@@ -89,7 +89,7 @@ class ConfigUpdate(BaseModel):
 
 
 @router.post("/config", dependencies=[Depends(verify_api_key)])
-async def save_config(body: ConfigUpdate):
+async def save_config(body: ConfigUpdate, request: Request):
     existing: dict[str, str] = {}
     header_lines: list[str] = []
     if _ENV_FILE.exists():
@@ -104,6 +104,28 @@ async def save_config(body: ConfigUpdate):
     lines = header_lines + [f"{k}={v}" for k, v in existing.items()]
     _ENV_FILE.write_text("\n".join(lines) + "\n")
     _LOGGER.info("admin.config_saved")
+
+    # Reload TTS service immediately so provider changes take effect without a restart
+    from avatar_backend.config import get_settings
+    from avatar_backend.services.tts_service import create_tts_service
+    get_settings.cache_clear()
+    new_settings = get_settings()
+    new_tts = create_tts_service(new_settings)
+    request.app.state.tts_service = new_tts
+    _LOGGER.info("admin.tts_reloaded", provider=new_settings.tts_provider)
+
+    # Pre-warm AfroTTS (Kokoro) model in background — first load downloads weights
+    if new_settings.tts_provider.lower() == "afrotts":
+        async def _warm():
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            try:
+                await loop.run_in_executor(None, new_tts._get_pipeline)
+                _LOGGER.info("admin.afrotts_warmed")
+            except Exception as exc:
+                _LOGGER.warning("admin.afrotts_warm_failed", exc=str(exc))
+        asyncio.create_task(_warm())
+
     return {"saved": True}
 
 
