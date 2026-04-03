@@ -193,11 +193,14 @@ class AfroTTSService(BaseTTSService):
         chunks: list = []
         for _, _, audio in pipeline(text, voice=self._voice, speed=self._speed):
             if audio is not None:
+                # Kokoro yields PyTorch tensors — convert to numpy
+                if hasattr(audio, 'detach'):
+                    audio = audio.detach().cpu().numpy()
                 chunks.append(audio)
         if not chunks:
             return _silent_wav(self._sample_rate)
         audio_np = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
-        pcm16 = np.clip(audio_np * 32767, -32768, 32767).astype(np.int16)
+        pcm16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
         buf = _io.BytesIO()
         with _wave.open(buf, 'wb') as wf:
             wf.setnchannels(1)
