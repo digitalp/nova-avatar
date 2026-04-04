@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
         acl=acl,
     )
 
+    app.state.audio_cache = {}  # token → wav_bytes for one-shot audio serving
     app.state.stt_service = STTService(model_name=settings.whisper_model)
     app.state.tts_service = create_tts_service(settings)
     logger.info("tts_service.configured", provider=settings.tts_provider)

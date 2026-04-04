@@ -22,8 +22,10 @@ import time
 from typing import Literal
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
+
+import uuid
 
 from avatar_backend.middleware.auth import verify_api_key
 from avatar_backend.services.speaker_service import SpeakerService
@@ -99,10 +101,18 @@ async def announce_handler(body: AnnounceRequest, request: Request):
     })
     await ws_mgr.broadcast_to_voice_bytes(wav_bytes)
 
-    # 5. Play on HA speakers concurrently (non-blocking on failure)
+    # 5. Play on HA speakers — use synthesised audio URL when public_url is set
     if speaker and speaker.is_configured:
         try:
-            await speaker.speak(text)
+            from avatar_backend.config import get_settings
+            public_url = (get_settings().public_url or "").rstrip("/")
+            if public_url:
+                token = uuid.uuid4().hex
+                request.app.state.audio_cache[token] = wav_bytes
+                audio_url = f"{public_url}/tts/audio/{token}"
+                await speaker.speak_wav(text, audio_url)
+            else:
+                await speaker.speak(text)
         except Exception as exc:
             _LOGGER.warning("announce.speaker_error", exc=str(exc))
 
@@ -119,3 +129,17 @@ async def announce_handler(body: AnnounceRequest, request: Request):
         wav_bytes=len(wav_bytes),
         elapsed_ms=elapsed_ms,
     )
+
+
+@router.get(
+    "/tts/audio/{token}",
+    include_in_schema=False,
+    summary="Serve a one-shot synthesised audio file",
+)
+async def serve_tts_audio(token: str, request: Request):
+    """Serve a pre-synthesised WAV to HA media players then delete it from cache."""
+    cache: dict = getattr(request.app.state, "audio_cache", {})
+    data = cache.pop(token, None)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Audio not found or already played")
+    return Response(content=data, media_type="audio/wav")

@@ -66,7 +66,7 @@ class SpeakerService:
         return bool(self._speakers)
 
     async def speak(self, text: str) -> None:
-        """Play *text* on all configured speakers concurrently."""
+        """Play *text* on all configured speakers concurrently (via HA TTS engine)."""
         if not text or not text.strip() or not self._speakers:
             return
 
@@ -74,6 +74,25 @@ class SpeakerService:
             self._speak_on(entity_id, text, alexa)
             for entity_id, alexa in self._speakers
         ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for (entity_id, _), result in zip(self._speakers, results):
+            if isinstance(result, Exception):
+                _LOGGER.warning("speaker.error",
+                                entity_id=entity_id, exc=str(result))
+
+    async def speak_wav(self, text: str, audio_url: str) -> None:
+        """Play synthesised audio URL on non-Alexa speakers; Alexa falls back to TTS notify."""
+        if not self._speakers:
+            return
+
+        tasks = []
+        for entity_id, alexa in self._speakers:
+            if alexa:
+                # Alexa cannot play arbitrary URLs — use notify TTS instead
+                tasks.append(self._speak_on(entity_id, text, alexa=True))
+            else:
+                tasks.append(self._play_media(entity_id, audio_url))
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for (entity_id, _), result in zip(self._speakers, results):
             if isinstance(result, Exception):
@@ -96,6 +115,28 @@ class SpeakerService:
             else:
                 await self._tts_speak(client, entity_id, text)
         _LOGGER.info("speaker.spoke", entity_id=entity_id, alexa=alexa)
+
+    async def _play_media(
+        self,
+        client_or_entity: str,
+        audio_url: str,
+    ) -> None:
+        """Play an audio URL on a media player via media_player.play_media."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self._ha_url}/api/services/media_player/play_media",
+                headers=self._headers,
+                json={
+                    "entity_id": client_or_entity,
+                    "media_content_id": audio_url,
+                    "media_content_type": "music",
+                },
+            )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f"play_media {client_or_entity} HTTP {resp.status_code}: {resp.text[:120]}"
+            )
+        _LOGGER.info("speaker.play_media", entity_id=client_or_entity, url=audio_url)
 
     async def _alexa_notify(
         self,

@@ -108,7 +108,6 @@ class ElevenLabsTTSService(BaseTTSService):
         payload = {
             "text": text,
             "model_id": self._model,
-            "output_format": "pcm_22050",
         }
         headers = {
             "xi-api-key": self._api_key,
@@ -116,7 +115,8 @@ class ElevenLabsTTSService(BaseTTSService):
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json=payload, headers=headers)
+            resp = await client.post(url, json=payload, headers=headers,
+                                     params={"output_format": "pcm_22050"})
 
         if resp.status_code != 200:
             raise RuntimeError(
