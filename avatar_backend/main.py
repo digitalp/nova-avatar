@@ -138,6 +138,7 @@ async def lifespan(app: FastAPI):
     proactive = ProactiveService(
         ha_url=settings.ha_url,
         ha_token=settings.ha_token,
+        ha_proxy=app.state.ha_proxy,
         llm_service=app.state.llm_service,
         announce_fn=_proactive_announce,
         system_prompt=system_prompt,

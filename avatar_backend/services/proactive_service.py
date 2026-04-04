@@ -5,6 +5,12 @@ asks the LLM if anything warrants a proactive announcement.
 Flow:
   HA WS state_changed events
     → filter to important domains + non-trivial state changes
+
+  Motion sensors (binary_sensor with camera mapping):
+    → immediate camera fetch + vision describe + announce (bypasses batch)
+    → per-camera cooldown (10 min) to avoid duplicate announces
+
+  All other watched domains:
     → batch for BATCH_WINDOW_S seconds
     → LLM triage (generate_text, 30 s timeout)
     → if LLM says announce → call announce_fn(message, priority)
@@ -23,9 +29,34 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 
 _LOGGER = structlog.get_logger()
 
-# Domains monitored for proactive announcements.
-# NOTE: 'sensor' is intentionally excluded — numeric sensors emit constant updates
-# and threshold-based alerts are already handled by dedicated HA automations.
+# Motion sensor → camera mapping.
+# When a motion sensor fires, Nova fetches the associated camera and describes what it sees.
+# Duplicate sensors for the same camera share the same camera cooldown.
+_MOTION_CAMERA_MAP: dict[str, str] = {
+    "binary_sensor.tangu_home_outdoor1_motion":      "camera.tangu_home_outdoor1",
+    "binary_sensor.tangu_home_door_bell_motion":     "camera.tangu_home_door_bell",
+    "binary_sensor.tangu_home_outdoor_2_motion":     "camera.tangu_home_outdoor_2",
+    "binary_sensor.tangu_home_sitting_room_motion":  "camera.tangu_home_sitting_room",
+    "binary_sensor.tangu_home_kitchen_motion":       "camera.tangu_home_kitchen",
+    "binary_sensor.tangu_home_hallway_motion":       "camera.tangu_home_hallway",
+    "binary_sensor.rlc_1224a_motion":                "camera.rlc_1224a_fluent",
+    "binary_sensor.rlc_410w_motion":                 "camera.rlc_410w_fluent",
+    "binary_sensor.reolink_video_doorbell_poe_motion": "camera.reolink_video_doorbell_poe_fluent",
+    "binary_sensor.reolink_motion_alarm":            "camera.reolink_profile000_mainstream",
+    "binary_sensor.reolink_cell_motion_detection":   "camera.reolink_profile000_mainstream",
+    "binary_sensor.reolink_living_room_motion_alarm":          "camera.reolink_living_room_profile000_mainstream",
+    "binary_sensor.reolink_living_room_cell_motion_detection": "camera.reolink_living_room_profile000_mainstream",
+    "binary_sensor.reolink_living_room_motion_alarm_2":        "camera.reolink_living_room_profile000_mainstream",
+    "binary_sensor.outdoor2_motion_alarm":           "camera.outdoor2_profile000_mainstream",
+    "binary_sensor.outdoor2_cell_motion_detection":  "camera.outdoor2_profile000_mainstream",
+    "binary_sensor.outdoor2_motion_alarm_2":         "camera.outdoor2_profile000_mainstream",
+    "binary_sensor.outdoor2_cell_motion_detection_2": "camera.outdoor2_profile000_mainstream",
+}
+
+# Domains monitored for batch triage announcements.
+# 'sensor' excluded — numeric sensors emit constant updates and threshold alerts
+# are already handled by dedicated HA automations.
+# Motion binary_sensors are handled separately via _MOTION_CAMERA_MAP.
 _WATCH_DOMAINS = {
     "binary_sensor",
     "lock",
@@ -39,14 +70,17 @@ _WATCH_DOMAINS = {
 # States that are noise — skip silently
 _NOISE_STATES = {"unavailable", "unknown", "none"}
 
-# Minimum seconds before re-announcing the same entity
+# Minimum seconds before re-announcing the same entity (batch triage)
 _COOLDOWN_S = 600  # 10 minutes
 
-# Minimum seconds between ANY proactive announcements (global rate limit)
+# Minimum seconds before re-announcing from the same camera (motion events)
+_CAMERA_COOLDOWN_S = 600  # 10 minutes
+
+# Minimum seconds between ANY batch-triage proactive announcements
 _GLOBAL_ANNOUNCE_COOLDOWN_S = 300  # 5 minutes
 
 # Collect changes for this many seconds before triaging
-_BATCH_WINDOW_S = 60  # increased from 30s to reduce triage frequency
+_BATCH_WINDOW_S = 60
 
 # Max changes passed to LLM per batch
 _MAX_CHANGES = 20
@@ -62,16 +96,19 @@ class ProactiveService:
         self,
         ha_url: str,
         ha_token: str,
+        ha_proxy,
         llm_service,
         announce_fn: Callable[[str, str], Awaitable[None]],
         system_prompt: str,
     ) -> None:
         self._ha_url = ha_url.rstrip("/")
         self._ha_token = ha_token
+        self._ha = ha_proxy
         self._llm = llm_service
         self._announce = announce_fn
         self._system_prompt = system_prompt
         self._cooldowns: dict[str, float] = {}
+        self._camera_cooldowns: dict[str, float] = {}
         self._last_announce_time: float = 0.0
         self._queue: list[dict] = []
         self._task: asyncio.Task | None = None
@@ -180,9 +217,6 @@ class ProactiveService:
         entity_id: str = data.get("entity_id", "")
         domain = entity_id.split(".")[0] if "." in entity_id else ""
 
-        if domain not in _WATCH_DOMAINS:
-            return
-
         new_state = data.get("new_state") or {}
         old_state = data.get("old_state") or {}
         new_val = new_state.get("state", "")
@@ -193,27 +227,69 @@ class ProactiveService:
         if new_val in _NOISE_STATES or old_val in _NOISE_STATES:
             return
 
-        # For binary_sensor: only queue transitions TO "on" — "off" transitions
-        # are rarely actionable and generate most of the noise.
+        # Motion sensors with a known camera — handle immediately with vision
+        if entity_id in _MOTION_CAMERA_MAP and new_val == "on":
+            camera_id = _MOTION_CAMERA_MAP[entity_id]
+            if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) >= _CAMERA_COOLDOWN_S:
+                friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
+                asyncio.create_task(
+                    self._handle_motion_event(entity_id, friendly, camera_id),
+                    name=f"motion_{entity_id}",
+                )
+            else:
+                _LOGGER.debug("proactive.motion_camera_cooldown", entity_id=entity_id, camera=camera_id)
+            return
+
+        if domain not in _WATCH_DOMAINS:
+            return
+
+        # For binary_sensor: only queue off→on transitions
         if domain == "binary_sensor" and new_val != "on":
             return
 
-        # Cooldown check
+        # Per-entity cooldown check
         if time.monotonic() - self._cooldowns.get(entity_id, 0) < _COOLDOWN_S:
             return
 
         friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
-
         self._queue.append({
             "entity_id": entity_id,
             "friendly": friendly,
             "old": old_val,
             "new": new_val,
         })
-        _LOGGER.debug(
-            "proactive.event_queued",
-            entity_id=entity_id, old=old_val, new=new_val,
-        )
+        _LOGGER.debug("proactive.event_queued", entity_id=entity_id, old=old_val, new=new_val)
+
+    # ── Motion + camera describe ──────────────────────────────────────────
+
+    async def _handle_motion_event(self, entity_id: str, friendly: str, camera_id: str) -> None:
+        """Fetch a camera snapshot, describe it with vision, and announce."""
+        _LOGGER.info("proactive.motion_triggered", entity_id=entity_id, camera=camera_id)
+
+        try:
+            image_bytes = await self._ha.fetch_camera_image(camera_id)
+        except Exception as exc:
+            _LOGGER.warning("proactive.motion_camera_fetch_failed", camera=camera_id, exc=str(exc))
+            image_bytes = None
+
+        if image_bytes:
+            try:
+                description = await self._llm.describe_image(image_bytes)
+                message = f"Motion detected. {description}"
+                _LOGGER.info("proactive.motion_described", camera=camera_id, chars=len(description))
+            except Exception as exc:
+                _LOGGER.warning("proactive.motion_describe_failed", camera=camera_id, exc=str(exc))
+                message = f"Motion detected by {friendly}."
+        else:
+            message = f"Motion detected by {friendly}."
+
+        # Apply camera cooldown before announcing to block any duplicate triggers
+        self._camera_cooldowns[camera_id] = time.monotonic()
+
+        try:
+            await self._announce(message, "normal")
+        except Exception as exc:
+            _LOGGER.warning("proactive.motion_announce_failed", exc=str(exc))
 
     # ── Batch triage ──────────────────────────────────────────────────────
 
@@ -249,7 +325,6 @@ class ProactiveService:
         )
         _LOGGER.info("proactive.triaging", n_changes=len(changes))
 
-        # Trim system prompt to keep token cost reasonable
         prompt_ctx = self._system_prompt[:3000]
 
         prompt = (
@@ -284,7 +359,6 @@ class ProactiveService:
             _LOGGER.warning("proactive.llm_failed", exc=str(exc))
             return
 
-        # Strip markdown fences if model wrapped the response
         raw = raw.strip()
         if raw.startswith("```"):
             parts = raw.split("```")
@@ -310,7 +384,6 @@ class ProactiveService:
 
         _LOGGER.info("proactive.announcing", chars=len(message), priority=priority)
 
-        # Apply cooldowns
         now = time.monotonic()
         self._last_announce_time = now
         for c in changes:
