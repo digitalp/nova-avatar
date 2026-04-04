@@ -269,3 +269,198 @@ async def save_avatar_settings(body: AvatarSettings):
     _AVATAR_SETTINGS_FILE.write_text(_json.dumps(body.model_dump()))
     _LOGGER.info("admin.avatar_settings_saved", skin_tone=body.skin_tone)
     return {"saved": True}
+
+
+# ── Prompt sync ───────────────────────────────────────────────────────────────
+
+# Domains worth tracking for prompt enrichment
+_SYNC_DOMAINS = {
+    "sensor", "binary_sensor", "light", "switch", "climate",
+    "media_player", "lock", "cover", "input_boolean", "input_select",
+    "input_number", "input_text", "person", "camera", "fan",
+    "vacuum", "humidifier", "water_heater", "number",
+}
+
+# Prefixes that indicate noise/infrastructure entities to skip
+_SKIP_PREFIXES = (
+    "update.", "system.", "device_tracker.unifi_", "device_tracker.unknown_",
+    "sensor.sun_", "sensor.moon_",
+)
+
+# These friendly-name substrings usually indicate internal/debug entities
+_SKIP_NAME_FRAGMENTS = ("rssi", "lqi", "linkquality", "uptime", "firmware", "version", "reboot")
+
+
+def _extract_known_entity_ids(prompt_text: str) -> set[str]:
+    """Return all entity_id-like strings found anywhere in the prompt."""
+    import re
+    return set(re.findall(r'\b\w+\.\w[\w_]*', prompt_text))
+
+
+def _summarise_new_entities(states: list[dict], known: set[str]) -> str:
+    """
+    Filter states down to meaningful unknown entities and return a compact
+    grouped summary string to feed the LLM.
+    """
+    from collections import defaultdict
+    groups: dict[str, list[str]] = defaultdict(list)
+
+    for s in states:
+        eid = s["entity_id"]
+        domain = eid.split(".")[0]
+        if domain not in _SYNC_DOMAINS:
+            continue
+        if eid in known:
+            continue
+        if any(eid.startswith(p) for p in _SKIP_PREFIXES):
+            continue
+        if s["state"] in ("unavailable", "unknown", ""):
+            continue
+        name = s["attributes"].get("friendly_name", "")
+        if any(frag in name.lower() for frag in _SKIP_NAME_FRAGMENTS):
+            continue
+        unit = s["attributes"].get("unit_of_measurement", "")
+        device_class = s["attributes"].get("device_class", "")
+        line = f"  {eid}"
+        if name and name != eid:
+            line += f" | {name}"
+        line += f" | {s['state']}"
+        if unit:
+            line += f" {unit}"
+        if device_class:
+            line += f" [{device_class}]"
+        groups[domain].append(line)
+
+    if not groups:
+        return ""
+
+    parts = []
+    for domain in sorted(groups):
+        parts.append(f"{domain} ({len(groups[domain])}):")
+        parts.extend(groups[domain][:40])  # cap per domain to avoid token explosion
+    return "\n".join(parts)
+
+
+class SyncPromptResponse(BaseModel):
+    status: str
+    new_entities_found: int
+    prompt_updated: bool
+    summary: str
+
+
+@router.post(
+    "/sync-prompt",
+    response_model=SyncPromptResponse,
+    dependencies=[Depends(verify_api_key)],
+    summary="Discover new HA entities and integrate them into the system prompt",
+)
+async def sync_prompt(request: Request):
+    """
+    1. Fetches all current HA entity states
+    2. Diffs against entity IDs already referenced in the system prompt
+    3. If new meaningful entities are found, calls the LLM to integrate them
+    4. Saves the updated prompt and reloads the session manager
+    """
+    import httpx as _httpx
+    import json as _json
+
+    ha = request.app.state.ha_proxy
+    llm = request.app.state.llm_service
+    sm = request.app.state.session_manager
+
+    _LOGGER.info("sync_prompt.started")
+
+    # 1. Fetch all states from HA
+    try:
+        async with _httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{ha._ha_url}/api/states",
+                headers={"Authorization": ha._headers["Authorization"]},
+            )
+            resp.raise_for_status()
+            all_states: list[dict] = resp.json()
+    except Exception as exc:
+        _LOGGER.error("sync_prompt.ha_fetch_failed", exc=str(exc))
+        raise HTTPException(status_code=503, detail=f"Could not fetch HA states: {exc}")
+
+    # 2. Diff against current prompt
+    current_prompt = _PROMPT_FILE.read_text() if _PROMPT_FILE.exists() else ""
+    known = _extract_known_entity_ids(current_prompt)
+    new_summary = _summarise_new_entities(all_states, known)
+
+    if not new_summary:
+        _LOGGER.info("sync_prompt.no_new_entities")
+        return SyncPromptResponse(
+            status="ok",
+            new_entities_found=0,
+            prompt_updated=False,
+            summary="No new entities found — system prompt is up to date.",
+        )
+
+    new_count = new_summary.count("\n  ")  # rough count of entity lines
+    _LOGGER.info("sync_prompt.new_entities_found", count=new_count)
+
+    # 3. Ask LLM to integrate new entities into the prompt
+    integration_request = (
+        "You are updating the system prompt for Nova, an AI home automation controller.\n\n"
+        "Here is the current system prompt:\n"
+        "```\n" + current_prompt + "\n```\n\n"
+        "The following new Home Assistant entities have been discovered that are not yet "
+        "referenced in the system prompt:\n\n"
+        + new_summary + "\n\n"
+        "Instructions:\n"
+        "- Add these entities to the appropriate existing sections of the system prompt.\n"
+        "- If an entity clearly belongs in an existing section (e.g. a new sensor in the "
+        "Car section, a new climate entity in Heating), add it there.\n"
+        "- If a group of new entities represent a genuinely new capability or room, "
+        "create a minimal new section.\n"
+        "- Skip entities that are clearly noise (network infrastructure, debug sensors, "
+        "duplicate trackers, internal HA helpers with no user value).\n"
+        "- Preserve the exact structure, tone, and formatting of the original prompt.\n"
+        "- Return ONLY the complete updated system prompt — no explanation, no markdown "
+        "fences, no preamble."
+    )
+
+    try:
+        from avatar_backend.config import get_settings as _get_settings
+        import httpx as _httpx2
+        _s = _get_settings()
+        _api_key = _s.google_api_key
+        _model = _s.cloud_model or 'gemini-2.5-flash'
+        _payload = {
+            'contents': [{'role': 'user', 'parts': [{'text': integration_request}]}],
+            'generationConfig': {'temperature': 0.2},
+        }
+        _url = (
+            f'https://generativelanguage.googleapis.com/v1beta/models'
+            f'/{_model}:generateContent?key={_api_key}'
+        )
+        async with _httpx2.AsyncClient(timeout=_httpx2.Timeout(180.0)) as _client:
+            _resp = await _client.post(_url, json=_payload, headers={'Content-Type': 'application/json'})
+            _resp.raise_for_status()
+        _parts = (_resp.json().get('candidates') or [{}])[0].get('content', {}).get('parts', [])
+        updated_prompt = ' '.join(p.get('text', '') for p in _parts if 'text' in p).strip()
+    except Exception as exc:
+        _LOGGER.error('sync_prompt.llm_failed', exc=str(exc))
+        raise HTTPException(status_code=503, detail=f'LLM call failed: {exc}')
+
+    if not updated_prompt or len(updated_prompt) < len(current_prompt) // 2:
+        _LOGGER.warning("sync_prompt.llm_response_too_short", chars=len(updated_prompt))
+        raise HTTPException(status_code=500, detail="LLM returned an unexpectedly short response — prompt not saved.")
+
+    # 4. Save and reload
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _PROMPT_FILE.write_text(updated_prompt)
+    _LOGGER.info("sync_prompt.saved", chars=len(updated_prompt))
+
+    # Reload session manager so new sessions pick up the updated prompt
+    from avatar_backend.services.session_manager import SessionManager
+    request.app.state.session_manager = SessionManager(updated_prompt)
+    _LOGGER.info("sync_prompt.session_manager_reloaded")
+
+    return SyncPromptResponse(
+        status="ok",
+        new_entities_found=new_count,
+        prompt_updated=True,
+        summary=f"Integrated {new_count} new entities into the system prompt.",
+    )
