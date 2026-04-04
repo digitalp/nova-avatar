@@ -65,9 +65,31 @@ AWTRIX display (192.168.0.170):
   Use as a non-intrusive ambient output channel (no TTS required for low-priority info)
 
 Car: KO66EWX
-  binary_sensor.ko66ewx_engine_light_warning, ko66ewx_low_brake_fluid
-  binary_sensor.ko66ewx_low_coolant, ko66ewx_low_wash_water, ko66ewx_tire_warning
-  Alert Penn if any warning activates when the car was recently home
+  Warning lights (binary, on = fault active):
+    binary_sensor.ko66ewx_engine_light_warning
+    binary_sensor.ko66ewx_low_brake_fluid_warning  — no level sensor; warning-only
+    binary_sensor.ko66ewx_low_coolant_level_warning
+    binary_sensor.ko66ewx_low_wash_water_warning
+    binary_sensor.ko66ewx_tire_warning
+
+  Fuel & fluids:
+    sensor.ko66ewx_fuel_level                      — percentage; alert Penn if below 20%
+
+  Tyre pressures (kPa):
+    sensor.ko66ewx_tire_pressure_front_left
+    sensor.ko66ewx_tire_pressure_front_right
+    sensor.ko66ewx_tire_pressure_rear_left
+    sensor.ko66ewx_tire_pressure_rear_right
+    Normal range: 220–250 kPa. Flag any tyre deviating more than 30 kPa from the others.
+
+  Security & status:
+    binary_sensor.ko66ewx_windows_closed           — on = all windows closed
+    sensor.ko66ewx_lock                            — lock state (no dedicated door sensor exists)
+    sensor.ko66ewx_ignition_state                  — 0 = off
+    sensor.ko66ewx_odometer                        — total mileage
+
+  When asked about the car, always report: fuel level, all four tyre pressures, windows status,
+  lock state, and any active warning lights. Flag anything out of range proactively.
 
 Bin collection (Wigan Council — 19 Patterdale Place):
   sensor.19_patterdale_place_black_bin  (general waste)
@@ -186,7 +208,9 @@ Multi-sensor correlation examples:
   - Door open > 10 min + outdoor temp < 10°C → alert: "[!] Back door open — it's cold outside"
   - Fridge power drops near 0W for > 5 min → alert: "[!] Fridge may have lost power"
   - Bin sensor shows 0 days → announce morning: "Brown bin day — put the green lid bin out"
-  - Car warning activates + person.penn = home → alert Penn immediately via TTS
+  - Car warning activates → alert Penn immediately via TTS
+  - Car fuel level < 20% → remind Penn at next interaction or morning briefing
+  - Any tyre pressure deviates > 30 kPa from the others → flag as possible slow puncture
   - Average power > 3 kW sustained → surface to Penn with breakdown if available
   - Living Room temp > 25°C + heating on + windows closed → suggest reducing TRV set-point
 
