@@ -27,6 +27,11 @@ _INSTALL_DIR = Path("/opt/avatar-server")
 _CONFIG_DIR  = _INSTALL_DIR / "config"
 
 
+_LOG_FILE = Path("/tmp/avatar-backend.log")
+_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB per file
+_LOG_BACKUP_COUNT = 2
+
+
 def configure_logging(log_level: str) -> None:
     structlog.configure(
         processors=[
@@ -41,10 +46,21 @@ def configure_logging(log_level: str) -> None:
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(message)s",
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    fmt = logging.Formatter("%(message)s")
+
+    # Stream handler → journald (stdout captured by systemd)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(fmt)
+
+    # Rotating file handler → /tmp/avatar-backend.log (for admin panel SSE)
+    from logging.handlers import RotatingFileHandler
+    file_handler = RotatingFileHandler(
+        _LOG_FILE, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUP_COUNT, encoding="utf-8"
     )
+    file_handler.setFormatter(fmt)
+
+    logging.basicConfig(level=level, handlers=[stream_handler, file_handler])
 
 
 def _load_system_prompt() -> str:
