@@ -76,6 +76,9 @@ _COOLDOWN_S = 600  # 10 minutes
 # Minimum seconds before re-announcing from the same camera (motion events)
 _CAMERA_COOLDOWN_S = 600  # 10 minutes
 
+# Minimum seconds between ANY motion announcement (global cap)
+_GLOBAL_MOTION_COOLDOWN_S = 600  # 10 minutes
+
 # Minimum seconds between ANY batch-triage proactive announcements
 _GLOBAL_ANNOUNCE_COOLDOWN_S = 300  # 5 minutes
 
@@ -109,6 +112,7 @@ class ProactiveService:
         self._system_prompt = system_prompt
         self._cooldowns: dict[str, float] = {}
         self._camera_cooldowns: dict[str, float] = {}
+        self._last_motion_announce_time: float = 0.0
         self._last_announce_time: float = 0.0
         self._queue: list[dict] = []
         self._task: asyncio.Task | None = None
@@ -267,6 +271,11 @@ class ProactiveService:
 
     async def _handle_motion_event(self, entity_id: str, friendly: str, camera_id: str) -> None:
         """Fetch a camera snapshot, describe it with vision, and announce."""
+        # Global motion rate limit
+        since_last = time.monotonic() - self._last_motion_announce_time
+        if since_last < _GLOBAL_MOTION_COOLDOWN_S:
+            _LOGGER.debug("proactive.motion_global_cooldown", seconds_remaining=int(_GLOBAL_MOTION_COOLDOWN_S - since_last))
+            return
         _LOGGER.info("proactive.motion_triggered", entity_id=entity_id, camera=camera_id)
 
         try:
@@ -286,6 +295,7 @@ class ProactiveService:
         else:
             message = f"Motion detected by {friendly}."
 
+        self._last_motion_announce_time = time.monotonic()
         try:
             await self._announce(message, "normal")
         except Exception as exc:
