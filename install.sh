@@ -296,11 +296,23 @@ GOOGLE_API_KEY=${INPUT_CLOUD_KEY:-}
 
 # STT / TTS
 WHISPER_MODEL=${INPUT_WHISPER_MODEL}
+TTS_PROVIDER=piper
 PIPER_VOICE=${INPUT_PIPER_VOICE}
+
+# ElevenLabs TTS (set TTS_PROVIDER=elevenlabs to use)
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+ELEVENLABS_MODEL=eleven_monolingual_v1
+
+# AfroTTS / Kokoro TTS (set TTS_PROVIDER=afrotts to use)
+AFROTTS_VOICE=af_heart
+AFROTTS_SPEED=1.0
 
 # Speakers (comma-separated HA media_player entity IDs, prefix echo devices with alexa:)
 SPEAKERS=${INPUT_SPEAKERS:-}
-TTS_ENGINE=tts.google_translate_en_com
+
+# Public URL used to serve synthesised audio to speakers (must be reachable from HA)
+PUBLIC_URL=http://$(hostname -I | awk '{print \$1}'):${INPUT_PORT}
 ENV_EOF
 
 chown "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}/.env"
@@ -318,7 +330,15 @@ fi
 
 info "Installing Python dependencies…"
 sudo -u "${SERVICE_USER}" "${INSTALL_DIR}/.venv/bin/pip" install -q --upgrade pip
+# Install base deps (requirements.txt excludes CUDA-specific packages)
 sudo -u "${SERVICE_USER}" "${INSTALL_DIR}/.venv/bin/pip" install -q -r "${INSTALL_DIR}/requirements.txt"
+# Install CUDA runtime libs only when an NVIDIA GPU is present
+if $GPU_FOUND; then
+  info "GPU detected — installing CUDA 12 runtime libs for faster Whisper inference…"
+  sudo -u "${SERVICE_USER}" "${INSTALL_DIR}/.venv/bin/pip" install -q \
+    "nvidia-cublas-cu12>=12.0" "nvidia-cuda-nvrtc-cu12>=12.0"
+  success "CUDA libs installed"
+fi
 success "Python dependencies installed"
 
 # ── Piper TTS binary ───────────────────────────────────────────────────────────
