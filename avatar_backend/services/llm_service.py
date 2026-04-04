@@ -466,6 +466,24 @@ class _AnthropicBackend:
 
 # ── Vision helpers ───────────────────────────────────────────────────────────
 
+async def _ollama_describe_image(image_bytes: bytes, base_url: str, model: str) -> str:
+    import base64 as _b64
+    b64 = _b64.b64encode(image_bytes).decode()
+    payload = {
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": "Describe what you see in this security camera image in 2-3 sentences. Focus on people, vehicles, objects, and any notable activity.",
+            "images": [b64],
+        }],
+        "stream": False,
+    }
+    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+        resp = await client.post(f"{base_url}/api/chat", json=payload)
+        resp.raise_for_status()
+    return resp.json()["message"]["content"].strip()
+
+
 async def _gemini_describe_image(image_bytes: bytes, api_key: str, model: str) -> str:
     import base64 as _b64
     b64 = _b64.b64encode(image_bytes).decode()
@@ -589,7 +607,9 @@ class LLMService:
                 return await _gemini_describe_image(image_bytes, self._backend._api_key, self._backend._model)
             if self._provider == "openai":
                 return await _openai_describe_image(image_bytes, self._backend._api_key, self._backend._model)
-            return "Camera vision is not supported with the current LLM provider. Switch to Google Gemini or OpenAI."
+            if self._provider == "ollama":
+                return await _ollama_describe_image(image_bytes, self._backend._base_url, self._backend._model)
+            return "Camera vision is not supported with the current LLM provider."
         except Exception as exc:
             _log_struct = structlog.get_logger()
             _log_struct.error("llm.describe_image_error", exc=str(exc))
