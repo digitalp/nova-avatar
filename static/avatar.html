@@ -31,7 +31,7 @@
     /* ── Tap-to-start gate ── */
     #start-gate {
       position: absolute; inset: 0; z-index: 30;
-      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+      display: none; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
       background: #080d16;
     }
     #start-gate.hidden { display: none; }
@@ -48,7 +48,7 @@
 
     /* ── Loading ── */
     #loading-overlay {
-      position: absolute; inset: 0; display: none;
+      position: absolute; inset: 0; display: flex;
       flex-direction: column; align-items: center; justify-content: center; gap: 16px;
       background: #080d16; z-index: 20; transition: opacity 0.6s;
     }
@@ -162,7 +162,7 @@
 
 <div id="bottom-bar">
   <div id="status-dot"></div>
-  <span id="status-text">Tap to Start</span>
+  <span id="status-text">Loading…</span>
   <button id="btn-mic" disabled>🎙 Hold to Talk</button>
 </div>
 
@@ -262,38 +262,39 @@ let wakeVadStream  = null;
 let wakeVadChecking = false;  // true while a /stt/wake POST is in-flight
 let wakeVadFallbackTimer = null;  // detects SR black-hole (starts but never fires events)
 
-// ── Start gate ───────────────────────────────────────────────────────────────
-$btnStart.addEventListener('click', async () => {
-  $gate.classList.add('hidden');
-  $overlay.classList.add('show');
-
-  // Create AudioContext on this user gesture (satisfies Chrome autoplay policy)
+// ── Auto-start (no tap required) ─────────────────────────────────────────────
+async function autoStart() {
   audioCtx = new AudioContext();
   if (audioCtx.state === 'suspended') await audioCtx.resume();
 
-  // ── Mic test before loading avatar ──────────────────────────────────────
   $loadText.textContent = 'Testing microphone…';
   const micOk = await testMic();
   if (!micOk) {
-    // Show clear error — do NOT proceed; user must fix mic first
     $overlay.classList.remove('show');
-    $gate.classList.remove('hidden');
+    $gate.style.display = 'flex';
     $gate.querySelector('p').textContent = '';
     $gate.querySelector('h2').textContent = '⚠ Mic Blocked';
-    const msg = document.createElement('div');
-    msg.style.cssText = 'max-width:300px;text-align:center;color:#94a3b8;font-size:0.85rem;line-height:1.6;padding:0 16px';
-    msg.innerHTML =
-      'Your microphone is <strong style="color:#ef4444">blocked or silent</strong>.<br><br>' +
-      '1. Click the 🔒 icon in your browser address bar<br>' +
-      '2. Set <strong>Microphone → Allow</strong><br>' +
-      '3. Reload the page<br><br>' +
-      '<em>If using the HA app, open this URL in <strong>Chrome</strong> or <strong>Safari</strong> instead.</em>';
-    $gate.insertBefore(msg, $btnStart);
+    if (!$gate.querySelector('.mic-error-msg')) {
+      const msg = document.createElement('div');
+      msg.className = 'mic-error-msg';
+      msg.style.cssText = 'max-width:300px;text-align:center;color:#94a3b8;font-size:0.85rem;line-height:1.6;padding:0 16px';
+      msg.innerHTML =
+        'Your microphone is <strong style="color:#ef4444">blocked or silent</strong>.<br><br>' +
+        '1. Click the 🔒 icon in your browser address bar<br>' +
+        '2. Set <strong>Microphone → Allow</strong><br>' +
+        '3. Reload the page';
+      $gate.insertBefore(msg, $btnStart);
+    }
     $btnStart.textContent = 'Try Again';
+    $btnStart.style.display = 'block';
+    $btnStart.addEventListener('click', () => {
+      $gate.style.display = 'none';
+      $overlay.classList.add('show');
+      autoStart();
+    }, { once: true });
     return;
   }
 
-  // Load avatar settings (skin tone, custom avatar URL) before initialising
   try {
     const s = await fetch(`${SERVER}/admin/avatar-settings`).then(r => r.json());
     if (typeof s.skin_tone === 'number') _skinToneIndex = s.skin_tone;
@@ -301,7 +302,9 @@ $btnStart.addEventListener('click', async () => {
   } catch (_) {}
 
   initHead().catch(e => { $loadText.textContent = 'Error: ' + e.message; console.error(e); });
-});
+}
+
+autoStart();
 
 async function testMic() {
   let testStream = null;
