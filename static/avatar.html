@@ -500,7 +500,6 @@ async function startWakeWordVAD() {
   setStatus('Say "Nova" to talk', 'dot-waking');
   $btnMic.textContent = '🎙 Or Hold to Talk';
 
-  // AnalyserNode for energy gating — only POST when speech is detected
   if (!audioCtx) audioCtx = new AudioContext();
   const wakeAnalyser = audioCtx.createAnalyser();
   wakeAnalyser.fftSize = 1024;
@@ -511,79 +510,74 @@ async function startWakeWordVAD() {
   const mimeType = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','']
     .find(m => !m || MediaRecorder.isTypeSupported(m)) || '';
 
-  function scheduleChunk() {
-    if (!wakeVadActive || recording || isBusy) return;
+  // ── Rolling-buffer approach ───────────────────────────────────────────────
+  // A single continuous MediaRecorder fires every 200 ms. We keep the last
+  // ROLL_SIZE slices (~2 s) in a rolling buffer.  When speech energy is
+  // detected we POST the full buffer to the server so "Nova" is always
+  // captured regardless of where it falls within the window.
+  const ROLL_SIZE = 10;          // 10 × 200 ms = 2 s
+  const rollingChunks = [];
+  let headerChunk = null;        // First MediaRecorder chunk carries WebM headers
+  let hasSpeech = false;
+  let wakeVadMr = null;
 
-    const chunks = [];
-    let hasSpeech = false;
+  // Energy sampler
+  const energyTimer = setInterval(() => {
+    if (!wakeVadActive) { clearInterval(energyTimer); return; }
+    wakeAnalyser.getFloatTimeDomainData(wakeBuf);
+    let s = 0;
+    for (let i = 0; i < wakeBuf.length; i++) s += wakeBuf[i] * wakeBuf[i];
+    if (Math.sqrt(s / wakeBuf.length) > VAD_THRESHOLD) hasSpeech = true;
+  }, 80);
 
-    const mr = new MediaRecorder(wakeVadStream, mimeType ? { mimeType } : {});
-    mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  wakeVadMr = new MediaRecorder(wakeVadStream, mimeType ? { mimeType } : {});
 
-    // Sample energy while recording this chunk
-    const energyTimer = setInterval(() => {
-      if (!wakeVadActive) { clearInterval(energyTimer); return; }
-      wakeAnalyser.getFloatTimeDomainData(wakeBuf);
-      let s = 0;
-      for (let i = 0; i < wakeBuf.length; i++) s += wakeBuf[i] * wakeBuf[i];
-      if (Math.sqrt(s / wakeBuf.length) > VAD_THRESHOLD) hasSpeech = true;
-    }, 80);
+  wakeVadMr.ondataavailable = async (e) => {
+    if (!e.data || e.data.size === 0 || !wakeVadActive) return;
 
-    mr.onstop = async () => {
-      clearInterval(energyTimer);
-      if (!wakeVadActive || recording || isBusy) return;
+    // The very first chunk is the WebM init/header segment — keep it separate.
+    if (!headerChunk) { headerChunk = e.data; return; }
 
-      if (hasSpeech && chunks.length && !wakeVadChecking) {
-        wakeVadChecking = true;
+    rollingChunks.push(e.data);
+    if (rollingChunks.length > ROLL_SIZE) rollingChunks.shift();
 
-        // Show immediate "Heard you…" feedback so the user knows we detected speech
-        setStatus('Heard you…', 'dot-waking');
+    // Only fire a check when energy was detected, we have enough audio,
+    // and no check is already in-flight.
+    if (!hasSpeech || wakeVadChecking || recording || isBusy) return;
+    if (rollingChunks.length < 3) return;   // < 600 ms — too short
 
-        // Pre-buffer: start capturing follow-up audio RIGHT NOW while the wake check
-        // processes on the server (~1s with tiny model). When wake is confirmed the
-        // user's question is already being recorded instead of missed.
-        const fuChunks = [];
-        let fuMr = null;
-        try {
-          fuMr = new MediaRecorder(wakeVadStream, mimeType ? { mimeType } : {});
-          fuMr.ondataavailable = e => { if (e.data.size > 0) fuChunks.push(e.data); };
-          fuMr.start(200);
-        } catch (_) { fuMr = null; }
+    hasSpeech = false;
+    wakeVadChecking = true;
+    setStatus('Heard you…', 'dot-waking');
 
-        const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' });
-        let wakeConfirmed = false;
-        try {
-          const res = await fetch(
-            `${SERVER}/stt/wake?api_key=${encodeURIComponent(API_KEY)}`,
-            { method: 'POST', body: await blob.arrayBuffer(),
-              headers: { 'Content-Type': 'application/octet-stream' } }
-          );
-          if (res.ok) {
-            const data = await res.json();
-            wakeConfirmed = !!data.wake;
-          }
-        } catch (_) {}
-
-        // Discard pre-buffer regardless (user speaks after the activation flash)
-        if (fuMr && fuMr.state === 'recording') fuMr.stop();
-
-        if (wakeConfirmed && wakeVadActive && !recording && !isBusy) {
-          stopWakeWordVAD();
-          onWakeWord();
-          return;
-        }
-
-        if (wakeVadActive) setStatus('Say "Nova" to talk', 'dot-waking');
-        wakeVadChecking = false;
+    // header + rolling buffer = a complete, decodable WebM clip
+    const blob = new Blob([headerChunk, ...rollingChunks],
+                          { type: wakeVadMr.mimeType || 'audio/webm' });
+    let wakeConfirmed = false;
+    try {
+      const res = await fetch(
+        `${SERVER}/stt/wake?api_key=${encodeURIComponent(API_KEY)}`,
+        { method: 'POST', body: await blob.arrayBuffer(),
+          headers: { 'Content-Type': 'application/octet-stream' } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        wakeConfirmed = !!data.wake;
       }
-      setTimeout(scheduleChunk, 50);
-    };
+    } catch (_) {}
 
-    mr.start(200);
-    setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 1200);
-  }
+    if (wakeConfirmed && wakeVadActive && !recording && !isBusy) {
+      clearInterval(energyTimer);
+      stopWakeWordVAD();
+      onWakeWord();
+      return;
+    }
 
-  scheduleChunk();
+    if (wakeVadActive) setStatus('Say "Nova" to talk', 'dot-waking');
+    wakeVadChecking = false;
+  };
+
+  wakeVadMr.start(200);   // continuous — fires ondataavailable every 200 ms
 }
 
 function stopWakeWordVAD() {
