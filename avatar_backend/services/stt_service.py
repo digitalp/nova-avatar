@@ -139,8 +139,15 @@ def _decode_audio(data: bytes, sample_rate: int) -> tuple[Optional[np.ndarray], 
         result = _decode_av(data)
         if result[0] is not None:
             return result
-    # Fall back to raw PCM16
-    return _decode_pcm(data, sample_rate), sample_rate
+    # Fall back to raw PCM16 — but reject blobs that look like binary container
+    # data misread as PCM (binary garbage has max_amp very close to 1.0 because
+    # arbitrary bytes span the full int16 range; real speech is rarely above 0.95).
+    pcm = _decode_pcm(data, sample_rate)
+    if pcm is not None and float(np.max(np.abs(pcm))) < 0.95:
+        return pcm, sample_rate
+    _LOGGER.debug("stt.pcm_rejected_likely_binary", size=len(data),
+                  max_amp=round(float(np.max(np.abs(pcm))), 4) if pcm is not None else None)
+    return None, 0
 
 
 def _is_wav(data: bytes) -> bool:
@@ -189,7 +196,10 @@ def _decode_av(data: bytes) -> tuple[Optional[np.ndarray], int]:
         audio = np.concatenate(frames)
         return audio, src_rate
     except Exception as exc:
-        _LOGGER.warning("stt.av_decode_error", exc=str(exc))
+        if len(data) < 2048:
+            _LOGGER.debug("stt.av_decode_error_small", size=len(data), exc=str(exc))
+        else:
+            _LOGGER.warning("stt.av_decode_error", exc=str(exc))
         return None, 0
 
 

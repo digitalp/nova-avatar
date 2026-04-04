@@ -519,15 +519,22 @@ async function startWakeWordVAD() {
   const rollingChunks = [];
   let headerChunk = null;        // First MediaRecorder chunk carries WebM headers
   let hasSpeech = false;
+  let speechEnergyCount = 0;    // Require consecutive energy samples before flagging speech
+  const SPEECH_DEBOUNCE = 3;    // ~240 ms of sustained energy before trigger
   let wakeVadMr = null;
 
-  // Energy sampler
+  // Energy sampler — debounced to avoid single-spike false triggers
   const energyTimer = setInterval(() => {
     if (!wakeVadActive) { clearInterval(energyTimer); return; }
     wakeAnalyser.getFloatTimeDomainData(wakeBuf);
     let s = 0;
     for (let i = 0; i < wakeBuf.length; i++) s += wakeBuf[i] * wakeBuf[i];
-    if (Math.sqrt(s / wakeBuf.length) > VAD_THRESHOLD) hasSpeech = true;
+    if (Math.sqrt(s / wakeBuf.length) > VAD_THRESHOLD) {
+      speechEnergyCount++;
+      if (speechEnergyCount >= SPEECH_DEBOUNCE) hasSpeech = true;
+    } else {
+      speechEnergyCount = 0;
+    }
   }, 80);
 
   wakeVadMr = new MediaRecorder(wakeVadStream, mimeType ? { mimeType } : {});
@@ -547,6 +554,7 @@ async function startWakeWordVAD() {
     if (rollingChunks.length < 3) return;   // < 600 ms — too short
 
     hasSpeech = false;
+    speechEnergyCount = 0;
     wakeVadChecking = true;
     setStatus('Heard you…', 'dot-waking');
 
