@@ -7,6 +7,7 @@ and returns the final text response plus all ToolCall results.
 from __future__ import annotations
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import structlog
@@ -55,6 +56,11 @@ async def run_chat(
     await sm.add_message(session_id, "user", user_text)
     messages = await sm.get_messages(session_id)
 
+    # Inject current datetime into the system message so the LLM can answer
+    # time/date questions without needing a tool call.
+    now_str = datetime.now().strftime("%A, %d %B %Y %H:%M")
+    messages = _inject_datetime(messages, now_str)
+
     final_text = ""
     model_name = ""
 
@@ -88,7 +94,7 @@ async def run_chat(
             all_tool_calls.append(tc)
             await sm.add_message(session_id, "tool", result.message)
 
-        messages = await sm.get_messages(session_id)
+        messages = _inject_datetime(await sm.get_messages(session_id), now_str)
 
         if round_num == _MAX_TOOL_ROUNDS:
             _LOGGER.warning("chat.max_tool_rounds_reached",
@@ -107,3 +113,17 @@ async def run_chat(
         model=llm.model_name,
         session_id=session_id,
     )
+
+
+def _inject_datetime(messages: list[dict], now_str: str) -> list[dict]:
+    """Prepend current datetime to the system message so the LLM can answer
+    time/date questions. Does not mutate the original list."""
+    if not messages:
+        return messages
+    result = list(messages)
+    sys_msg = dict(result[0])
+    original = sys_msg.get("content", "")
+    if not original.startswith(f"Current date/time: {now_str}"):
+        sys_msg["content"] = f"Current date/time: {now_str}\n\n{original}"
+    result[0] = sys_msg
+    return result
