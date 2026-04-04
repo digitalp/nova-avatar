@@ -231,6 +231,9 @@ class ProactiveService:
         if entity_id in _MOTION_CAMERA_MAP and new_val == "on":
             camera_id = _MOTION_CAMERA_MAP[entity_id]
             if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) >= _CAMERA_COOLDOWN_S:
+                # Set cooldown immediately so duplicate sensors for the same camera
+                # that fire within milliseconds are blocked before the task runs
+                self._camera_cooldowns[camera_id] = time.monotonic()
                 friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
                 asyncio.create_task(
                     self._handle_motion_event(entity_id, friendly, camera_id),
@@ -282,9 +285,6 @@ class ProactiveService:
                 message = f"Motion detected by {friendly}."
         else:
             message = f"Motion detected by {friendly}."
-
-        # Apply camera cooldown before announcing to block any duplicate triggers
-        self._camera_cooldowns[camera_id] = time.monotonic()
 
         try:
             await self._announce(message, "normal")
