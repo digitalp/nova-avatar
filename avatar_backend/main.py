@@ -19,9 +19,11 @@ from avatar_backend.services.speaker_service import SpeakerService
 from avatar_backend.services.stt_service import STTService
 from avatar_backend.services.tts_service import create_tts_service
 from avatar_backend.services.ws_manager import ConnectionManager
+from avatar_backend.services.proactive_service import ProactiveService
 from avatar_backend.routers import health, chat
 from avatar_backend.routers import voice, avatar_ws, announce
 from avatar_backend.routers import admin
+from avatar_backend.routers.announce import AnnounceRequest, announce_handler
 
 _INSTALL_DIR = Path("/opt/avatar-server")
 _CONFIG_DIR  = _INSTALL_DIR / "config"
@@ -124,6 +126,25 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("ha_proxy.not_connected", ha_url=settings.ha_url)
 
+    # Announce callback for ProactiveService — calls the announce pipeline directly
+    async def _proactive_announce(message: str, priority: str = "normal") -> None:
+        from types import SimpleNamespace
+        fake_request = SimpleNamespace(app=app)
+        await announce_handler(
+            AnnounceRequest(message=message, priority=priority),
+            fake_request,
+        )
+
+    proactive = ProactiveService(
+        ha_url=settings.ha_url,
+        ha_token=settings.ha_token,
+        llm_service=app.state.llm_service,
+        announce_fn=_proactive_announce,
+        system_prompt=system_prompt,
+    )
+    app.state.proactive_service = proactive
+    await proactive.start()
+
     cleanup_task = asyncio.create_task(
         _session_cleanup_loop(app.state.session_manager)
     )
@@ -132,6 +153,7 @@ async def lifespan(app: FastAPI):
     yield
 
     cleanup_task.cancel()
+    await proactive.stop()
     logger.info("avatar_backend.stopped")
 
 

@@ -441,6 +441,12 @@ async def sync_prompt(request: Request):
     request.app.state.session_manager = SessionManager(updated_prompt)
     _LOGGER.info("sync_prompt.session_manager_reloaded")
 
+    # Keep proactive monitor in sync with the new prompt
+    proactive = getattr(request.app.state, "proactive_service", None)
+    if proactive is not None:
+        proactive.update_system_prompt(updated_prompt)
+        _LOGGER.info("sync_prompt.proactive_updated")
+
     return SyncPromptResponse(
         status="ok",
         new_entities_found=new_count,
