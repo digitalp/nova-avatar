@@ -5,12 +5,11 @@ GET /health/public — liveness probe (no auth)
 import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 import httpx
 import structlog
 
 from avatar_backend.config import get_settings
-from avatar_backend.middleware.auth import verify_api_key
 
 router = APIRouter(tags=["health"])
 logger = structlog.get_logger()
@@ -71,7 +70,7 @@ def _probe_piper(request: Request) -> str:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("/health", dependencies=[Depends(verify_api_key)])
+@router.get("/health")
 async def health_check(request: Request) -> dict:
     settings = get_settings()
 
