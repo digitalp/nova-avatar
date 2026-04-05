@@ -202,6 +202,89 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
     )
 
 
+# Outdoor cameras available for motion announcements
+_OUTDOOR_CAMERAS: dict[str, str] = {
+    "outdoor_1":  "camera.rlc_410w_fluent",
+    "outdoor_2":  "camera.rlc_1224a_fluent",
+    "doorbell":   "camera.reolink_video_doorbell_poe_fluent",
+}
+_DEFAULT_MOTION_CAMERA = "camera.rlc_410w_fluent"
+
+
+class MotionAnnounceRequest(BaseModel):
+    camera_entity_id: str = _DEFAULT_MOTION_CAMERA
+    location:         str = Field("outdoors", max_length=64)
+
+
+class MotionAnnounceResponse(BaseModel):
+    status:      str
+    message:     str
+    camera_used: str
+    wav_bytes:   int = 0
+    elapsed_ms:  int = 0
+
+
+@router.post(
+    "/announce/motion",
+    response_model=MotionAnnounceResponse,
+    dependencies=[Depends(verify_api_key)],
+    summary="Motion alert — capture outdoor camera image and announce what Nova sees",
+)
+async def motion_announce_handler(body: MotionAnnounceRequest, request: Request):
+    """
+    Called when motion is detected on an outdoor camera. Nova:
+      1. Captures a snapshot from the specified camera
+      2. Describes what it sees using vision AI
+      3. Announces the result on all speakers with priority="alert"
+
+    camera_entity_id: HA camera entity ID (or use _OUTDOOR_CAMERAS aliases)
+    location: human-readable label used in the fallback message (e.g. "the garden")
+
+    Falls back to a generic "Motion detected" message if the camera is unavailable.
+    """
+    t0 = time.monotonic()
+    ha  = request.app.state.ha_proxy
+    llm = request.app.state.llm_service
+
+    # Resolve friendly aliases to real entity IDs
+    camera_id = _OUTDOOR_CAMERAS.get(body.camera_entity_id, body.camera_entity_id)
+    location  = body.location.strip() or "outdoors"
+
+    _LOGGER.info("motion.triggered", camera=camera_id, location=location)
+
+    # 1. Fetch camera snapshot
+    image_bytes = await ha.fetch_camera_image(camera_id)
+
+    if image_bytes:
+        try:
+            description = await llm.describe_image(image_bytes)
+            message = f"Motion detected {location}. {description}"
+            _LOGGER.info("motion.described", chars=len(description))
+        except Exception as exc:
+            _LOGGER.warning("motion.describe_failed", exc=str(exc))
+            message = f"Motion detected {location}."
+    else:
+        _LOGGER.warning("motion.camera_unavailable", camera=camera_id)
+        message = f"Motion detected {location}."
+
+    # 2. Announce via the standard announce flow
+    announce_resp = await announce_handler(
+        AnnounceRequest(message=message, priority="alert"),
+        request,
+    )
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    _LOGGER.info("motion.done", elapsed_ms=elapsed_ms, wav_bytes=announce_resp.wav_bytes)
+
+    return MotionAnnounceResponse(
+        status="ok",
+        message=message,
+        camera_used=camera_id,
+        wav_bytes=announce_resp.wav_bytes,
+        elapsed_ms=elapsed_ms,
+    )
+
+
 @router.get(
     "/tts/audio/{token}",
     include_in_schema=False,
