@@ -65,8 +65,8 @@ _CONFIG_FIELDS = {
 
 # ── Page ──────────────────────────────────────────────────────────────────────
 
-@router.get("", include_in_schema=False)
-@router.get("/", include_in_schema=False)
+@router.get("", include_in_schema=False, dependencies=[Depends(verify_api_key)])
+@router.get("/", include_in_schema=False, dependencies=[Depends(verify_api_key)])
 async def admin_page():
     return FileResponse(str(_STATIC_DIR / "admin.html"))
 

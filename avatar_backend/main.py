@@ -64,6 +64,10 @@ def configure_logging(log_level: str) -> None:
 
     logging.basicConfig(level=level, handlers=[stream_handler, file_handler])
 
+    # Suppress uvicorn access log — it records full URLs including ?api_key= query params.
+    # Application-level request logging is handled by structlog instead.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 
 def _load_system_prompt() -> str:
     path = _CONFIG_DIR / "system_prompt.txt"
