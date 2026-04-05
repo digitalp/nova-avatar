@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime
 from typing import Any
 import httpx
 import structlog
@@ -50,6 +51,13 @@ class HAProxy:
             entity_id = tool_call.arguments.get("entity_id", "").strip()
             if not entity_id:
                 return ToolResult(success=False, message="get_entity_state requires an 'entity_id' argument.")
+            # Intercept time/date lookups — return local server time directly
+            # rather than hitting HA (sensor.system_time / sensor.time / etc. don't exist)
+            _TIME_LIKE = {"sensor.system_time", "sensor.time", "sensor.date_time",
+                          "sensor.current_time", "sensor.local_time"}
+            if entity_id in _TIME_LIKE or entity_id.endswith("_time") and entity_id.startswith("sensor."):
+                now = datetime.now().strftime("%A, %d %B %Y %H:%M")
+                return ToolResult(success=True, message=f"Current time: {now}")
             return await self._get_single_entity_state(entity_id)
 
         if tool_call.function_name != "call_ha_service":
