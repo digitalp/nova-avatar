@@ -81,6 +81,19 @@ class HAProxy:
                 message=f"Tool call missing required fields: {', '.join(missing)}.",
             )
 
+        # Never allow TTS service calls — Nova's text responses are automatically
+        # spoken by the announce pipeline. Calling tts.speak directly is always wrong.
+        if domain == "tts":
+            logger.warning("ha_proxy.tts_blocked", service=service, entity_id=entity_id)
+            return ToolResult(
+                success=False,
+                message=(
+                    "Do not call tts services directly. "
+                    "Your text response will be automatically spoken by the system. "
+                    "Simply respond with the information as plain text."
+                ),
+            )
+
         return await self.call_service(domain, service, entity_id, service_data)
 
     async def get_entities(self, domain: str) -> ToolResult:

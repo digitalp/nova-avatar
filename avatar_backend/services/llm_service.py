@@ -75,8 +75,10 @@ HA_TOOLS: list[dict] = [
         "function": {
             "name": "call_ha_service",
             "description": (
-                "Control a Home Assistant device by calling a service. "
-                "Use get_entities first if you are unsure of the entity_id."
+                "Control a Home Assistant device by calling a service (turn on/off, lock, unlock, etc). "
+                "Use get_entities first if you are unsure of the entity_id. "
+                "NEVER use this to read sensor values — use get_entity_state instead. "
+                "NEVER call tts or media_player speak services — your text responses are automatically spoken."
             ),
             "parameters": {
                 "type": "object",
