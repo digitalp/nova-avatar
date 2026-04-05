@@ -278,8 +278,23 @@ class HAProxy:
             ha_status_code=resp.status_code,
         )
 
+    # Map common LLM-guessed camera aliases to real HA entity IDs
+    _CAMERA_ALIASES: dict[str, str] = {
+        "camera.doorbell":            "camera.reolink_video_doorbell_poe_fluent",
+        "camera.front_door":          "camera.reolink_video_doorbell_poe_fluent",
+        "camera.front_door_camera":   "camera.reolink_video_doorbell_poe_fluent",
+        "camera.reolink_doorbell":    "camera.reolink_video_doorbell_poe_fluent",
+        "camera.doorbell_camera":     "camera.reolink_video_doorbell_poe_fluent",
+        "camera.outdoor":             "camera.rlc_410w_fluent",
+        "camera.outdoor_camera":      "camera.rlc_410w_fluent",
+        "camera.outside":             "camera.rlc_410w_fluent",
+        "camera.living_room":         "camera.reolink_living_room_profile000_mainstream",
+        "camera.living_room_camera":  "camera.reolink_living_room_profile000_mainstream",
+    }
+
     async def fetch_camera_image(self, entity_id: str) -> bytes | None:
         """Fetch a camera snapshot from HA. Returns raw image bytes or None on failure."""
+        entity_id = self._CAMERA_ALIASES.get(entity_id, entity_id)
         url = f"{self._ha_url}/api/camera_proxy/{entity_id}"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
