@@ -109,6 +109,11 @@ async def setup_required(request: Request):
 @router.post("/setup", include_in_schema=False)
 async def first_run_setup(request: Request):
     """Create the very first admin account. Only works when no users exist."""
+    from avatar_backend.middleware.ratelimit import is_rate_limited, record_failure
+    client_ip = request.client.host if request.client else "unknown"
+    if is_rate_limited(client_ip):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
     users = request.app.state.user_service
     if users.has_users():
         raise HTTPException(status_code=409, detail="Setup already complete")
@@ -116,10 +121,12 @@ async def first_run_setup(request: Request):
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
     if not username:
+        record_failure(client_ip)
         raise HTTPException(status_code=400, detail="Username is required")
     try:
         users.create_user(username, password, "admin")
     except ValueError as exc:
+        record_failure(client_ip)
         raise HTTPException(status_code=400, detail=str(exc))
     _LOGGER.info("admin.setup_complete", username=username)
     return {"created": True}
@@ -132,13 +139,19 @@ class LoginBody(BaseModel):
 
 @router.post("/login")
 async def do_login(body: LoginBody, request: Request):
+    from avatar_backend.middleware.ratelimit import is_rate_limited, record_failure, clear_failures
+    client_ip = request.client.host if request.client else "unknown"
+    if is_rate_limited(client_ip):
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Try again later.")
+
     users = request.app.state.user_service
     user  = users.authenticate(body.username, body.password)
     if not user:
-        _LOGGER.warning("admin.login_failed", username=body.username,
-                        client=request.client.host if request.client else "unknown")
+        record_failure(client_ip)
+        _LOGGER.warning("admin.login_failed", username=body.username, client=client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    clear_failures(client_ip)
     token = users.create_session(user["username"], user["role"])
     _LOGGER.info("admin.login_ok", username=user["username"], role=user["role"])
     resp  = JSONResponse({"ok": True, "role": user["role"]})

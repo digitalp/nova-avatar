@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from datetime import datetime
 from typing import Any
 import httpx
@@ -11,6 +12,40 @@ from avatar_backend.models.tool_result import ToolResult
 logger = structlog.get_logger()
 
 _CALL_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
+
+# ── service_data validation ───────────────────────────────────────────────────
+
+_KEY_RE          = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
+_ALLOWED_TYPES   = (str, int, float, bool)
+_MAX_SD_KEYS     = 10
+_MAX_STR_LEN     = 512
+# entity_id is always set explicitly by call_service — block LLM from overriding it
+_FORBIDDEN_KEYS  = frozenset({"entity_id"})
+
+
+def _validate_service_data(data: dict) -> dict[str, Any]:
+    """
+    Sanitise LLM-supplied service_data before merging into the HA payload.
+    Raises ValueError if the dict contains anything unsafe.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("service_data must be a mapping")
+    if len(data) > _MAX_SD_KEYS:
+        raise ValueError(f"service_data exceeds maximum key count ({_MAX_SD_KEYS})")
+    clean: dict[str, Any] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not _KEY_RE.match(k):
+            raise ValueError(f"Invalid service_data key: {k!r}")
+        if k in _FORBIDDEN_KEYS:
+            continue  # silently drop — we set entity_id ourselves
+        if not isinstance(v, _ALLOWED_TYPES):
+            raise ValueError(
+                f"service_data[{k!r}] has unsupported type {type(v).__name__!r}"
+            )
+        if isinstance(v, str) and len(v) > _MAX_STR_LEN:
+            raise ValueError(f"service_data[{k!r}] string value too long")
+        clean[k] = v
+    return clean
 
 
 class HAProxy:
@@ -205,7 +240,17 @@ class HAProxy:
         # ── Gate 2: HA API ────────────────────────────────────────────────
         payload: dict[str, Any] = {"entity_id": entity_id}
         if service_data:
-            payload.update(service_data)
+            try:
+                payload.update(_validate_service_data(service_data))
+            except ValueError as exc:
+                logger.warning("ha_proxy.bad_service_data", error=str(exc),
+                               entity_id=entity_id, service=svc_label)
+                return ToolResult(
+                    success=False,
+                    message=f"Invalid service_data: {exc}",
+                    entity_id=entity_id,
+                    service_called=svc_label,
+                )
 
         url = f"{self._ha_url}/api/services/{domain}/{service}"
         logger.info(
