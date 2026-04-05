@@ -440,7 +440,13 @@ _AVATAR_SETTINGS_FILE = _CONFIG_DIR / "avatar_settings.json"
 
 @router.get("/avatar-settings")
 async def get_avatar_settings(request: Request):
-    _require_session(request)
+    # Accept session cookie (admin panel) OR API key header (avatar/kiosk page)
+    if not _get_session(request):
+        import secrets as _sec
+        from avatar_backend.config import get_settings as _gs
+        key = request.headers.get("X-API-Key") or request.query_params.get("api_key", "")
+        if not key or not _sec.compare_digest(key.encode(), _gs().api_key.encode()):
+            raise HTTPException(status_code=401, detail="Not authenticated")
     import json as _json
     if _AVATAR_SETTINGS_FILE.exists():
         return _json.loads(_AVATAR_SETTINGS_FILE.read_text())

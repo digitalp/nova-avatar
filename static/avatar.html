@@ -136,6 +136,25 @@
       border-color: transparent; box-shadow: 0 2px 14px rgba(239,68,68,0.5);
     }
     #btn-mic:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      #start-gate h2 { font-size: 1.5rem; }
+      #start-gate p  { font-size: 0.82rem; }
+      #btn-start     { padding: 12px 32px; font-size: 0.95rem; }
+      #btn-mic       { padding: 10px 18px; font-size: 0.84rem; }
+      #status-text   { font-size: 0.75rem; }
+      #subtitle      { font-size: 0.82rem; max-width: 92%; padding: 7px 12px; }
+      #name-badge    { font-size: 0.78rem; padding: 3px 12px; }
+      #bottom-bar    { gap: 8px; padding: 8px 12px; }
+    }
+
+    /* Landscape phone — shrink bottom bar so avatar gets more vertical space */
+    @media (max-height: 500px) and (orientation: landscape) {
+      #bottom-bar { padding: 5px 14px; }
+      #btn-mic    { padding: 7px 16px; font-size: 0.82rem; }
+      #status-text { font-size: 0.72rem; }
+    }
   </style>
 </head>
 <body>

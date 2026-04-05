@@ -174,7 +174,44 @@
 
   /* Config grid */
   .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  @media (max-width: 800px) { .config-grid { grid-template-columns: 1fr; } .stat-grid { grid-template-columns: 1fr 1fr; } }
+
+  /* ── Responsive ─────────────────────────────────────────────────────────── */
+  #menu-toggle {
+    display: none; align-items: center; justify-content: center;
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; color: var(--text); cursor: pointer; flex-shrink: 0;
+    margin-right: 8px;
+  }
+  #menu-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  #sidebar-overlay {
+    display: none; position: fixed; inset: 0; z-index: 99;
+    background: rgba(0,0,0,0.55);
+  }
+  #sidebar-overlay.show { display: block; }
+
+  @media (max-width: 768px) {
+    #sidebar {
+      position: fixed; top: 0; bottom: 0;
+      left: calc(-1 * var(--nav-w) - 2px); z-index: 100;
+      transition: left .25s ease;
+    }
+    #sidebar.open { left: 0; box-shadow: 4px 0 32px rgba(0,0,0,.6); }
+    #menu-toggle { display: flex; }
+    #topbar { padding: 0 12px; }
+    #content { padding: 16px; }
+  }
+
+  @media (max-width: 800px) {
+    .config-grid { grid-template-columns: 1fr; }
+    .stat-grid   { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 540px) {
+    .field-row   { grid-template-columns: 1fr; }
+    .user-actions { flex-wrap: wrap; }
+    #log-output  { height: min(440px, 45vh); }
+    #topbar h2   { font-size: 14px; }
+  }
 
   /* Spinner */
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -246,7 +283,10 @@
 <!-- Main -->
 <div id="main">
   <div id="topbar">
-    <h2 id="section-title">Dashboard</h2>
+    <button id="menu-toggle" onclick="toggleSidebar()" aria-label="Menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <h2 id="section-title" style="flex:1">Dashboard</h2>
     <div id="topbar-actions">
       <button class="btn btn-outline btn-sm" onclick="refreshSection()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.72"/></svg>
@@ -441,6 +481,7 @@
   </div><!-- /content -->
 </div><!-- /main -->
 
+<div id="sidebar-overlay" onclick="closeSidebar()"></div>
 <div id="toast"></div>
 
 <script>
@@ -514,17 +555,27 @@ async function loadAvatarSettings() {
 async function saveAvatarSettings() {
   const url = document.getElementById('avatar-url').value.trim();
   await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: url });
-  showToast('Avatar settings saved — reload the avatar page to apply');
+  toast('Avatar settings saved — reload the avatar page to apply');
 }
 
 async function resetAvatarSettings() {
   document.getElementById('avatar-url').value = '';
   selectSkin(0);
   await api('POST', '/admin/avatar-settings', { skin_tone: 0, avatar_url: '' });
-  showToast('Reset to default');
+  toast('Reset to default');
+}
+
+function toggleSidebar() {
+  const open = document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-overlay').classList.toggle('show', open);
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
 }
 
 function navigate(el) {
+  closeSidebar();
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   el.classList.add('active');
   const sec = el.dataset.section;
