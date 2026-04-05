@@ -202,18 +202,9 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
     )
 
 
-# Outdoor cameras available for motion announcements
-_OUTDOOR_CAMERAS: dict[str, str] = {
-    "outdoor_1":  "camera.rlc_410w_fluent",
-    "outdoor_2":  "camera.rlc_1224a_fluent",
-    "doorbell":   "camera.reolink_video_doorbell_poe_fluent",
-}
-_DEFAULT_MOTION_CAMERA = "camera.rlc_410w_fluent"
-
-
 class MotionAnnounceRequest(BaseModel):
-    camera_entity_id: str = _DEFAULT_MOTION_CAMERA
-    location:         str = Field("outdoors", max_length=64)
+    camera_entity_id: str = Field(..., description="HA camera entity ID for the triggered camera")
+    location:         str = Field("outdoors", max_length=64, description="Human-readable label used in the spoken message")
 
 
 class MotionAnnounceResponse(BaseModel):
@@ -246,8 +237,7 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
     ha  = request.app.state.ha_proxy
     llm = request.app.state.llm_service
 
-    # Resolve friendly aliases to real entity IDs
-    camera_id = _OUTDOOR_CAMERAS.get(body.camera_entity_id, body.camera_entity_id)
+    camera_id = body.camera_entity_id
     location  = body.location.strip() or "outdoors"
 
     _LOGGER.info("motion.triggered", camera=camera_id, location=location)
