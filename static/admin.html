@@ -103,18 +103,16 @@
   .skin-swatch.selected { border-color: var(--accent); }
   .btn svg { width: 14px; height: 14px; }
 
-  /* Auth gate */
-  #auth-gate {
-    position: fixed; inset: 0; background: var(--bg); z-index: 100;
-    display: flex; align-items: center; justify-content: center;
+  /* User badges */
+  .role-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
   }
-  #auth-box {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 32px; width: 340px;
-  }
-  #auth-box h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
-  #auth-box p  { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-  #auth-error  { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 16px; }
+  .role-badge.admin  { background: rgba(99,102,241,.2); color: var(--accent); }
+  .role-badge.viewer { background: rgba(100,116,139,.15); color: var(--muted); }
+  .user-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .user-row:last-child { border-bottom: none; }
+  .user-row .user-name { flex: 1; font-weight: 500; }
+  .user-actions { display: flex; gap: 6px; }
 
   /* Toast */
   #toast {
@@ -191,23 +189,6 @@
 </head>
 <body>
 
-<!-- Auth gate -->
-<div id="auth-gate">
-  <div id="auth-box">
-    <h2>Nova Admin</h2>
-    <p>Enter your API key to continue.</p>
-    <div class="field">
-      <label for="auth-key-input">API Key</label>
-      <div class="input-reveal">
-        <input type="password" id="auth-key-input" placeholder="Enter API key..." autocomplete="current-password">
-        <button onclick="toggleReveal('auth-key-input',this)" tabindex="-1">&#128065;</button>
-      </div>
-    </div>
-    <button class="btn btn-primary" style="width:100%" onclick="authenticate()">Unlock</button>
-    <div id="auth-error"></div>
-  </div>
-</div>
-
 <!-- Sidebar -->
 <div id="sidebar">
   <div id="sidebar-header">
@@ -247,12 +228,18 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
       Tools
     </div>
+    <div class="nav-item admin-only" data-section="users" onclick="navigate(this)" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+      Users
+    </div>
   </nav>
   <div id="sidebar-footer">
-    <div id="status-dot">
+    <div id="status-dot" style="margin-bottom:8px;">
       <div class="dot"></div>
       <span id="status-text">Checking...</span>
     </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;" id="user-info"></div>
+    <button class="btn btn-outline btn-sm" style="width:100%" onclick="logout()">Sign out</button>
   </div>
 </div>
 
@@ -405,6 +392,52 @@
       </div>
     </div>
 
+    <!-- USERS (admin only) -->
+    <div id="section-users" class="section">
+      <div class="card">
+        <div class="card-title">Users</div>
+        <div id="users-list" style="margin-bottom:16px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Add User</div>
+        <div class="field-row">
+          <div class="field">
+            <label>Username</label>
+            <input type="text" id="new-username" placeholder="Username">
+          </div>
+          <div class="field">
+            <label>Role</label>
+            <select id="new-role">
+              <option value="viewer">Viewer</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="new-password" placeholder="Min 8 characters">
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end;">
+            <button class="btn btn-primary" style="width:100%" onclick="createUser()">Add User</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="change-pw-card" style="display:none">
+        <div class="card-title">Change Password — <span id="change-pw-name"></span></div>
+        <div class="field-row">
+          <div class="field">
+            <label>New Password</label>
+            <input type="password" id="change-pw-input" placeholder="Min 8 characters">
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end;gap:8px;">
+            <button class="btn btn-primary" style="flex:1" onclick="submitPasswordChange()">Save</button>
+            <button class="btn btn-outline" onclick="cancelPasswordChange()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main -->
 
@@ -413,61 +446,48 @@
 <script>
 'use strict';
 
-let API_KEY = '';
 let logEventSource = null;
-let logRunning = false;
-const BASE = '';
-
-// ── Auth ─────────────────────────────────────────────────────────────────────
-
-function toggleReveal(inputId, btn) {
-  const el = document.getElementById(inputId);
-  el.type = el.type === 'password' ? 'text' : 'password';
-}
-
-async function authenticate() {
-  const key = document.getElementById('auth-key-input').value.trim();
-  if (!key) { document.getElementById('auth-error').textContent = 'Please enter your API key.'; return; }
-  try {
-    const r = await fetch('/admin/config', { headers: { 'X-API-Key': key } });
-    if (r.status === 403 || r.status === 401) {
-      document.getElementById('auth-error').textContent = 'Invalid API key.';
-      return;
-    }
-    API_KEY = key;
-    localStorage.setItem('nova_admin_key', key);
-    document.getElementById('auth-gate').style.display = 'none';
-    init();
-  } catch (e) {
-    document.getElementById('auth-error').textContent = 'Cannot reach server.';
-  }
-}
-
-document.getElementById('auth-key-input').addEventListener('keydown', e => { if (e.key === 'Enter') authenticate(); });
-
-// Auto-login from storage
-const stored = localStorage.getItem('nova_admin_key');
-if (stored) {
-  API_KEY = stored;
-  fetch('/admin/config', { headers: { 'X-API-Key': API_KEY } }).then(r => {
-    if (r.ok) { document.getElementById('auth-gate').style.display = 'none'; init(); }
-    else { API_KEY = ''; localStorage.removeItem('nova_admin_key'); }
-  }).catch(() => {
-    document.getElementById('auth-gate').style.display = 'none'; init();
-  });
-}
+let logRunning     = false;
+let _currentRole   = 'viewer';
+let _changePwTarget = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-function init() {
+async function init() {
+  try {
+    const me = await api('GET', '/admin/me');
+    _currentRole = me.role;
+    document.getElementById('user-info').textContent = `${me.username} (${me.role})`;
+    if (me.role === 'admin') {
+      document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
+      document.getElementById('restart-btn').style.display = '';
+    } else {
+      document.getElementById('restart-btn').style.display = 'none';
+      // Hide write-only nav items for viewers
+      ['config','prompt','acl'].forEach(sec => {
+        const el = document.querySelector(`.nav-item[data-section="${sec}"]`);
+        if (el) el.style.display = 'none';
+      });
+    }
+  } catch {
+    window.location.href = '/admin/login';
+    return;
+  }
   loadDashboard();
   pollHealth();
   setInterval(pollHealth, 15000);
 }
 
+async function logout() {
+  await fetch('/admin/logout', { method: 'POST' }).catch(() => {});
+  window.location.href = '/admin/login';
+}
+
+init();
+
 // ── Navigation ────────────────────────────────────────────────────────────────
 
-const TITLES = { dashboard:'Dashboard', config:'Configuration', prompt:'System Prompt', acl:'ACL Rules', logs:'Live Logs', sessions:'Sessions', avatar:'Avatar', tools:'Tools' };
+const TITLES = { dashboard:'Dashboard', config:'Configuration', prompt:'System Prompt', acl:'ACL Rules', logs:'Live Logs', sessions:'Sessions', avatar:'Avatar', tools:'Tools', users:'Users' };
 
 // ── Avatar / skin tone ────────────────────────────────────────────────────────
 const SKIN_LABELS = ['Porcelain','Light','Medium','Dark','Deep'];
@@ -519,6 +539,7 @@ function navigate(el) {
   if (sec === 'sessions') loadSessions();
   if (sec === 'dashboard') loadDashboard();
   if (sec === 'logs' && logRunning) {}  // keep going
+  if (sec === 'users') loadUsers();
 }
 
 function refreshSection() {
@@ -540,9 +561,10 @@ function toast(msg, type='ok') {
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 async function api(method, path, body) {
-  const opts = { method, headers: { 'X-API-Key': API_KEY } };
+  const opts = { method, headers: {} };
   if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const r = await fetch(path, opts);
+  if (r.status === 401) { window.location.href = '/admin/login'; throw new Error('Session expired'); }
   if (!r.ok) { const t = await r.text(); throw new Error(t || r.statusText); }
   return r.json();
 }
@@ -551,7 +573,7 @@ async function api(method, path, body) {
 
 async function pollHealth() {
   try {
-    const d = await fetch('/health', { headers: { 'X-API-Key': API_KEY } }).then(r => r.json());
+    const d = await fetch('/health').then(r => r.json());
     const dot = document.getElementById('status-dot');
     const statusText = document.getElementById('status-text');
     if (d.status === 'ok') { dot.className = 'ok'; statusText.textContent = 'Server OK'; }
@@ -579,7 +601,7 @@ function renderHealth(d) {
 async function loadDashboard() {
   try {
     const [health, sessions] = await Promise.all([
-      fetch('/health', { headers: { 'X-API-Key': API_KEY } }).then(r => r.json()),
+      fetch('/health').then(r => r.json()),
       api('GET', '/admin/sessions'),
     ]);
     renderHealth(health);
@@ -755,8 +777,7 @@ function toggleLogs() {
 
 function startLogs() {
   if (logEventSource) { logEventSource.close(); logEventSource = null; }
-  const url = `/admin/logs?api_key=${encodeURIComponent(API_KEY)}`;
-  logEventSource = new EventSource(url);
+  logEventSource = new EventSource('/admin/logs');
   logRunning = true;
   document.getElementById('log-toggle-btn').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause';
   document.getElementById('log-status').textContent = 'Streaming...';
@@ -859,6 +880,88 @@ async function testAnnounce() {
     await api('POST', '/admin/announce/test', { message, priority });
     toast('Announcement sent', 'ok');
   } catch(e) { toast('Announce failed: ' + e.message, 'err'); }
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+
+async function loadUsers() {
+  try {
+    const d = await api('GET', '/admin/users');
+    const container = document.getElementById('users-list');
+    if (!d.users.length) {
+      container.innerHTML = '<p style="color:var(--muted);font-size:13px;">No users yet.</p>';
+      return;
+    }
+    container.innerHTML = d.users.map(u => `
+      <div class="user-row">
+        <span class="user-name">${esc(u.username)}</span>
+        <span class="role-badge ${u.role}">${u.role}</span>
+        <div class="user-actions">
+          <select id="role-sel-${esc(u.username)}" class="btn btn-outline btn-sm" style="padding:4px 6px;">
+            <option value="viewer"${u.role==='viewer'?' selected':''}>Viewer</option>
+            <option value="admin"${u.role==='admin'?' selected':''}>Admin</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="changeRole('${esc(u.username)}')">Set Role</button>
+          <button class="btn btn-outline btn-sm" onclick="showPasswordChange('${esc(u.username)}')">Password</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.username)}')">Delete</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { toast('Failed to load users: ' + e.message, 'err'); }
+}
+
+async function createUser() {
+  const username = document.getElementById('new-username').value.trim();
+  const password = document.getElementById('new-password').value;
+  const role     = document.getElementById('new-role').value;
+  if (!username || !password) { toast('Username and password required', 'warn'); return; }
+  try {
+    await api('POST', '/admin/users', { username, password, role });
+    document.getElementById('new-username').value = '';
+    document.getElementById('new-password').value = '';
+    toast(`User '${username}' created`, 'ok');
+    loadUsers();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+async function deleteUser(username) {
+  if (!confirm(`Delete user '${username}'? This cannot be undone.`)) return;
+  try {
+    await api('DELETE', `/admin/users/${encodeURIComponent(username)}`);
+    toast(`User '${username}' deleted`, 'ok');
+    loadUsers();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+async function changeRole(username) {
+  const role = document.getElementById(`role-sel-${username}`).value;
+  try {
+    await api('POST', `/admin/users/${encodeURIComponent(username)}/role`, { role });
+    toast(`Role updated to '${role}'`, 'ok');
+    loadUsers();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
+}
+
+function showPasswordChange(username) {
+  _changePwTarget = username;
+  document.getElementById('change-pw-name').textContent = username;
+  document.getElementById('change-pw-input').value = '';
+  document.getElementById('change-pw-card').style.display = '';
+  document.getElementById('change-pw-input').focus();
+}
+
+function cancelPasswordChange() {
+  _changePwTarget = null;
+  document.getElementById('change-pw-card').style.display = 'none';
+}
+
+async function submitPasswordChange() {
+  const pw = document.getElementById('change-pw-input').value;
+  if (!pw) { toast('Enter a new password', 'warn'); return; }
+  try {
+    await api('POST', `/admin/users/${encodeURIComponent(_changePwTarget)}/password`, { new_password: pw });
+    toast('Password updated', 'ok');
+    cancelPasswordChange();
+  } catch(e) { toast('Failed: ' + e.message, 'err'); }
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────

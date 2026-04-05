@@ -1,80 +1,249 @@
 """
 Admin panel — /admin
 
-Serves the admin UI and supporting REST endpoints for managing the
-avatar backend without SSH access.
+Session-based authentication (username + password) replaces the API key gate.
+All browser sessions are tracked via an HTTP-only cookie (nova_session).
 
-All API endpoints require the same X-API-Key as the main server.
-The /admin/logs SSE endpoint accepts ?api_key= query param (browser
-EventSource cannot set headers).
+Roles
+-----
+admin  — full access: config, prompt, ACL, restart, user management
+viewer — read-only: dashboard, logs, sessions
 """
 from __future__ import annotations
 import asyncio
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
-
-import secrets
-
-from avatar_backend.middleware.auth import verify_api_key
 
 _LOGGER = structlog.get_logger()
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-_INSTALL_DIR = Path("/opt/avatar-server")
-_CONFIG_DIR  = _INSTALL_DIR / "config"
-_ENV_FILE    = _INSTALL_DIR / ".env"
-_PROMPT_FILE = _CONFIG_DIR / "system_prompt.txt"
-_ACL_FILE    = _CONFIG_DIR / "acl.yaml"
-_LOG_FILE    = Path("/tmp/avatar-backend.log")
-_STATIC_DIR  = _INSTALL_DIR / "static"
+_INSTALL_DIR  = Path("/opt/avatar-server")
+_CONFIG_DIR   = _INSTALL_DIR / "config"
+_ENV_FILE     = _INSTALL_DIR / ".env"
+_PROMPT_FILE  = _CONFIG_DIR / "system_prompt.txt"
+_ACL_FILE     = _CONFIG_DIR / "acl.yaml"
+_LOG_FILE     = _INSTALL_DIR / "logs" / "avatar-backend.log"
+_STATIC_DIR   = _INSTALL_DIR / "static"
+_COOKIE_NAME  = "nova_session"
 
 # Fields shown in the config editor (display label, sensitive flag)
 _CONFIG_FIELDS = {
-    "API_KEY":              ("API Key",                                     True),
-    "HA_URL":               ("Home Assistant URL",                          False),
-    "HA_TOKEN":             ("HA Long-lived Token",                         True),
-    "LLM_PROVIDER":         ("LLM Provider (ollama/openai/google/anthropic)",False),
-    "OLLAMA_URL":           ("Ollama URL",                                  False),
-    "OLLAMA_MODEL":         ("Ollama Model",                                False),
-    "CLOUD_MODEL":          ("Cloud Model Name",                            False),
-    "OPENAI_API_KEY":       ("OpenAI API Key",                              True),
-    "GOOGLE_API_KEY":       ("Google API Key",                              True),
-    "ANTHROPIC_API_KEY":    ("Anthropic API Key",                           True),
-    "WHISPER_MODEL":        ("Whisper Model",                               False),
-    "TTS_PROVIDER":         ("TTS Provider",                                False),
-    "PIPER_VOICE":          ("Piper Voice",                                 False),
-    "ELEVENLABS_API_KEY":   ("ElevenLabs API Key",                          True),
-    "ELEVENLABS_VOICE_ID":  ("ElevenLabs Voice ID",                         False),
-    "ELEVENLABS_MODEL":     ("ElevenLabs Model",                            False),
-    "AFROTTS_VOICE":        ("AfroTTS Voice",                               False),
-    "AFROTTS_SPEED":        ("AfroTTS Speed (0.5-2.0)",                      False),
-    "PUBLIC_URL":           ("Server Public URL (for audio playback)",      False),
-    "SPEAKERS":             ("Speakers",                                    False),
-    "TTS_ENGINE":           ("TTS Engine (Sonos)",                          False),
-    "LOG_LEVEL":            ("Log Level",                                   False),
-    "HOST":                 ("Bind Host",                                   False),
-    "PORT":                 ("Bind Port",                                   False),
+    "API_KEY":              ("API Key",                                      True),
+    "HA_URL":               ("Home Assistant URL",                           False),
+    "HA_TOKEN":             ("HA Long-lived Token",                          True),
+    "LLM_PROVIDER":         ("LLM Provider (ollama/openai/google/anthropic)", False),
+    "OLLAMA_URL":           ("Ollama URL",                                   False),
+    "OLLAMA_MODEL":         ("Ollama Model",                                 False),
+    "CLOUD_MODEL":          ("Cloud Model Name",                             False),
+    "OPENAI_API_KEY":       ("OpenAI API Key",                               True),
+    "GOOGLE_API_KEY":       ("Google API Key",                               True),
+    "ANTHROPIC_API_KEY":    ("Anthropic API Key",                            True),
+    "WHISPER_MODEL":        ("Whisper Model",                                False),
+    "TTS_PROVIDER":         ("TTS Provider",                                 False),
+    "PIPER_VOICE":          ("Piper Voice",                                  False),
+    "ELEVENLABS_API_KEY":   ("ElevenLabs API Key",                           True),
+    "ELEVENLABS_VOICE_ID":  ("ElevenLabs Voice ID",                          False),
+    "ELEVENLABS_MODEL":     ("ElevenLabs Model",                             False),
+    "AFROTTS_VOICE":        ("AfroTTS Voice",                                False),
+    "AFROTTS_SPEED":        ("AfroTTS Speed (0.5-2.0)",                       False),
+    "PUBLIC_URL":           ("Server Public URL (for audio playback)",       False),
+    "SPEAKERS":             ("Speakers",                                     False),
+    "TTS_ENGINE":           ("TTS Engine (Sonos)",                           False),
+    "LOG_LEVEL":            ("Log Level",                                    False),
+    "HOST":                 ("Bind Host",                                    False),
+    "PORT":                 ("Bind Port",                                    False),
 }
 
 
-# ── Page ──────────────────────────────────────────────────────────────────────
+# ── Session helpers ───────────────────────────────────────────────────────────
 
-@router.get("", include_in_schema=False, dependencies=[Depends(verify_api_key)])
-@router.get("/", include_in_schema=False, dependencies=[Depends(verify_api_key)])
-async def admin_page():
+def _get_session(request: Request) -> dict | None:
+    token = request.cookies.get(_COOKIE_NAME)
+    if not token:
+        return None
+    users: "UserService" = request.app.state.user_service
+    return users.validate_session(token)
+
+
+def _require_session(request: Request, min_role: Literal["admin", "viewer"] = "viewer") -> dict:
+    """Return the session or raise 401/403. Used inline (not as Depends)."""
+    sess = _get_session(request)
+    if not sess:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if min_role == "admin" and sess["role"] != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return sess
+
+
+def _set_session_cookie(response: JSONResponse | RedirectResponse, token: str) -> None:
+    response.set_cookie(
+        key=_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="strict",
+        max_age=86400,
+        path="/admin",
+    )
+
+
+# ── Login / logout / setup ────────────────────────────────────────────────────
+
+@router.get("/login", include_in_schema=False)
+async def login_page():
+    return FileResponse(str(_STATIC_DIR / "login.html"))
+
+
+@router.get("/setup-required", include_in_schema=False)
+async def setup_required(request: Request):
+    return {"required": not request.app.state.user_service.has_users()}
+
+
+@router.post("/setup", include_in_schema=False)
+async def first_run_setup(request: Request):
+    """Create the very first admin account. Only works when no users exist."""
+    users = request.app.state.user_service
+    if users.has_users():
+        raise HTTPException(status_code=409, detail="Setup already complete")
+    body = await request.json()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+    try:
+        users.create_user(username, password, "admin")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    _LOGGER.info("admin.setup_complete", username=username)
+    return {"created": True}
+
+
+class LoginBody(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/login")
+async def do_login(body: LoginBody, request: Request):
+    users = request.app.state.user_service
+    user  = users.authenticate(body.username, body.password)
+    if not user:
+        _LOGGER.warning("admin.login_failed", username=body.username,
+                        client=request.client.host if request.client else "unknown")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    token = users.create_session(user["username"], user["role"])
+    _LOGGER.info("admin.login_ok", username=user["username"], role=user["role"])
+    resp  = JSONResponse({"ok": True, "role": user["role"]})
+    _set_session_cookie(resp, token)
+    return resp
+
+
+@router.post("/logout")
+async def do_logout(request: Request):
+    token = request.cookies.get(_COOKIE_NAME)
+    if token:
+        request.app.state.user_service.invalidate_session(token)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(_COOKIE_NAME, path="/admin")
+    return resp
+
+
+@router.get("/me")
+async def get_me(request: Request):
+    sess = _get_session(request)
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"username": sess["username"], "role": sess["role"]}
+
+
+# ── Admin page ────────────────────────────────────────────────────────────────
+
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+async def admin_page(request: Request):
+    if not _get_session(request):
+        return RedirectResponse("/admin/login")
     return FileResponse(str(_STATIC_DIR / "admin.html"))
+
+
+# ── User management (admin only) ──────────────────────────────────────────────
+
+class CreateUserBody(BaseModel):
+    username: str
+    password: str
+    role:     Literal["admin", "viewer"] = "viewer"
+
+
+class ChangePasswordBody(BaseModel):
+    new_password: str
+
+
+class ChangeRoleBody(BaseModel):
+    role: Literal["admin", "viewer"]
+
+
+@router.get("/users")
+async def list_users(request: Request):
+    _require_session(request, min_role="admin")
+    return {"users": request.app.state.user_service.list_users()}
+
+
+@router.post("/users", status_code=201)
+async def create_user(body: CreateUserBody, request: Request):
+    _require_session(request, min_role="admin")
+    try:
+        request.app.state.user_service.create_user(body.username, body.password, body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"created": body.username}
+
+
+@router.delete("/users/{username}")
+async def delete_user(username: str, request: Request):
+    sess = _require_session(request, min_role="admin")
+    if username == sess["username"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    try:
+        request.app.state.user_service.delete_user(username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"deleted": username}
+
+
+@router.post("/users/{username}/password")
+async def change_user_password(username: str, body: ChangePasswordBody, request: Request):
+    _require_session(request, min_role="admin")
+    try:
+        request.app.state.user_service.change_password(username, body.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"updated": username}
+
+
+@router.post("/users/{username}/role")
+async def change_user_role(username: str, body: ChangeRoleBody, request: Request):
+    sess = _require_session(request, min_role="admin")
+    if username == sess["username"]:
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
+    try:
+        request.app.state.user_service.change_role(username, body.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"updated": username, "role": body.role}
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-@router.get("/config", dependencies=[Depends(verify_api_key)])
-async def get_config():
+@router.get("/config")
+async def get_config(request: Request):
+    _require_session(request)
     pairs: dict[str, str] = {}
     if _ENV_FILE.exists():
         for line in _ENV_FILE.read_text().splitlines():
@@ -91,8 +260,9 @@ class ConfigUpdate(BaseModel):
     values: dict[str, str]
 
 
-@router.post("/config", dependencies=[Depends(verify_api_key)])
+@router.post("/config")
 async def save_config(body: ConfigUpdate, request: Request):
+    _require_session(request, min_role="admin")
     existing: dict[str, str] = {}
     header_lines: list[str] = []
     if _ENV_FILE.exists():
@@ -108,7 +278,6 @@ async def save_config(body: ConfigUpdate, request: Request):
     _ENV_FILE.write_text("\n".join(lines) + "\n")
     _LOGGER.info("admin.config_saved")
 
-    # Reload TTS service immediately so provider changes take effect without a restart
     from avatar_backend.config import get_settings
     from avatar_backend.services.tts_service import create_tts_service
     get_settings.cache_clear()
@@ -117,7 +286,6 @@ async def save_config(body: ConfigUpdate, request: Request):
     request.app.state.tts_service = new_tts
     _LOGGER.info("admin.tts_reloaded", provider=new_settings.tts_provider)
 
-    # Pre-warm AfroTTS (Kokoro) model in background — first load downloads weights
     if new_settings.tts_provider.lower() == "afrotts":
         async def _warm():
             import asyncio as _asyncio
@@ -134,17 +302,19 @@ async def save_config(body: ConfigUpdate, request: Request):
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-@router.get("/prompt", dependencies=[Depends(verify_api_key)])
-async def get_prompt():
-    return {"text": _PROMPT_FILE.read_text() if _PROMPT_FILE.exists() else ""}
-
-
 class TextBody(BaseModel):
     text: str
 
 
-@router.post("/prompt", dependencies=[Depends(verify_api_key)])
-async def save_prompt(body: TextBody):
+@router.get("/prompt")
+async def get_prompt(request: Request):
+    _require_session(request)
+    return {"text": _PROMPT_FILE.read_text() if _PROMPT_FILE.exists() else ""}
+
+
+@router.post("/prompt")
+async def save_prompt(body: TextBody, request: Request):
+    _require_session(request, min_role="admin")
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _PROMPT_FILE.write_text(body.text)
     _LOGGER.info("admin.prompt_saved", chars=len(body.text))
@@ -153,13 +323,15 @@ async def save_prompt(body: TextBody):
 
 # ── ACL ───────────────────────────────────────────────────────────────────────
 
-@router.get("/acl", dependencies=[Depends(verify_api_key)])
-async def get_acl():
+@router.get("/acl")
+async def get_acl(request: Request):
+    _require_session(request)
     return {"text": _ACL_FILE.read_text() if _ACL_FILE.exists() else ""}
 
 
-@router.post("/acl", dependencies=[Depends(verify_api_key)])
-async def save_acl(body: TextBody):
+@router.post("/acl")
+async def save_acl(body: TextBody, request: Request):
+    _require_session(request, min_role="admin")
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _ACL_FILE.write_text(body.text)
     _LOGGER.info("admin.acl_saved")
@@ -168,15 +340,14 @@ async def save_acl(body: TextBody):
 
 # ── Server controls ───────────────────────────────────────────────────────────
 
-@router.post("/restart", dependencies=[Depends(verify_api_key)])
-async def restart_server():
+@router.post("/restart")
+async def restart_server(request: Request):
+    _require_session(request, min_role="admin")
     _LOGGER.info("admin.restart_requested")
 
     async def _do_restart():
-        await asyncio.sleep(0.5)  # let the HTTP response reach the client first
-        subprocess.Popen(
-            ["/usr/bin/sudo", "/usr/bin/systemctl", "restart", "avatar-backend"],
-        )
+        await asyncio.sleep(0.5)
+        subprocess.Popen(["/usr/bin/sudo", "/usr/bin/systemctl", "restart", "avatar-backend"])
 
     asyncio.create_task(_do_restart())
     return {"restarting": True}
@@ -184,14 +355,15 @@ async def restart_server():
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
-@router.get("/sessions", dependencies=[Depends(verify_api_key)])
+@router.get("/sessions")
 async def list_sessions(request: Request):
-    sm = request.app.state.session_manager
-    return {"active_sessions": sm.active_count()}
+    _require_session(request)
+    return {"active_sessions": request.app.state.session_manager.active_count()}
 
 
-@router.delete("/sessions/{session_id}", dependencies=[Depends(verify_api_key)])
+@router.delete("/sessions/{session_id}")
 async def clear_session(session_id: str, request: Request):
+    _require_session(request, min_role="admin")
     await request.app.state.session_manager.clear(session_id)
     return {"cleared": session_id}
 
@@ -199,29 +371,30 @@ async def clear_session(session_id: str, request: Request):
 # ── Test announce ─────────────────────────────────────────────────────────────
 
 class AnnounceBody(BaseModel):
-    message: str
+    message:  str
     priority: str = "normal"
 
 
-@router.post("/announce/test", dependencies=[Depends(verify_api_key)])
+@router.post("/announce/test")
 async def test_announce(body: AnnounceBody, request: Request):
+    _require_session(request, min_role="admin")
     from avatar_backend.routers.announce import AnnounceRequest, announce_handler
-    return await announce_handler(AnnounceRequest(
-        message=body.message, priority=body.priority,  # type: ignore[arg-type]
-    ), request)
+    return await announce_handler(
+        AnnounceRequest(message=body.message, priority=body.priority),  # type: ignore[arg-type]
+        request,
+    )
 
 
 # ── Live logs (SSE) ───────────────────────────────────────────────────────────
+# EventSource cannot set custom headers, but cookies are sent automatically
+# for same-origin requests — session cookie checked directly here.
 
 @router.get("/logs")
-async def stream_logs(request: Request, api_key: str = ""):
-    from avatar_backend.config import get_settings
-    if not api_key or not secrets.compare_digest(api_key.encode(), get_settings().api_key.encode()):
-        from fastapi.responses import Response
-        return Response(status_code=401)
+async def stream_logs(request: Request):
+    if not _get_session(request):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
     async def generate():
-        # Backfill last 100 lines
         if _LOG_FILE.exists():
             for line in _LOG_FILE.read_text().splitlines()[-100:]:
                 yield f"data: {line}\n\n"
@@ -246,13 +419,14 @@ async def stream_logs(request: Request, api_key: str = ""):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-# ── Avatar settings ────────────────────────────────────────────────────────────
+# ── Avatar settings ───────────────────────────────────────────────────────────
 
 _AVATAR_SETTINGS_FILE = _CONFIG_DIR / "avatar_settings.json"
 
 
-@router.get("/avatar-settings", dependencies=[Depends(verify_api_key)])
-async def get_avatar_settings():
+@router.get("/avatar-settings")
+async def get_avatar_settings(request: Request):
+    _require_session(request)
     import json as _json
     if _AVATAR_SETTINGS_FILE.exists():
         return _json.loads(_AVATAR_SETTINGS_FILE.read_text())
@@ -264,8 +438,9 @@ class AvatarSettings(BaseModel):
     avatar_url: str = ""
 
 
-@router.post("/avatar-settings", dependencies=[Depends(verify_api_key)])
-async def save_avatar_settings(body: AvatarSettings):
+@router.post("/avatar-settings")
+async def save_avatar_settings(body: AvatarSettings, request: Request):
+    _require_session(request, min_role="admin")
     import json as _json
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _AVATAR_SETTINGS_FILE.write_text(_json.dumps(body.model_dump()))
@@ -275,40 +450,29 @@ async def save_avatar_settings(body: AvatarSettings):
 
 # ── Prompt sync ───────────────────────────────────────────────────────────────
 
-# Domains worth tracking for prompt enrichment
 _SYNC_DOMAINS = {
     "sensor", "binary_sensor", "light", "switch", "climate",
     "media_player", "lock", "cover", "input_boolean", "input_select",
     "input_number", "input_text", "person", "camera", "fan",
     "vacuum", "humidifier", "water_heater", "number",
 }
-
-# Prefixes that indicate noise/infrastructure entities to skip
 _SKIP_PREFIXES = (
     "update.", "system.", "device_tracker.unifi_", "device_tracker.unknown_",
     "sensor.sun_", "sensor.moon_",
 )
-
-# These friendly-name substrings usually indicate internal/debug entities
 _SKIP_NAME_FRAGMENTS = ("rssi", "lqi", "linkquality", "uptime", "firmware", "version", "reboot")
 
 
 def _extract_known_entity_ids(prompt_text: str) -> set[str]:
-    """Return all entity_id-like strings found anywhere in the prompt."""
     import re
     return set(re.findall(r'\b\w+\.\w[\w_]*', prompt_text))
 
 
 def _summarise_new_entities(states: list[dict], known: set[str]) -> str:
-    """
-    Filter states down to meaningful unknown entities and return a compact
-    grouped summary string to feed the LLM.
-    """
     from collections import defaultdict
     groups: dict[str, list[str]] = defaultdict(list)
-
     for s in states:
-        eid = s["entity_id"]
+        eid    = s["entity_id"]
         domain = eid.split(".")[0]
         if domain not in _SYNC_DOMAINS:
             continue
@@ -321,7 +485,7 @@ def _summarise_new_entities(states: list[dict], known: set[str]) -> str:
         name = s["attributes"].get("friendly_name", "")
         if any(frag in name.lower() for frag in _SKIP_NAME_FRAGMENTS):
             continue
-        unit = s["attributes"].get("unit_of_measurement", "")
+        unit         = s["attributes"].get("unit_of_measurement", "")
         device_class = s["attributes"].get("device_class", "")
         line = f"  {eid}"
         if name and name != eid:
@@ -332,47 +496,31 @@ def _summarise_new_entities(states: list[dict], known: set[str]) -> str:
         if device_class:
             line += f" [{device_class}]"
         groups[domain].append(line)
-
     if not groups:
         return ""
-
     parts = []
     for domain in sorted(groups):
         parts.append(f"{domain} ({len(groups[domain])}):")
-        parts.extend(groups[domain][:40])  # cap per domain to avoid token explosion
+        parts.extend(groups[domain][:40])
     return "\n".join(parts)
 
 
 class SyncPromptResponse(BaseModel):
-    status: str
+    status:             str
     new_entities_found: int
-    prompt_updated: bool
-    summary: str
+    prompt_updated:     bool
+    summary:            str
 
 
-@router.post(
-    "/sync-prompt",
-    response_model=SyncPromptResponse,
-    dependencies=[Depends(verify_api_key)],
-    summary="Discover new HA entities and integrate them into the system prompt",
-)
+@router.post("/sync-prompt", response_model=SyncPromptResponse)
 async def sync_prompt(request: Request):
-    """
-    1. Fetches all current HA entity states
-    2. Diffs against entity IDs already referenced in the system prompt
-    3. If new meaningful entities are found, calls the LLM to integrate them
-    4. Saves the updated prompt and reloads the session manager
-    """
+    _require_session(request, min_role="admin")
     import httpx as _httpx
-    import json as _json
 
-    ha = request.app.state.ha_proxy
+    ha  = request.app.state.ha_proxy
     llm = request.app.state.llm_service
-    sm = request.app.state.session_manager
 
     _LOGGER.info("sync_prompt.started")
-
-    # 1. Fetch all states from HA
     try:
         async with _httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
@@ -382,76 +530,48 @@ async def sync_prompt(request: Request):
             resp.raise_for_status()
             all_states: list[dict] = resp.json()
     except Exception as exc:
-        _LOGGER.error("sync_prompt.ha_fetch_failed", exc=str(exc))
         raise HTTPException(status_code=503, detail=f"Could not fetch HA states: {exc}")
 
-    # 2. Diff against current prompt
     current_prompt = _PROMPT_FILE.read_text() if _PROMPT_FILE.exists() else ""
-    known = _extract_known_entity_ids(current_prompt)
-    new_summary = _summarise_new_entities(all_states, known)
+    known          = _extract_known_entity_ids(current_prompt)
+    new_summary    = _summarise_new_entities(all_states, known)
 
     if not new_summary:
-        _LOGGER.info("sync_prompt.no_new_entities")
-        return SyncPromptResponse(
-            status="ok",
-            new_entities_found=0,
-            prompt_updated=False,
-            summary="No new entities found — system prompt is up to date.",
-        )
+        return SyncPromptResponse(status="ok", new_entities_found=0,
+                                  prompt_updated=False,
+                                  summary="No new entities found — system prompt is up to date.")
 
-    new_count = new_summary.count("\n  ")  # rough count of entity lines
-    _LOGGER.info("sync_prompt.new_entities_found", count=new_count)
-
-    # 3. Ask LLM to integrate new entities into the prompt
+    new_count = new_summary.count("\n  ")
     integration_request = (
         "You are updating the system prompt for Nova, an AI home automation controller.\n\n"
-        "Here is the current system prompt:\n"
-        "```\n" + current_prompt + "\n```\n\n"
-        "The following new Home Assistant entities have been discovered that are not yet "
-        "referenced in the system prompt:\n\n"
+        "Here is the current system prompt:\n```\n" + current_prompt + "\n```\n\n"
+        "The following new Home Assistant entities have been discovered:\n\n"
         + new_summary + "\n\n"
         "Instructions:\n"
-        "- Add these entities to the appropriate existing sections of the system prompt.\n"
-        "- If an entity clearly belongs in an existing section (e.g. a new sensor in the "
-        "Car section, a new climate entity in Heating), add it there.\n"
-        "- If a group of new entities represent a genuinely new capability or room, "
-        "create a minimal new section.\n"
-        "- Skip entities that are clearly noise (network infrastructure, debug sensors, "
-        "duplicate trackers, internal HA helpers with no user value).\n"
+        "- Add these entities to appropriate existing sections.\n"
+        "- Skip clear infrastructure noise.\n"
         "- Preserve the exact structure, tone, and formatting of the original prompt.\n"
-        "- Return ONLY the complete updated system prompt — no explanation, no markdown "
-        "fences, no preamble."
+        "- Return ONLY the complete updated system prompt — no explanation, no markdown fences."
     )
 
     try:
         updated_prompt = await llm.generate_text(integration_request, timeout_s=180.0)
     except Exception as exc:
-        _LOGGER.error('sync_prompt.llm_failed', exc=str(exc))
-        raise HTTPException(status_code=503, detail=f'LLM call failed: {exc}')
+        raise HTTPException(status_code=503, detail=f"LLM call failed: {exc}")
 
     if not updated_prompt or len(updated_prompt) < len(current_prompt) // 2:
-        _LOGGER.warning("sync_prompt.llm_response_too_short", chars=len(updated_prompt))
-        raise HTTPException(status_code=500, detail="LLM returned an unexpectedly short response — prompt not saved.")
+        raise HTTPException(status_code=500, detail="LLM returned an unexpectedly short response.")
 
-    # 4. Save and reload
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _PROMPT_FILE.write_text(updated_prompt)
-    _LOGGER.info("sync_prompt.saved", chars=len(updated_prompt))
 
-    # Reload session manager so new sessions pick up the updated prompt
     from avatar_backend.services.session_manager import SessionManager
     request.app.state.session_manager = SessionManager(updated_prompt)
-    _LOGGER.info("sync_prompt.session_manager_reloaded")
 
-    # Keep proactive monitor in sync with the new prompt
     proactive = getattr(request.app.state, "proactive_service", None)
     if proactive is not None:
         proactive.update_system_prompt(updated_prompt)
-        _LOGGER.info("sync_prompt.proactive_updated")
 
-    return SyncPromptResponse(
-        status="ok",
-        new_entities_found=new_count,
-        prompt_updated=True,
-        summary=f"Integrated {new_count} new entities into the system prompt.",
-    )
+    return SyncPromptResponse(status="ok", new_entities_found=new_count,
+                               prompt_updated=True,
+                               summary=f"Integrated {new_count} new entities into the system prompt.")

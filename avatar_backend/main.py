@@ -20,6 +20,7 @@ from avatar_backend.services.stt_service import STTService
 from avatar_backend.services.tts_service import create_tts_service
 from avatar_backend.services.ws_manager import ConnectionManager
 from avatar_backend.services.proactive_service import ProactiveService
+from avatar_backend.services.user_service import UserService
 from avatar_backend.routers import health, chat
 from avatar_backend.routers import voice, avatar_ws, announce
 from avatar_backend.routers import admin
@@ -96,6 +97,15 @@ async def lifespan(app: FastAPI):
 
     system_prompt = _load_system_prompt()
     logger.info("system_prompt.loaded", chars=len(system_prompt))
+
+    # ── User / session service ─────────────────────────────────────────────
+    user_service = UserService(_CONFIG_DIR / "users.json")
+    if not user_service.has_users():
+        logger.warning(
+            "avatar_backend.no_users",
+            detail="No admin users found. Visit /admin/login to create the first account.",
+        )
+    app.state.user_service = user_service
 
     acl = ACLManager.from_yaml_safe(str(_CONFIG_DIR / "acl.yaml"))
     app.state.acl_manager = acl

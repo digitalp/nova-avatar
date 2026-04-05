@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nova Admin — Login</title>
+<style>
+  :root {
+    --bg:      #0f1117;
+    --surface: #1a1d27;
+    --border:  #2a2d3a;
+    --accent:  #6366f1;
+    --accent2: #4f46e5;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
+    --green:   #10b981;
+    --red:     #ef4444;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 36px; width: 360px;
+  }
+  .logo { font-size: 22px; font-weight: 700; letter-spacing: -.3px; margin-bottom: 4px; }
+  .sub  { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  .mode-title { font-size: 15px; font-weight: 600; margin-bottom: 18px; color: var(--text); }
+  label { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 5px; }
+  input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); padding: 9px 11px;
+    font-size: 13px; outline: none; transition: border-color .15s;
+  }
+  input:focus { border-color: var(--accent); }
+  .field { margin-bottom: 14px; }
+  .btn {
+    width: 100%; padding: 10px; border-radius: 7px; border: none;
+    background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: background .15s, opacity .15s; margin-top: 6px;
+  }
+  .btn:hover { background: var(--accent2); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .error { color: var(--red); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .success { color: var(--green); font-size: 12px; margin-top: 10px; }
+  .divider { border-top: 1px solid var(--border); margin: 20px 0; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">Nova Admin</div>
+  <div class="sub">AI Server Control Panel</div>
+
+  <!-- Login form -->
+  <div id="login-form">
+    <div class="mode-title" id="form-title">Sign in</div>
+    <div class="field">
+      <label for="username">Username</label>
+      <input type="text" id="username" autocomplete="username" placeholder="Username">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" placeholder="Password">
+    </div>
+    <button class="btn" id="submit-btn" onclick="submit()">Sign in</button>
+    <div class="error" id="error-msg"></div>
+  </div>
+
+  <!-- First-run setup form (shown if no users exist) -->
+  <div id="setup-form" style="display:none">
+    <div class="mode-title">Create admin account</div>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">No accounts exist yet. Create the first admin account to get started.</p>
+    <div class="field">
+      <label for="setup-username">Username</label>
+      <input type="text" id="setup-username" autocomplete="username" placeholder="Username">
+    </div>
+    <div class="field">
+      <label for="setup-password">Password</label>
+      <input type="password" id="setup-password" autocomplete="new-password" placeholder="Min 8 characters">
+    </div>
+    <div class="field">
+      <label for="setup-confirm">Confirm Password</label>
+      <input type="password" id="setup-confirm" autocomplete="new-password" placeholder="Repeat password">
+    </div>
+    <button class="btn" id="setup-btn" onclick="setup()">Create Account</button>
+    <div class="error" id="setup-error"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+async function checkSetupRequired() {
+  try {
+    const r = await fetch('/admin/setup-required');
+    const d = await r.json();
+    if (d.required) {
+      document.getElementById('login-form').style.display = 'none';
+      document.getElementById('setup-form').style.display = 'block';
+    }
+  } catch (_) {}
+}
+
+checkSetupRequired();
+
+// Focus username on load
+window.addEventListener('load', () => {
+  const visible = document.getElementById('setup-form').style.display !== 'none'
+    ? 'setup-username' : 'username';
+  document.getElementById(visible)?.focus();
+});
+
+document.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+
+async function submit() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const errEl    = document.getElementById('error-msg');
+  const btn      = document.getElementById('submit-btn');
+
+  errEl.textContent = '';
+  if (!username || !password) { errEl.textContent = 'Please enter username and password.'; return; }
+
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const r = await fetch('/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (r.ok) {
+      window.location.href = '/admin';
+    } else {
+      const d = await r.json().catch(() => ({}));
+      errEl.textContent = d.detail || 'Invalid credentials.';
+    }
+  } catch (_) {
+    errEl.textContent = 'Cannot reach server.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sign in';
+  }
+}
+
+async function setup() {
+  const username = document.getElementById('setup-username').value.trim();
+  const password = document.getElementById('setup-password').value;
+  const confirm  = document.getElementById('setup-confirm').value;
+  const errEl    = document.getElementById('setup-error');
+  const btn      = document.getElementById('setup-btn');
+
+  errEl.textContent = '';
+  if (!username)               { errEl.textContent = 'Username is required.'; return; }
+  if (password.length < 8)     { errEl.textContent = 'Password must be at least 8 characters.'; return; }
+  if (password !== confirm)    { errEl.textContent = 'Passwords do not match.'; return; }
+
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const r = await fetch('/admin/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (r.ok) {
+      window.location.href = '/admin/login';
+    } else {
+      const d = await r.json().catch(() => ({}));
+      errEl.textContent = d.detail || 'Setup failed.';
+    }
+  } catch (_) {
+    errEl.textContent = 'Cannot reach server.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Create Account';
+  }
+}
+</script>
+</body>
+</html>
