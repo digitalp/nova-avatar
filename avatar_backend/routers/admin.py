@@ -582,6 +582,11 @@ async def sync_prompt(request: Request):
 
     if not updated_prompt or len(updated_prompt) < len(current_prompt) // 2:
         raise HTTPException(status_code=500, detail="LLM returned an unexpectedly short response.")
+    if len(updated_prompt) > len(current_prompt) * 3:
+        raise HTTPException(status_code=500, detail="LLM returned an unexpectedly long response — possible prompt injection. Prompt not saved.")
+
+    # Strip NUL bytes and non-printable control characters before persisting
+    updated_prompt = "".join(c for c in updated_prompt if c >= " " or c in "\n\r\t")
 
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _PROMPT_FILE.write_text(updated_prompt)
