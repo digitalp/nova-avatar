@@ -34,6 +34,13 @@ _LOGGER = structlog.get_logger()
 # Duplicate sensors for the same camera share the same camera cooldown.
 _MOTION_CAMERA_MAP: dict[str, str] = {}  # disabled — entries removed
 
+# binary_sensor device_classes that represent motion/presence.
+# These are excluded from batch triage — they're either handled by the camera
+# vision path (_MOTION_CAMERA_MAP) or by dedicated HA automations.
+# Letting them reach the batch LLM produces unreliable "motion detected" blurts
+# that contain no camera description.
+_MOTION_DEVICE_CLASSES = {"motion", "occupancy", "presence", "moving"}
+
 # Domains monitored for batch triage announcements.
 # 'sensor' excluded — numeric sensors emit constant updates and threshold alerts
 # are already handled by dedicated HA automations.
@@ -212,21 +219,26 @@ class ProactiveService:
         if new_val in _NOISE_STATES or old_val in _NOISE_STATES:
             return
 
-        # Motion sensors with a known camera — handle immediately with vision
-        if entity_id in _MOTION_CAMERA_MAP and new_val == "on":
-            camera_id = _MOTION_CAMERA_MAP[entity_id]
-            if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) >= _CAMERA_COOLDOWN_S:
-                # Set cooldown immediately so duplicate sensors for the same camera
-                # that fire within milliseconds are blocked before the task runs
-                self._camera_cooldowns[camera_id] = time.monotonic()
-                friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
-                asyncio.create_task(
-                    self._handle_motion_event(entity_id, friendly, camera_id),
-                    name=f"motion_{entity_id}",
-                )
-            else:
-                _LOGGER.debug("proactive.motion_camera_cooldown", entity_id=entity_id, camera=camera_id)
-            return
+        # Motion/occupancy/presence binary_sensors — handle via camera vision path
+        # or drop entirely.  Never let them reach the batch LLM triage.
+        if domain == "binary_sensor":
+            device_class = new_state.get("attributes", {}).get("device_class", "")
+            if device_class in _MOTION_DEVICE_CLASSES:
+                if entity_id in _MOTION_CAMERA_MAP and new_val == "on":
+                    camera_id = _MOTION_CAMERA_MAP[entity_id]
+                    if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) >= _CAMERA_COOLDOWN_S:
+                        self._camera_cooldowns[camera_id] = time.monotonic()
+                        friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
+                        asyncio.create_task(
+                            self._handle_motion_event(entity_id, friendly, camera_id),
+                            name=f"motion_{entity_id}",
+                        )
+                    else:
+                        _LOGGER.debug("proactive.motion_camera_cooldown", entity_id=entity_id, camera=camera_id)
+                else:
+                    _LOGGER.debug("proactive.motion_no_camera", entity_id=entity_id,
+                                  hint="add to _MOTION_CAMERA_MAP to enable vision description")
+                return  # always return — never queue motion sensors for batch triage
 
         if domain not in _WATCH_DOMAINS:
             return

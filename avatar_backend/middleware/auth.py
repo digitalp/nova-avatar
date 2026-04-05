@@ -39,8 +39,17 @@ async def verify_api_key(request: Request) -> None:
     Uses secrets.compare_digest to prevent timing attacks.
     Also accepts ?api_key= query param for HA rest_command automations
     that cannot set custom headers.
+    Rate-limits failed attempts per IP (shared bucket with login endpoints).
     """
     from avatar_backend.config import get_settings
+    from avatar_backend.middleware.ratelimit import is_rate_limited, record_failure
+
+    client_ip = request.client.host if request.client else "unknown"
+    if is_rate_limited(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later.",
+        )
 
     settings = get_settings()
 
@@ -52,10 +61,11 @@ async def verify_api_key(request: Request) -> None:
     if not incoming or not secrets.compare_digest(
         incoming.encode(), settings.api_key.encode()
     ):
+        record_failure(client_ip)
         logger.warning(
             "auth.rejected",
             path=str(request.url.path),
-            client=request.client.host if request.client else "unknown",
+            client=client_ip,
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
