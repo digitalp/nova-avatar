@@ -4,241 +4,681 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nova Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg:      #0f1117;
-    --surface: #1a1d27;
-    --border:  #2a2d3a;
-    --accent:  #6366f1;
-    --accent2: #4f46e5;
-    --text:    #e2e8f0;
-    --muted:   #64748b;
-    --green:   #10b981;
-    --red:     #ef4444;
-    --yellow:  #f59e0b;
-    --nav-w:   220px;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; display: flex; height: 100vh; overflow: hidden; }
+/* ── Design tokens ──────────────────────────────────────────────────────────── */
+:root {
+  --bg:          #080c16;
+  --bg2:         #0d1120;
+  --surface:     #111827;
+  --surface2:    #1a2035;
+  --border:      rgba(255,255,255,.07);
+  --border2:     rgba(255,255,255,.12);
+  --accent:      #818cf8;
+  --accent-dim:  rgba(129,140,248,.12);
+  --accent-glow: rgba(129,140,248,.25);
+  --cyan:        #22d3ee;
+  --cyan-dim:    rgba(34,211,238,.12);
+  --green:       #10b981;
+  --green-dim:   rgba(16,185,129,.15);
+  --red:         #f43f5e;
+  --red-dim:     rgba(244,63,94,.15);
+  --yellow:      #f59e0b;
+  --yellow-dim:  rgba(245,158,11,.15);
+  --purple:      #a78bfa;
+  --text:        #e2e8f0;
+  --text2:       #94a3b8;
+  --text3:       #4b5563;
+  --nav-w:       260px;
+  --radius:      12px;
+  --radius-sm:   8px;
+  --shadow:      0 4px 24px rgba(0,0,0,.4);
+  --shadow-lg:   0 8px 40px rgba(0,0,0,.6);
+}
 
-  /* Sidebar */
+/* ── Reset ──────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────────── */
+#sidebar {
+  width: var(--nav-w);
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  z-index: 10;
+}
+
+/* subtle top glow */
+#sidebar::before {
+  content: '';
+  position: absolute;
+  top: -60px; left: 50%;
+  transform: translateX(-50%);
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, rgba(129,140,248,.18) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+#sidebar-header {
+  padding: 22px 20px 18px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.nova-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.nova-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #22d3ee 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700; color: #fff;
+  box-shadow: 0 0 16px rgba(129,140,248,.4);
+  flex-shrink: 0;
+}
+.nova-title { font-size: 16px; font-weight: 700; letter-spacing: -.3px; color: var(--text); }
+.nova-sub   { font-size: 11px; color: var(--text3); margin-top: 1px; }
+
+#sidebar nav {
+  flex: 1;
+  padding: 10px 10px 0;
+  overflow-y: auto;
+}
+
+.nav-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  color: var(--text3);
+  padding: 12px 10px 6px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  transition: background .15s, color .15s;
+  user-select: none;
+  position: relative;
+  margin-bottom: 1px;
+}
+.nav-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+.nav-item.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 20%; bottom: 20%;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: .8; }
+.nav-item.active svg { opacity: 1; }
+
+#sidebar-footer {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+.footer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,.03);
+  margin-bottom: 10px;
+}
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text3);
+  flex-shrink: 0;
+  transition: background .3s;
+}
+.status-dot.ok   { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse-green 2s infinite; }
+.status-dot.err  { background: var(--red); }
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 4px var(--green); }
+  50%       { box-shadow: 0 0 12px var(--green); }
+}
+.footer-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.user-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #fff;
+  flex-shrink: 0;
+}
+.user-meta { flex: 1; min-width: 0; }
+.user-name-display { font-size: 12px; font-weight: 600; color: var(--text); truncate; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-role-display { font-size: 10px; color: var(--text3); text-transform: capitalize; }
+
+/* ── Main ────────────────────────────────────────────────────────────────────── */
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+/* ── Topbar ──────────────────────────────────────────────────────────────────── */
+#topbar {
+  height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  background: rgba(8,12,22,.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  position: relative;
+  z-index: 5;
+}
+#section-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text2);
+}
+#section-breadcrumb span { color: var(--text3); }
+#section-breadcrumb strong { color: var(--text); font-weight: 600; }
+#topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ── Content ─────────────────────────────────────────────────────────────────── */
+#content { flex: 1; overflow-y: auto; padding: 24px; }
+
+/* ── Sections ────────────────────────────────────────────────────────────────── */
+.section { display: none; animation: fadeIn .18s ease; }
+.section.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ── Cards ───────────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+  transition: border-color .2s;
+}
+.card:hover { border-color: var(--border2); }
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+}
+.card-title-lg {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -.2px;
+}
+.card-sub {
+  font-size: 12px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.card-flush { padding: 0; }
+
+/* ── Stat cards ──────────────────────────────────────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 16px; }
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: border-color .2s, transform .15s;
+}
+.stat-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+.stat-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.stat-icon svg { width: 20px; height: 20px; }
+.stat-icon.green  { background: var(--green-dim);  color: var(--green); }
+.stat-icon.red    { background: var(--red-dim);    color: var(--red); }
+.stat-icon.yellow { background: var(--yellow-dim); color: var(--yellow); }
+.stat-icon.accent { background: var(--accent-dim); color: var(--accent); }
+.stat-icon.cyan   { background: var(--cyan-dim);   color: var(--cyan); }
+.stat-body {}
+.stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; font-weight: 500; }
+.stat-value { font-size: 22px; font-weight: 700; margin-top: 2px; color: var(--text); }
+.stat-value.ok   { color: var(--green); }
+.stat-value.warn { color: var(--yellow); }
+.stat-value.err  { color: var(--red); }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: all .15s;
+  user-select: none;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn svg { width: 14px; height: 14px; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(129,140,248,.3);
+}
+.btn-primary:hover:not(:disabled) {
+  background: #6d77f0;
+  box-shadow: 0 4px 16px rgba(129,140,248,.4);
+}
+.btn-danger  { background: var(--red); color: #fff; box-shadow: 0 2px 12px rgba(244,63,94,.3); }
+.btn-danger:hover:not(:disabled) { background: #e11d48; }
+.btn-outline {
+  background: transparent;
+  color: var(--text2);
+  border: 1px solid var(--border2);
+}
+.btn-outline:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.btn-ghost {
+  background: transparent;
+  color: var(--text2);
+}
+.btn-ghost:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,.06); }
+.btn-sm { padding: 5px 11px; font-size: 12px; }
+.btn-xs { padding: 3px 8px; font-size: 11px; border-radius: 6px; }
+
+/* ── Forms ───────────────────────────────────────────────────────────────────── */
+.field { margin-bottom: 16px; }
+.field:last-child { margin-bottom: 0; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
+input[type=text], input[type=password], input[type=url], select {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 9px 12px;
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color .15s, box-shadow .15s;
+  appearance: none;
+}
+input[type=text]:focus, input[type=password]:focus, input[type=url]:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+textarea {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  outline: none;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  resize: vertical;
+  min-height: 120px;
+  transition: border-color .15s, box-shadow .15s;
+  line-height: 1.7;
+}
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+.input-reveal { position: relative; }
+.input-reveal input { padding-right: 38px; }
+.input-reveal button {
+  position: absolute;
+  right: 10px; top: 50%;
+  transform: translateY(-50%);
+  background: none; border: none;
+  color: var(--text3); cursor: pointer; padding: 2px;
+  transition: color .15s;
+}
+.input-reveal button:hover { color: var(--text); }
+.config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+/* ── Badges / Chips ──────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .3px;
+}
+.badge-accent  { background: var(--accent-dim); color: var(--accent); }
+.badge-green   { background: var(--green-dim);  color: var(--green); }
+.badge-red     { background: var(--red-dim);    color: var(--red); }
+.badge-muted   { background: rgba(255,255,255,.06); color: var(--text3); }
+
+.role-badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.role-badge.admin  { background: var(--accent-dim); color: var(--accent); }
+.role-badge.viewer { background: rgba(255,255,255,.06); color: var(--text3); }
+
+/* ── Table ───────────────────────────────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; }
+thead tr { border-bottom: 1px solid var(--border); }
+th { text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
+td { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text2); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
+
+/* ── User rows ───────────────────────────────────────────────────────────────── */
+.user-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.user-row:last-child { border-bottom: none; }
+.user-row-icon {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.user-name { flex: 1; font-weight: 500; color: var(--text); }
+.user-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ── Skin swatches ───────────────────────────────────────────────────────────── */
+.skin-swatch {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 3px solid transparent;
+  transition: border-color .15s, transform .12s, box-shadow .15s;
+}
+.skin-swatch:hover { transform: scale(1.12); }
+.skin-swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+
+/* ── Log output ──────────────────────────────────────────────────────────────── */
+#log-output {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  height: 480px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-line { display: block; }
+.log-line.lvl-info    { color: #94a3b8; }
+.log-line.lvl-warning { color: var(--yellow); }
+.log-line.lvl-error   { color: var(--red); }
+.log-line.lvl-debug   { color: #374151; }
+.log-line.lvl-critical{ color: #f97316; }
+
+/* ── Stream log panels ───────────────────────────────────────────────────────── */
+.stream-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.stream-title { font-weight: 600; font-size: 14px; color: var(--text); flex: 1; min-width: 0; }
+.stream-sub   { font-size: 12px; color: var(--text3); }
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--green);
+  background: var(--green-dim);
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+.live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse-green 1.5s infinite;
+}
+
+/* ── Filter chips ────────────────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  background: transparent;
+  font-family: inherit;
+  transition: all .15s;
+}
+.filter-chip:hover { border-color: var(--accent); color: var(--accent); }
+.filter-chip.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+/* ── Toast ───────────────────────────────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  font-size: 13px;
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  transition: opacity .25s, transform .25s;
+  opacity: 0;
+  transform: translateY(10px) scale(.97);
+  pointer-events: none;
+  z-index: 500;
+  max-width: 340px;
+  font-weight: 500;
+}
+#toast.show { opacity: 1; transform: translateY(0) scale(1); }
+#toast.ok   { border-left: 3px solid var(--green); }
+#toast.err  { border-left: 3px solid var(--red); }
+#toast.warn { border-left: 3px solid var(--yellow); }
+
+/* ── Section page headers ────────────────────────────────────────────────────── */
+.page-header { margin-bottom: 20px; }
+.page-title  { font-size: 18px; font-weight: 700; color: var(--text); letter-spacing: -.3px; }
+.page-sub    { font-size: 13px; color: var(--text3); margin-top: 4px; }
+
+/* ── Divider ─────────────────────────────────────────────────────────────────── */
+.divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+/* ── Metric summary row ──────────────────────────────────────────────────────── */
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.metric-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  text-align: center;
+  transition: border-color .2s;
+}
+.metric-card:hover { border-color: var(--border2); }
+.metric-label { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .7px; }
+.metric-value { font-size: 26px; font-weight: 700; color: var(--text); margin-top: 4px; }
+.metric-value.green { color: var(--green); }
+
+/* ── Responsive ──────────────────────────────────────────────────────────────── */
+#menu-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all .15s;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+#menu-toggle:hover { border-color: var(--accent); color: var(--accent); }
+#sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  background: rgba(0,0,0,.65);
+  backdrop-filter: blur(2px);
+}
+#sidebar-overlay.show { display: block; }
+
+@media (max-width: 900px) {
   #sidebar {
-    width: var(--nav-w); background: var(--surface); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+    position: fixed;
+    top: 0; bottom: 0;
+    left: calc(-1 * var(--nav-w) - 2px);
+    z-index: 100;
+    transition: left .25s cubic-bezier(.4,0,.2,1);
+    box-shadow: none;
   }
-  #sidebar-header { padding: 20px 16px 16px; border-bottom: 1px solid var(--border); }
-  #sidebar-header h1 { font-size: 18px; font-weight: 700; color: var(--text); letter-spacing: -.3px; }
-  #sidebar-header p  { font-size: 11px; color: var(--muted); margin-top: 2px; }
-  #sidebar nav { flex: 1; padding: 8px 0; overflow-y: auto; }
-  .nav-item {
-    display: flex; align-items: center; gap: 10px; padding: 9px 16px; cursor: pointer;
-    color: var(--muted); font-size: 13px; font-weight: 500; border-radius: 0;
-    transition: background .12s, color .12s; user-select: none;
-  }
-  .nav-item:hover  { background: rgba(99,102,241,.1); color: var(--text); }
-  .nav-item.active { background: rgba(99,102,241,.18); color: var(--accent); border-right: 2px solid var(--accent); }
-  .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
-  #sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
-  #status-dot {
-    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted);
-  }
-  #status-dot .dot {
-    width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0;
-  }
-  #status-dot.ok  .dot { background: var(--green); }
-  #status-dot.err .dot { background: var(--red); }
+  #sidebar.open { left: 0; box-shadow: var(--shadow-lg); }
+  #menu-toggle { display: flex; }
+  #topbar { padding: 0 16px; }
+  #content { padding: 16px; }
+}
+@media (max-width: 720px) {
+  .stat-grid   { grid-template-columns: 1fr 1fr; }
+  .config-grid { grid-template-columns: 1fr; }
+  .metric-row  { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .field-row { grid-template-columns: 1fr; }
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .user-actions { flex-wrap: wrap; }
+  #log-output { height: min(400px, 45vh); }
+  .metric-row { grid-template-columns: 1fr 1fr; }
+}
 
-  /* Main content */
-  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  #topbar {
-    height: 52px; padding: 0 24px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
-    background: var(--surface);
-  }
-  #topbar h2 { font-size: 15px; font-weight: 600; }
-  #topbar-actions { display: flex; gap: 8px; align-items: center; }
-  #content { flex: 1; overflow-y: auto; padding: 24px; }
+/* ── Spinner ─────────────────────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { display: inline-block; animation: spin .7s linear infinite; }
 
-  /* Cards */
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: 20px; margin-bottom: 16px;
-  }
-  .card-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px; }
-
-  /* Forms */
-  label { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 5px; }
-  input[type=text], input[type=password], input[type=url], textarea, select {
-    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text); padding: 8px 10px; font-size: 13px; outline: none; font-family: inherit;
-    transition: border-color .15s;
-  }
-  input[type=text]:focus, input[type=password]:focus, input[type=url]:focus,
-  textarea:focus, select:focus { border-color: var(--accent); }
-  textarea { resize: vertical; min-height: 120px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; }
-  .field { margin-bottom: 14px; }
-  .field:last-child { margin-bottom: 0; }
-  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-
-  /* Buttons */
-  .btn {
-    display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
-    border-radius: 6px; font-size: 13px; font-weight: 500; border: none; cursor: pointer;
-    transition: opacity .15s, transform .08s; user-select: none;
-  }
-  .btn:active { transform: scale(.97); }
-  .btn:disabled { opacity: .45; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover:not(:disabled) { background: var(--accent2); }
-  .btn-danger  { background: var(--red); color: #fff; }
-  .btn-danger:hover:not(:disabled)  { background: #dc2626; }
-  .btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
-  .btn-outline:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-  .btn-sm { padding: 4px 10px; font-size: 12px; }
-  .skin-swatch {
-    width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
-    border: 3px solid transparent; transition: border-color .15s, transform .1s;
-  }
-  .skin-swatch:hover { transform: scale(1.1); }
-  .skin-swatch.selected { border-color: var(--accent); }
-  .btn svg { width: 14px; height: 14px; }
-
-  /* User badges */
-  .role-badge {
-    display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
-  }
-  .role-badge.admin  { background: rgba(99,102,241,.2); color: var(--accent); }
-  .role-badge.viewer { background: rgba(100,116,139,.15); color: var(--muted); }
-  .user-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-  .user-row:last-child { border-bottom: none; }
-  .user-row .user-name { flex: 1; font-weight: 500; }
-  .user-actions { display: flex; gap: 6px; }
-
-  /* Toast */
-  #toast {
-    position: fixed; bottom: 20px; right: 20px; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px;
-    font-size: 13px; color: var(--text); box-shadow: 0 4px 20px rgba(0,0,0,.4);
-    transition: opacity .3s, transform .3s; opacity: 0; transform: translateY(8px);
-    pointer-events: none; z-index: 200; max-width: 320px;
-  }
-  #toast.show { opacity: 1; transform: translateY(0); }
-  #toast.ok  { border-left: 3px solid var(--green); }
-  #toast.err { border-left: 3px solid var(--red); }
-  #toast.warn{ border-left: 3px solid var(--yellow); }
-
-  /* Dashboard stats */
-  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-  .stat-value { font-size: 24px; font-weight: 700; margin-top: 4px; }
-  .stat-value.ok   { color: var(--green); }
-  .stat-value.warn { color: var(--yellow); }
-  .stat-value.err  { color: var(--red); }
-
-  /* Live logs */
-  #log-output {
-    background: #0a0c10; border: 1px solid var(--border); border-radius: 8px;
-    padding: 12px; height: 440px; overflow-y: auto; font-family: 'JetBrains Mono', monospace;
-    font-size: 11.5px; line-height: 1.7; white-space: pre-wrap; word-break: break-all;
-  }
-  .log-line { display: block; }
-  .log-line.lvl-info    { color: #94a3b8; }
-  .log-line.lvl-warning { color: var(--yellow); }
-  .log-line.lvl-error   { color: var(--red); }
-  .log-line.lvl-debug   { color: #475569; }
-  .log-line.lvl-critical{ color: #f97316; }
-
-  /* Sessions table */
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; padding: 8px 12px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border); }
-  td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
-  tr:last-child td { border-bottom: none; }
-
-  /* Sections */
-  .section { display: none; }
-  .section.active { display: block; }
-
-  /* Announce */
-  .priority-row { display: flex; gap: 8px; align-items: center; }
-  .priority-row select { flex: 1; }
-
-  /* Key input with reveal */
-  .input-reveal { position: relative; }
-  .input-reveal input { padding-right: 36px; }
-  .input-reveal button {
-    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-    background: none; border: none; color: var(--muted); cursor: pointer; padding: 2px;
-  }
-  .input-reveal button:hover { color: var(--text); }
-
-  /* Config grid */
-  .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-
-  /* ── Responsive ─────────────────────────────────────────────────────────── */
-  #menu-toggle {
-    display: none; align-items: center; justify-content: center;
-    background: none; border: 1px solid var(--border); border-radius: 6px;
-    padding: 6px 8px; color: var(--text); cursor: pointer; flex-shrink: 0;
-    margin-right: 8px;
-  }
-  #menu-toggle:hover { border-color: var(--accent); color: var(--accent); }
-  #sidebar-overlay {
-    display: none; position: fixed; inset: 0; z-index: 99;
-    background: rgba(0,0,0,0.55);
-  }
-  #sidebar-overlay.show { display: block; }
-
-  @media (max-width: 768px) {
-    #sidebar {
-      position: fixed; top: 0; bottom: 0;
-      left: calc(-1 * var(--nav-w) - 2px); z-index: 100;
-      transition: left .25s ease;
-    }
-    #sidebar.open { left: 0; box-shadow: 4px 0 32px rgba(0,0,0,.6); }
-    #menu-toggle { display: flex; }
-    #topbar { padding: 0 12px; }
-    #content { padding: 16px; }
-  }
-
-  @media (max-width: 800px) {
-    .config-grid { grid-template-columns: 1fr; }
-    .stat-grid   { grid-template-columns: 1fr 1fr; }
-  }
-
-  @media (max-width: 540px) {
-    .field-row   { grid-template-columns: 1fr; }
-    .user-actions { flex-wrap: wrap; }
-    #log-output  { height: min(440px, 45vh); }
-    #topbar h2   { font-size: 14px; }
-  }
-
-  /* Spinner */
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .spin { display: inline-block; animation: spin .7s linear infinite; }
-
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+/* ── Announce section ────────────────────────────────────────────────────────── */
+.announce-preview {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text3);
+}
 </style>
 </head>
 <body>
 
-<!-- Sidebar -->
+<!-- Sidebar overlay (mobile) -->
+<div id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────────── -->
 <div id="sidebar">
   <div id="sidebar-header">
-    <h1>Nova Admin</h1>
-    <p>AI Server Control Panel</p>
+    <div class="nova-logo">
+      <div class="nova-icon">N</div>
+      <div>
+        <div class="nova-title">Nova Admin</div>
+        <div class="nova-sub">AI Server Control Panel</div>
+      </div>
+    </div>
   </div>
+
   <nav id="nav">
+    <div class="nav-group-label">Overview</div>
     <div class="nav-item active" data-section="dashboard" onclick="navigate(this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       Dashboard
     </div>
+
+    <div class="nav-group-label" style="margin-top:4px;">Configure</div>
     <div class="nav-item" data-section="config" onclick="navigate(this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
       Configuration
     </div>
     <div class="nav-item" data-section="prompt" onclick="navigate(this)">
@@ -249,25 +689,29 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       ACL Rules
     </div>
+    <div class="nav-item" data-section="avatar" onclick="navigate(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      Avatar
+    </div>
+
+    <div class="nav-group-label" style="margin-top:4px;">Monitor</div>
     <div class="nav-item" data-section="logs" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
       Live Logs
     </div>
-    <div class="nav-item" data-section="costs" onclick="navigate(this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/><path d="M9 2h6"/></svg>
-      LLM Cost
-    </div>
     <div class="nav-item" data-section="decisions" onclick="navigate(this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/><path d="M9.5 3.5L12 2l2.5 1.5"/><path d="M3.5 9.5L2 12l1.5 2.5"/><path d="M20.5 9.5L22 12l-1.5 2.5"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
       AI Decisions
     </div>
+    <div class="nav-item" data-section="costs" onclick="navigate(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      LLM Cost
+    </div>
+
+    <div class="nav-group-label" style="margin-top:4px;">Manage</div>
     <div class="nav-item" data-section="sessions" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Sessions
-    </div>
-    <div class="nav-item" data-section="avatar" onclick="navigate(this)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-      Avatar
     </div>
     <div class="nav-item" data-section="tools" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
@@ -278,25 +722,39 @@
       Users
     </div>
   </nav>
+
   <div id="sidebar-footer">
-    <div id="status-dot" style="margin-bottom:8px;">
-      <div class="dot"></div>
-      <span id="status-text">Checking...</span>
+    <div class="footer-user">
+      <div class="user-avatar" id="user-avatar-initials">?</div>
+      <div class="user-meta">
+        <div class="user-name-display" id="user-info">—</div>
+        <div class="user-role-display" id="user-role-display">—</div>
+      </div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:6px;" id="user-info"></div>
-    <button class="btn btn-outline btn-sm" style="width:100%" onclick="logout()">Sign out</button>
+    <div class="footer-status">
+      <div class="status-dot" id="status-dot-inner"></div>
+      <span id="status-text" style="font-size:12px;color:var(--text2);flex:1;">Checking…</span>
+    </div>
+    <button class="btn btn-outline btn-sm" style="width:100%;justify-content:center;" onclick="logout()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Sign out
+    </button>
   </div>
 </div>
 
-<!-- Main -->
+<!-- ── Main ──────────────────────────────────────────────────────────────────── -->
 <div id="main">
   <div id="topbar">
     <button id="menu-toggle" onclick="toggleSidebar()" aria-label="Menu">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <h2 id="section-title" style="flex:1">Dashboard</h2>
+    <div id="section-breadcrumb">
+      <span>Nova</span>
+      <span style="color:var(--text3);">/</span>
+      <strong id="section-title">Dashboard</strong>
+    </div>
     <div id="topbar-actions">
-      <button class="btn btn-outline btn-sm" onclick="refreshSection()">
+      <button class="btn btn-ghost btn-sm" onclick="refreshSection()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.72"/></svg>
         Refresh
       </button>
@@ -306,244 +764,296 @@
       </button>
     </div>
   </div>
+
   <div id="content">
 
-    <!-- DASHBOARD -->
+    <!-- ══════════════ DASHBOARD ══════════════ -->
     <div id="section-dashboard" class="section active">
+      <div class="page-header">
+        <div class="page-title">Dashboard</div>
+        <div class="page-sub">System health and real-time status</div>
+      </div>
       <div class="stat-grid" id="health-stats">
-        <div class="stat"><div class="stat-label">Ollama</div><div class="stat-value" id="h-ollama">—</div></div>
-        <div class="stat"><div class="stat-label">Whisper</div><div class="stat-value" id="h-whisper">—</div></div>
-        <div class="stat"><div class="stat-label">Piper</div><div class="stat-value" id="h-piper">—</div></div>
-        <div class="stat"><div class="stat-label">Home Assistant</div><div class="stat-value" id="h-ha">—</div></div>
+        <div class="stat-card">
+          <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></div>
+          <div class="stat-body"><div class="stat-label">Ollama</div><div class="stat-value" id="h-ollama">—</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon cyan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></div>
+          <div class="stat-body"><div class="stat-label">Whisper STT</div><div class="stat-value" id="h-whisper">—</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></div>
+          <div class="stat-body"><div class="stat-label">Piper TTS</div><div class="stat-value" id="h-piper">—</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
+          <div class="stat-body"><div class="stat-label">Home Assistant</div><div class="stat-value" id="h-ha">—</div></div>
+        </div>
       </div>
-      <div class="card">
-        <div class="card-title">Active Sessions</div>
-        <div id="dash-sessions" style="font-size:32px;font-weight:700;color:var(--accent)">—</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Server Version</div>
-        <div id="dash-version" style="font-size:20px;font-weight:600;color:var(--muted)">—</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="card" style="margin-bottom:0;">
+          <div class="card-title">Active Sessions</div>
+          <div id="dash-sessions" style="font-size:36px;font-weight:700;color:var(--accent);margin-top:6px;">—</div>
+        </div>
+        <div class="card" style="margin-bottom:0;">
+          <div class="card-title">Server Version</div>
+          <div id="dash-version" style="font-size:24px;font-weight:600;color:var(--text);margin-top:6px;">—</div>
+        </div>
       </div>
     </div>
 
-    <!-- CONFIG -->
+    <!-- ══════════════ CONFIG ══════════════ -->
     <div id="section-config" class="section">
+      <div class="page-header">
+        <div class="page-title">Configuration</div>
+        <div class="page-sub">Environment settings — changes take effect after server restart</div>
+      </div>
       <div class="card">
-        <div class="card-title">Environment Settings</div>
         <div class="config-grid" id="config-fields"></div>
-        <div style="margin-top:18px;display:flex;gap:8px;">
+        <hr class="divider">
+        <div style="display:flex;gap:8px;">
           <button class="btn btn-primary" onclick="saveConfig()">Save Changes</button>
           <button class="btn btn-outline" onclick="loadConfig()">Discard</button>
         </div>
       </div>
     </div>
 
-    <!-- SYSTEM PROMPT -->
+    <!-- ══════════════ SYSTEM PROMPT ══════════════ -->
     <div id="section-prompt" class="section">
+      <div class="page-header">
+        <div class="page-title">System Prompt</div>
+        <div class="page-sub">Nova's core personality and capabilities definition</div>
+      </div>
       <div class="card">
-        <div class="card-title">System Prompt</div>
         <div class="field">
-          <textarea id="prompt-text" rows="20" placeholder="Enter system prompt..."></textarea>
+          <textarea id="prompt-text" rows="24" placeholder="Loading…"></textarea>
         </div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;margin-top:4px;">
           <button class="btn btn-primary" onclick="savePrompt()">Save Prompt</button>
           <button class="btn btn-outline" onclick="loadPrompt()">Discard</button>
         </div>
       </div>
     </div>
 
-    <!-- ACL -->
+    <!-- ══════════════ ACL ══════════════ -->
     <div id="section-acl" class="section">
+      <div class="page-header">
+        <div class="page-title">ACL Rules</div>
+        <div class="page-sub">YAML access control rules for Nova's tool usage</div>
+      </div>
       <div class="card">
-        <div class="card-title">ACL Rules (YAML)</div>
         <div class="field">
-          <textarea id="acl-text" rows="20" placeholder="# YAML ACL rules..."></textarea>
+          <textarea id="acl-text" rows="24" placeholder="# YAML ACL rules…"></textarea>
         </div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;margin-top:4px;">
           <button class="btn btn-primary" onclick="saveAcl()">Save ACL</button>
           <button class="btn btn-outline" onclick="loadAcl()">Discard</button>
         </div>
       </div>
     </div>
 
-    <!-- LOGS -->
-    <div id="section-logs" class="section">
-      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
-        <button class="btn btn-outline btn-sm" id="log-toggle-btn" onclick="toggleLogs()">
-          <svg id="log-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Start
-        </button>
-        <button class="btn btn-outline btn-sm" onclick="clearLogs()">Clear</button>
-        <label style="margin:0;display:flex;align-items:center;gap:6px;cursor:pointer;">
-          <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
-        </label>
-        <span id="log-status" style="color:var(--muted);font-size:12px;margin-left:auto;"></span>
-      </div>
-      <div id="log-output"></div>
-    </div>
-
-    <!-- SESSIONS -->
-    <div id="section-sessions" class="section">
-      <div class="card">
-        <div class="card-title">Active Sessions</div>
-        <table>
-          <thead><tr><th>Session ID</th><th>Action</th></tr></thead>
-          <tbody id="sessions-tbody"><tr><td colspan="2" style="color:var(--muted)">Loading...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- AVATAR -->
+    <!-- ══════════════ AVATAR ══════════════ -->
     <div id="section-avatar" class="section">
+      <div class="page-header">
+        <div class="page-title">Avatar</div>
+        <div class="page-sub">Customize Nova's visual appearance</div>
+      </div>
       <div class="card">
         <div class="card-title">Skin Tone</div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Select a preset or enter a custom avatar GLB URL. Changes apply when the avatar page is next loaded.</p>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;" id="skin-swatches">
+        <p style="font-size:12px;color:var(--text3);margin-bottom:16px;">Select a preset tone. Changes apply when the avatar page reloads.</p>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;" id="skin-swatches">
           <div class="skin-swatch" data-index="0" title="Porcelain" style="background:#fde8d2;" onclick="selectSkin(0)"></div>
           <div class="skin-swatch" data-index="1" title="Light"     style="background:#f1c49a;" onclick="selectSkin(1)"></div>
           <div class="skin-swatch" data-index="2" title="Medium"    style="background:#c68642;" onclick="selectSkin(2)"></div>
           <div class="skin-swatch" data-index="3" title="Dark"      style="background:#8d5524;" onclick="selectSkin(3)"></div>
           <div class="skin-swatch" data-index="4" title="Deep"      style="background:#4a2c0a;" onclick="selectSkin(4)"></div>
         </div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">Selected: <span id="skin-label">—</span></div>
+        <div style="font-size:12px;color:var(--text3);">Selected: <strong id="skin-label" style="color:var(--text);">—</strong></div>
       </div>
-      <div class="card" style="margin-top:12px;">
+      <div class="card">
         <div class="card-title">Custom Avatar URL</div>
         <div class="field">
-          <label for="avatar-url">GLB URL (leave blank to use default)</label>
+          <label for="avatar-url">GLB URL <span style="color:var(--text3);font-weight:400;">(leave blank for default)</span></label>
           <input type="text" id="avatar-url" placeholder="https://…/avatar.glb">
         </div>
-        <div style="display:flex;gap:8px;margin-top:4px;">
+        <div style="display:flex;gap:8px;margin-top:8px;">
           <button class="btn btn-primary" onclick="saveAvatarSettings()">Save</button>
           <button class="btn btn-outline" onclick="loadAvatarSettings()">Discard</button>
-          <button class="btn btn-outline" onclick="resetAvatarSettings()">Reset to Default</button>
+          <button class="btn btn-ghost" onclick="resetAvatarSettings()">Reset to Default</button>
         </div>
       </div>
     </div>
 
-    <!-- TOOLS -->
-    <div id="section-tools" class="section">
-      <div class="card">
-        <div class="card-title">Test Announcement</div>
-        <div class="field">
-          <label for="announce-msg">Message</label>
-          <input type="text" id="announce-msg" placeholder="Test announcement text..." value="Hello, this is a test announcement.">
-        </div>
-        <div class="field">
-          <label for="announce-priority">Priority</label>
-          <select id="announce-priority">
-            <option value="normal">Normal</option>
-            <option value="alert">Alert</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" onclick="testAnnounce()">Send Announcement</button>
+    <!-- ══════════════ LIVE LOGS ══════════════ -->
+    <div id="section-logs" class="section">
+      <div class="page-header">
+        <div class="page-title">Live Logs</div>
+        <div class="page-sub">Real-time structured server logs</div>
       </div>
-    </div>
-
-    <!-- USERS (admin only) -->
-
-    <!-- ── AI Decision Log ─────────────────────────────────────────── -->
-
-    <!-- ── LLM Cost Log ──────────────────────────────────────────────── -->
-    <div id="section-costs" class="section">
-
-      <!-- Summary cards row -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px;">
-        <div class="card" style="text-align:center;padding:16px 10px;">
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Session Calls</div>
-          <div id="cost-calls" style="font-size:28px;font-weight:700;margin-top:4px;">0</div>
-        </div>
-        <div class="card" style="text-align:center;padding:16px 10px;">
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Input Tokens</div>
-          <div id="cost-input-tok" style="font-size:28px;font-weight:700;margin-top:4px;">0</div>
-        </div>
-        <div class="card" style="text-align:center;padding:16px 10px;">
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Output Tokens</div>
-          <div id="cost-output-tok" style="font-size:28px;font-weight:700;margin-top:4px;">0</div>
-        </div>
-        <div class="card" style="text-align:center;padding:16px 10px;">
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Session Cost</div>
-          <div id="cost-total" style="font-size:28px;font-weight:700;color:#4ade80;margin-top:4px;">$0.000000</div>
-        </div>
-      </div>
-
-      <!-- Per-model breakdown -->
-      <div class="card" style="margin-bottom:16px;padding:0;overflow:hidden;">
-        <div style="padding:12px 20px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px;">
-          Pricing &amp; Model Breakdown
-        </div>
-        <div id="cost-by-model" style="padding:8px 0;">
-          <div style="padding:4px 20px;color:var(--muted);font-size:13px;">No invocations yet.</div>
-        </div>
-      </div>
-
-      <!-- Invocation log -->
-      <div class="card" style="padding:0;overflow:hidden;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--border);">
+      <div class="card card-flush" style="margin-bottom:0;">
+        <div class="stream-toolbar">
           <div>
-            <div class="card-title" style="margin:0;">Invocation Log</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px;">Live stream of every LLM call with token counts and cost</div>
+            <div class="stream-title">Server Output</div>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;">
-              <input type="checkbox" id="cost-autoscroll" checked style="cursor:pointer;"> Auto-scroll
-            </label>
-            <button class="btn btn-sm btn-outline" onclick="clearCosts()">Clear</button>
-            <span id="cost-status" style="font-size:11px;color:var(--muted);">Connecting…</span>
+          <button class="btn btn-outline btn-sm" id="log-toggle-btn" onclick="toggleLogs()">
+            <svg id="log-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Start
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="clearLogs()">Clear</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;margin:0;">
+            <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+          </label>
+          <span id="log-status" style="font-size:11px;color:var(--text3);margin-left:auto;"></span>
+        </div>
+        <div id="log-output" style="border:none;border-radius:0;border-bottom-left-radius:var(--radius);border-bottom-right-radius:var(--radius);"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════ SESSIONS ══════════════ -->
+    <div id="section-sessions" class="section">
+      <div class="page-header">
+        <div class="page-title">Sessions</div>
+        <div class="page-sub">Active Nova conversations</div>
+      </div>
+      <div class="card card-flush">
+        <table>
+          <thead><tr><th>Session ID</th><th style="width:120px;">Action</th></tr></thead>
+          <tbody id="sessions-tbody"><tr><td colspan="2" style="color:var(--text3);">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══════════════ AI DECISIONS ══════════════ -->
+    <div id="section-decisions" class="section">
+      <div class="page-header">
+        <div class="page-title">AI Decisions</div>
+        <div class="page-sub">Live stream of Nova's proactive triage, tool calls, and chat responses</div>
+      </div>
+      <div class="card card-flush">
+        <div class="stream-toolbar">
+          <div style="flex:1;min-width:0;">
+            <div class="stream-title">Decision Log</div>
           </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;margin:0;">
+            <input type="checkbox" id="dec-autoscroll" checked> Auto-scroll
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="clearDecisions()">Clear</button>
+          <span id="dec-status" style="font-size:11px;color:var(--text3);"></span>
+        </div>
+        <div class="filter-bar">
+          <button class="filter-chip active dec-filter" data-kind="all" onclick="filterDecisions(this)">All</button>
+          <button class="filter-chip dec-filter" data-kind="triage_announce" onclick="filterDecisions(this)" style="--chip-color:#4ade80;">▲ Announce</button>
+          <button class="filter-chip dec-filter" data-kind="triage_silence"  onclick="filterDecisions(this)" style="--chip-color:#64748b;">— Silent</button>
+          <button class="filter-chip dec-filter" data-kind="tool_call"        onclick="filterDecisions(this)" style="--chip-color:#818cf8;">⚙ Tool</button>
+          <button class="filter-chip dec-filter" data-kind="chat_response"   onclick="filterDecisions(this)" style="--chip-color:#22d3ee;">💬 Chat</button>
+          <button class="filter-chip dec-filter" data-kind="motion_announce" onclick="filterDecisions(this)" style="--chip-color:#f59e0b;">📷 Motion</button>
+          <button class="filter-chip dec-filter" data-kind="weather_announce" onclick="filterDecisions(this)" style="--chip-color:#38bdf8;">🌤 Weather</button>
+        </div>
+        <div id="dec-log"
+             style="font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.8;
+                    height:560px;overflow-y:auto;padding:8px 0;background:var(--bg);">
+          <div style="padding:12px 18px;color:var(--text3);">Waiting for events…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ LLM COST ══════════════ -->
+    <div id="section-costs" class="section">
+      <div class="page-header">
+        <div class="page-title">LLM Cost</div>
+        <div class="page-sub">Real-time token usage and cost tracking per invocation</div>
+      </div>
+
+      <div class="metric-row">
+        <div class="metric-card">
+          <div class="metric-label">Session Calls</div>
+          <div id="cost-calls" class="metric-value">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Input Tokens</div>
+          <div id="cost-input-tok" class="metric-value">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Output Tokens</div>
+          <div id="cost-output-tok" class="metric-value">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Session Cost</div>
+          <div id="cost-total" class="metric-value green">$0.000000</div>
+        </div>
+      </div>
+
+      <div class="card card-flush" style="margin-bottom:16px;">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);">
+          <div class="card-title-lg">Pricing &amp; Model Breakdown</div>
+        </div>
+        <div id="cost-by-model" style="padding:6px 0;">
+          <div style="padding:10px 18px;color:var(--text3);font-size:13px;">No invocations yet.</div>
+        </div>
+      </div>
+
+      <div class="card card-flush">
+        <div class="stream-toolbar">
+          <div style="flex:1;min-width:0;">
+            <div class="stream-title">Invocation Log</div>
+            <div class="stream-sub">Live token counts and cost per LLM call</div>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;margin:0;">
+            <input type="checkbox" id="cost-autoscroll" checked> Auto-scroll
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="clearCosts()">Clear</button>
+          <span id="cost-status" style="font-size:11px;color:var(--text3);"></span>
         </div>
         <div id="cost-log"
-             style="font-family:monospace;font-size:12px;line-height:1.7;
-                    height:500px;overflow-y:auto;padding:12px 0;
-                    background:var(--surface);">
-          <div style="padding:0 20px;color:var(--muted);">Waiting for LLM calls…</div>
+             style="font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.8;
+                    height:460px;overflow-y:auto;padding:8px 0;background:var(--bg);">
+          <div style="padding:12px 18px;color:var(--text3);">Waiting for LLM calls…</div>
         </div>
       </div>
     </div>
 
-    <div id="section-decisions" class="section">
-      <div class="card" style="padding:0;overflow:hidden;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);">
-          <div>
-            <div class="card-title" style="margin:0;">AI Decision Log</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px;">
-              Live stream of Nova's proactive triage, tool calls, and chat responses
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;">
-              <input type="checkbox" id="dec-autoscroll" checked style="cursor:pointer;"> Auto-scroll
-            </label>
-            <button class="btn btn-sm btn-outline" onclick="clearDecisions()">Clear</button>
-            <span id="dec-status" style="font-size:11px;color:var(--muted);">Connecting…</span>
-          </div>
-        </div>
-
-        <!-- Filter bar -->
-        <div style="display:flex;gap:6px;padding:10px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
-          <button class="btn btn-sm btn-outline dec-filter active" data-kind="all" onclick="filterDecisions(this)">All</button>
-          <button class="btn btn-sm btn-outline dec-filter" data-kind="triage_announce" onclick="filterDecisions(this)" style="border-color:#22c55e;color:#22c55e;">▲ Announce</button>
-          <button class="btn btn-sm btn-outline dec-filter" data-kind="triage_silence"  onclick="filterDecisions(this)" style="border-color:#64748b;color:#64748b;">— Silent</button>
-          <button class="btn btn-sm btn-outline dec-filter" data-kind="tool_call"        onclick="filterDecisions(this)" style="border-color:#6366f1;color:#6366f1;">⚙ Tool Call</button>
-          <button class="btn btn-sm btn-outline dec-filter" data-kind="chat_response"   onclick="filterDecisions(this)" style="border-color:#0ea5e9;color:#0ea5e9;">💬 Chat</button>
-          <button class="btn btn-sm btn-outline dec-filter" data-kind="motion_announce" onclick="filterDecisions(this)" style="border-color:#f59e0b;color:#f59e0b;">📷 Motion</button>
-          <button class="btn btn-sm btn-outline dec-filter" data-kind="weather_announce" onclick="filterDecisions(this)" style="border-color:#38bdf8;color:#38bdf8;">🌤 Weather</button>
-        </div>
-
-        <!-- Log entries -->
-        <div id="dec-log"
-             style="font-family:monospace;font-size:12px;line-height:1.7;
-                    height:600px;overflow-y:auto;padding:12px 0;
-                    background:var(--surface);">
-          <div style="padding:0 20px;color:var(--muted);">Waiting for events…</div>
-        </div>
+    <!-- ══════════════ TOOLS ══════════════ -->
+    <div id="section-tools" class="section">
+      <div class="page-header">
+        <div class="page-title">Tools</div>
+        <div class="page-sub">Test Nova's capabilities directly</div>
       </div>
-    </div>
-
-    <div id="section-users" class="section">
       <div class="card">
-        <div class="card-title">Users</div>
-        <div id="users-list" style="margin-bottom:16px;"></div>
+        <div class="card-title">Test Announcement</div>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:16px;">Send a test announcement through Nova's TTS pipeline.</p>
+        <div class="field-row">
+          <div class="field">
+            <label for="announce-msg">Message</label>
+            <input type="text" id="announce-msg" placeholder="Enter announcement text…" value="Hello, this is a test announcement.">
+          </div>
+          <div class="field">
+            <label for="announce-priority">Priority</label>
+            <select id="announce-priority">
+              <option value="normal">Normal</option>
+              <option value="alert">Alert</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="testAnnounce()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          Send Announcement
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════ USERS ══════════════ -->
+    <div id="section-users" class="section">
+      <div class="page-header">
+        <div class="page-title">Users</div>
+        <div class="page-sub">Manage admin panel access</div>
+      </div>
+      <div class="card card-flush" style="margin-bottom:16px;">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);">
+          <div class="card-title-lg">User Accounts</div>
+        </div>
+        <div id="users-list" style="padding:0 18px;"></div>
       </div>
       <div class="card">
         <div class="card-title">Add User</div>
@@ -566,19 +1076,19 @@
             <input type="password" id="new-password" placeholder="Min 8 characters">
           </div>
           <div class="field" style="display:flex;align-items:flex-end;">
-            <button class="btn btn-primary" style="width:100%" onclick="createUser()">Add User</button>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="createUser()">Add User</button>
           </div>
         </div>
       </div>
       <div class="card" id="change-pw-card" style="display:none">
-        <div class="card-title">Change Password — <span id="change-pw-name"></span></div>
+        <div class="card-title">Change Password — <span id="change-pw-name" style="color:var(--accent);"></span></div>
         <div class="field-row">
           <div class="field">
             <label>New Password</label>
             <input type="password" id="change-pw-input" placeholder="Min 8 characters">
           </div>
           <div class="field" style="display:flex;align-items:flex-end;gap:8px;">
-            <button class="btn btn-primary" style="flex:1" onclick="submitPasswordChange()">Save</button>
+            <button class="btn btn-primary" style="flex:1;justify-content:center;" onclick="submitPasswordChange()">Save</button>
             <button class="btn btn-outline" onclick="cancelPasswordChange()">Cancel</button>
           </div>
         </div>
@@ -588,7 +1098,6 @@
   </div><!-- /content -->
 </div><!-- /main -->
 
-<div id="sidebar-overlay" onclick="closeSidebar()"></div>
 <div id="toast"></div>
 
 <script>
@@ -605,13 +1114,15 @@ async function init() {
   try {
     const me = await api('GET', '/admin/me');
     _currentRole = me.role;
-    document.getElementById('user-info').textContent = `${me.username} (${me.role})`;
+    const displayName = me.username || '?';
+    document.getElementById('user-info').textContent = me.username || '—';
+    document.getElementById('user-role-display').textContent = me.role || '—';
+    document.getElementById('user-avatar-initials').textContent = displayName.charAt(0).toUpperCase();
     if (me.role === 'admin') {
       document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
       document.getElementById('restart-btn').style.display = '';
     } else {
       document.getElementById('restart-btn').style.display = 'none';
-      // Hide write-only nav items for viewers
       ['config','prompt','acl'].forEach(sec => {
         const el = document.querySelector(`.nav-item[data-section="${sec}"]`);
         if (el) el.style.display = 'none';
@@ -635,9 +1146,13 @@ init();
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
-const TITLES = { dashboard:'Dashboard', config:'Configuration', prompt:'System Prompt', acl:'ACL Rules', logs:'Live Logs', sessions:'Sessions', avatar:'Avatar', tools:'Tools', users:'Users' };
+const TITLES = {
+  dashboard:'Dashboard', config:'Configuration', prompt:'System Prompt',
+  acl:'ACL Rules', logs:'Live Logs', sessions:'Sessions',
+  avatar:'Avatar', tools:'Tools', users:'Users',
+  decisions:'AI Decisions', costs:'LLM Cost',
+};
 
-// ── Avatar / skin tone ────────────────────────────────────────────────────────
 const SKIN_LABELS = ['Porcelain','Light','Medium','Dark','Deep'];
 let _currentSkinTone = 0;
 
@@ -654,9 +1169,7 @@ async function loadAvatarSettings() {
     const d = await api('GET', '/admin/avatar-settings');
     selectSkin(d.skin_tone ?? 0);
     document.getElementById('avatar-url').value = d.avatar_url || '';
-  } catch(e) {
-    selectSkin(0);
-  }
+  } catch(e) { selectSkin(0); }
 }
 
 async function saveAvatarSettings() {
@@ -689,15 +1202,13 @@ function navigate(el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById('section-' + sec).classList.add('active');
   document.getElementById('section-title').textContent = TITLES[sec] || sec;
-  // Lazy load
-  if (sec === 'config') loadConfig();
-  if (sec === 'prompt') loadPrompt();
-  if (sec === 'acl') loadAcl();
-  if (sec === 'avatar') loadAvatarSettings();
-  if (sec === 'sessions') loadSessions();
+  if (sec === 'config')    loadConfig();
+  if (sec === 'prompt')    loadPrompt();
+  if (sec === 'acl')       loadAcl();
+  if (sec === 'avatar')    loadAvatarSettings();
+  if (sec === 'sessions')  loadSessions();
   if (sec === 'dashboard') loadDashboard();
-  if (sec === 'logs' && logRunning) {}  // keep going
-  if (sec === 'users') loadUsers();
+  if (sec === 'users')     loadUsers();
 }
 
 function refreshSection() {
@@ -713,7 +1224,7 @@ function toast(msg, type='ok') {
   t.textContent = msg;
   t.className = 'show ' + type;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.className = ''; }, 3000);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3500);
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -732,14 +1243,19 @@ async function api(method, path, body) {
 async function pollHealth() {
   try {
     const d = await fetch('/health').then(r => r.json());
-    const dot = document.getElementById('status-dot');
+    const dot = document.getElementById('status-dot-inner');
     const statusText = document.getElementById('status-text');
-    if (d.status === 'ok') { dot.className = 'ok'; statusText.textContent = 'Server OK'; }
-    else { dot.className = 'err'; statusText.textContent = 'Degraded'; }
+    if (d.status === 'ok') {
+      dot.className = 'status-dot ok';
+      statusText.textContent = 'All systems operational';
+    } else {
+      dot.className = 'status-dot err';
+      statusText.textContent = 'Degraded';
+    }
     if (document.querySelector('#section-dashboard.active')) renderHealth(d);
   } catch {
-    document.getElementById('status-dot').className = 'err';
-    document.getElementById('status-text').textContent = 'Unreachable';
+    document.getElementById('status-dot-inner').className = 'status-dot err';
+    document.getElementById('status-text').textContent = 'Server unreachable';
   }
 }
 
@@ -784,7 +1300,6 @@ const _FIELD_OPTIONS = {
   LOG_LEVEL:     ['INFO', 'DEBUG', 'WARNING', 'ERROR'],
 };
 
-// Fields that belong to each TTS provider (used to show/hide)
 const _TTS_FIELDS = {
   piper:      ['PIPER_VOICE'],
   elevenlabs: ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID', 'ELEVENLABS_MODEL'],
@@ -839,7 +1354,6 @@ function _updateCloudModelDropdown(provider, currentVal) {
   if (!wrapper) return;
   const models = _CLOUD_MODELS[provider] || [];
   const val = currentVal !== undefined ? currentVal : (document.getElementById('cfg-CLOUD_MODEL')?.value || '');
-
   if (models.length) {
     const selected = models.includes(val) ? val : models[0];
     wrapper.innerHTML = _buildSelect('CLOUD_MODEL', selected, models);
@@ -862,12 +1376,10 @@ async function loadConfig() {
 
       let input;
       if (_FIELD_OPTIONS[key]) {
-        // Static dropdown
         input = _buildSelect(key, val, _FIELD_OPTIONS[key]);
       } else if (key === 'OLLAMA_MODEL') {
         input = '<div id="ollama-model-wrapper"><input type="text" id="cfg-OLLAMA_MODEL" data-key="OLLAMA_MODEL" value="' + esc(val) + '" placeholder="e.g. qwen2.5:7b"></div>';
       } else if (key === 'CLOUD_MODEL') {
-        // Rendered into a wrapper div so it can be swapped when provider changes
         const provider = (d.values || {})['LLM_PROVIDER'] || 'ollama';
         const models = _CLOUD_MODELS[provider] || [];
         let inner;
@@ -888,14 +1400,10 @@ async function loadConfig() {
       grid.appendChild(div);
     }
 
-    // Wire provider dropdown → rebuild cloud model dropdown
     const providerEl = document.getElementById('cfg-LLM_PROVIDER');
     if (providerEl) {
-      providerEl.addEventListener('change', () => {
-        _updateCloudModelDropdown(providerEl.value);
-      });
+      providerEl.addEventListener('change', () => { _updateCloudModelDropdown(providerEl.value); });
     }
-    // Also run once on load to ensure correct initial state
     if (providerEl) _updateCloudModelDropdown(providerEl.value, (d.values || {})['CLOUD_MODEL'] || '');
 
     await _fetchOllamaModels();
@@ -910,7 +1418,6 @@ async function loadConfig() {
       });
     }
 
-    // Wire TTS_PROVIDER dropdown → show/hide provider-specific fields
     const ttsProviderEl = document.getElementById('cfg-TTS_PROVIDER');
     if (ttsProviderEl) {
       ttsProviderEl.addEventListener('change', () => _updateTTSFields(ttsProviderEl.value));
@@ -973,7 +1480,7 @@ function startLogs() {
   logEventSource = new EventSource('/admin/logs');
   logRunning = true;
   document.getElementById('log-toggle-btn').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause';
-  document.getElementById('log-status').textContent = 'Streaming...';
+  document.getElementById('log-status').textContent = 'Streaming…';
 
   logEventSource.onmessage = (e) => appendLog(e.data);
   logEventSource.onerror = () => {
@@ -1001,7 +1508,6 @@ function appendLog(raw) {
     else if (lvl === 'error') cls = 'lvl-error';
     else if (lvl === 'debug') cls = 'lvl-debug';
     else if (lvl === 'critical') cls = 'lvl-critical';
-    // Pretty print JSON log
     const ts = j.timestamp || '';
     const ev = j.event || j.message || '';
     const rest = Object.entries(j).filter(([k]) => !['timestamp','level','log_level','event','message','logger'].includes(k));
@@ -1011,16 +1517,11 @@ function appendLog(raw) {
   span.className = 'log-line ' + cls;
   span.textContent = text;
   out.appendChild(span);
-  // Trim old lines
   while (out.children.length > 2000) out.removeChild(out.firstChild);
-  if (document.getElementById('log-autoscroll').checked) {
-    out.scrollTop = out.scrollHeight;
-  }
+  if (document.getElementById('log-autoscroll').checked) out.scrollTop = out.scrollHeight;
 }
 
-function clearLogs() {
-  document.getElementById('log-output').innerHTML = '';
-}
+function clearLogs() { document.getElementById('log-output').innerHTML = ''; }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
 
@@ -1031,10 +1532,9 @@ async function loadSessions() {
     tbody.innerHTML = '';
     const count = d.active_sessions || 0;
     if (count === 0) {
-      tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No active sessions</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="2" style="color:var(--text3)">No active sessions</td></tr>';
       return;
     }
-    // The API only returns a count — show that info
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${count} active session(s)</td><td></td>`;
     tbody.appendChild(tr);
@@ -1046,8 +1546,7 @@ async function loadSessions() {
 async function restartServer() {
   if (!confirm('Restart the avatar-backend service? The server will be briefly unavailable.')) return;
   const btn = document.getElementById('restart-btn');
-  btn.disabled = true;
-  btn.textContent = 'Restarting...';
+  btn.disabled = true; btn.textContent = 'Restarting…';
   try {
     await api('POST', '/admin/restart');
     toast('Server is restarting…', 'warn');
@@ -1082,21 +1581,22 @@ async function loadUsers() {
     const d = await api('GET', '/admin/users');
     const container = document.getElementById('users-list');
     if (!d.users.length) {
-      container.innerHTML = '<p style="color:var(--muted);font-size:13px;">No users yet.</p>';
+      container.innerHTML = '<p style="padding:16px 0;color:var(--text3);font-size:13px;">No users yet.</p>';
       return;
     }
     container.innerHTML = d.users.map(u => `
       <div class="user-row">
+        <div class="user-row-icon">${esc(u.username.charAt(0).toUpperCase())}</div>
         <span class="user-name">${esc(u.username)}</span>
         <span class="role-badge ${u.role}">${u.role}</span>
         <div class="user-actions">
-          <select id="role-sel-${esc(u.username)}" class="btn btn-outline btn-sm" style="padding:4px 6px;">
+          <select id="role-sel-${esc(u.username)}" class="btn btn-outline btn-xs" style="padding:3px 8px;">
             <option value="viewer"${u.role==='viewer'?' selected':''}>Viewer</option>
             <option value="admin"${u.role==='admin'?' selected':''}>Admin</option>
           </select>
-          <button class="btn btn-outline btn-sm" onclick="changeRole('${esc(u.username)}')">Set Role</button>
-          <button class="btn btn-outline btn-sm" onclick="showPasswordChange('${esc(u.username)}')">Password</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.username)}')">Delete</button>
+          <button class="btn btn-outline btn-xs" onclick="changeRole('${esc(u.username)}')">Set Role</button>
+          <button class="btn btn-outline btn-xs" onclick="showPasswordChange('${esc(u.username)}')">Password</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteUser('${esc(u.username)}')">Delete</button>
         </div>
       </div>`).join('');
   } catch(e) { toast('Failed to load users: ' + e.message, 'err'); }
@@ -1141,12 +1641,10 @@ function showPasswordChange(username) {
   document.getElementById('change-pw-card').style.display = '';
   document.getElementById('change-pw-input').focus();
 }
-
 function cancelPasswordChange() {
   _changePwTarget = null;
   document.getElementById('change-pw-card').style.display = 'none';
 }
-
 async function submitPasswordChange() {
   const pw = document.getElementById('change-pw-input').value;
   if (!pw) { toast('Enter a new password', 'warn'); return; }
@@ -1163,254 +1661,225 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-  // ── AI Decision Log ────────────────────────────────────────────────────
-  let _decES   = null;
-  let _decFilter = 'all';
-  let _decEntries = [];
-  const _kindMeta = {
-    triage_announce: { label:'▲ ANNOUNCE',  bg:'#14532d', color:'#4ade80' },
-    triage_silence:  { label:'— SILENT',    bg:'#1e293b', color:'#94a3b8' },
-    tool_call:       { label:'⚙ TOOL',      bg:'#1e1b4b', color:'#a5b4fc' },
-    chat_response:   { label:'💬 CHAT',      bg:'#0c2e48', color:'#7dd3fc' },
-    motion_announce: { label:'📷 MOTION',   bg:'#3b2200', color:'#fcd34d' },
-    weather_announce:{ label:'🌤 WEATHER',  bg:'#0c2748', color:'#7dd3fc' },
+function toggleReveal(id, btn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+// ── AI Decision Log ───────────────────────────────────────────────────────────
+let _decES     = null;
+let _decFilter = 'all';
+let _decEntries = [];
+const _kindMeta = {
+  triage_announce: { label:'▲ ANNOUNCE', bg:'rgba(16,185,129,.15)', color:'#4ade80' },
+  triage_silence:  { label:'— SILENT',   bg:'rgba(71,85,105,.2)',   color:'#64748b' },
+  tool_call:       { label:'⚙ TOOL',     bg:'rgba(129,140,248,.15)',color:'#818cf8' },
+  chat_response:   { label:'💬 CHAT',    bg:'rgba(34,211,238,.12)', color:'#22d3ee' },
+  motion_announce: { label:'📷 MOTION',  bg:'rgba(245,158,11,.15)', color:'#f59e0b' },
+  weather_announce:{ label:'🌤 WEATHER', bg:'rgba(56,189,248,.12)', color:'#38bdf8' },
+};
+
+function _kindBadge(kind) {
+  const m = _kindMeta[kind] || { label: kind.toUpperCase(), bg:'rgba(255,255,255,.08)', color:'#e2e8f0' };
+  return `<span style="background:${m.bg};color:${m.color};padding:1px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">${m.label}</span>`;
+}
+
+function _decEntryHTML(e) {
+  let detail = '';
+  if (e.kind === 'triage_announce' || e.kind === 'triage_silence') {
+    const ents = (e.entities || []).join(', ');
+    detail = `<span style="color:var(--text3);">${ents}</span>`;
+    if (e.message) detail += ` <span style="color:#86efac;">→ "${e.message}"</span>`;
+    if (e.reason)  detail += ` <span style="color:var(--text3);">(${e.reason})</span>`;
+  } else if (e.kind === 'tool_call') {
+    const args = Object.entries(e.args || {}).map(([k,v])=>`${k}=${v}`).join(', ');
+    const ok   = e.success ? '<span style="color:#4ade80;">✓</span>' : '<span style="color:#f43f5e;">✗</span>';
+    detail = `${ok} <span style="color:#818cf8;">${e.tool || ''}</span>(<span style="color:var(--text);">${args}</span>)`;
+    if (e.result) detail += ` <span style="color:var(--text3);">→ ${e.result}</span>`;
+  } else if (e.kind === 'chat_response') {
+    detail = `<span style="color:#22d3ee;">"${e.query || ''}"</span>`;
+    if (e.tool_count > 0) detail += ` <span style="color:var(--text3);">[${e.tool_count} tool${e.tool_count>1?'s':''}]</span>`;
+    if (e.response) detail += ` <span style="color:var(--text3);">→ "${e.response}"</span>`;
+    if (e.ms) detail += ` <span style="color:var(--text3);">(${e.ms}ms)</span>`;
+  } else if (e.kind === 'motion_announce' || e.kind === 'weather_announce') {
+    detail = `<span style="color:#f59e0b;">${e.camera || (e.old + ' → ' + e.new)}</span>`;
+    if (e.message) detail += ` <span style="color:#86efac;">→ "${e.message}"</span>`;
+  }
+  return `<div class="dec-entry" data-kind="${e.kind}"
+               style="padding:5px 18px;border-bottom:1px solid rgba(255,255,255,.03);
+                      display:flex;align-items:baseline;gap:8px;">
+    <span style="color:var(--text3);min-width:58px;flex-shrink:0;">${e.ts}</span>
+    ${_kindBadge(e.kind)}
+    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${detail}</span>
+  </div>`;
+}
+
+function _appendDecEntry(e) {
+  _decEntries.push(e);
+  if (_decEntries.length > 500) _decEntries.shift();
+  if (_decFilter !== 'all' && e.kind !== _decFilter) return;
+  const log = document.getElementById('dec-log');
+  if (!log) return;
+  if (log.querySelector('div[style*="Waiting"]')) log.innerHTML = '';
+  log.insertAdjacentHTML('beforeend', _decEntryHTML(e));
+  if (document.getElementById('dec-autoscroll')?.checked) log.scrollTop = log.scrollHeight;
+}
+
+function filterDecisions(btn) {
+  _decFilter = btn.dataset.kind;
+  document.querySelectorAll('.dec-filter').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const log = document.getElementById('dec-log');
+  if (!log) return;
+  const entries = _decFilter === 'all' ? _decEntries : _decEntries.filter(e => e.kind === _decFilter);
+  if (entries.length === 0) {
+    log.innerHTML = '<div style="padding:12px 18px;color:var(--text3);">No entries for this filter.</div>';
+  } else {
+    log.innerHTML = entries.map(_decEntryHTML).join('');
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+function clearDecisions() {
+  _decEntries = [];
+  const log = document.getElementById('dec-log');
+  if (log) log.innerHTML = '<div style="padding:12px 18px;color:var(--text3);">Log cleared.</div>';
+}
+
+function startDecisionStream() {
+  if (_decES) { _decES.close(); _decES = null; }
+  const status = document.getElementById('dec-status');
+  if (status) status.textContent = 'Connecting…';
+  fetch('/admin/decisions', { credentials:'include' })
+    .then(r => r.json())
+    .then(data => {
+      (data.decisions || []).forEach(_appendDecEntry);
+      if (status) status.textContent = `${_decEntries.length} loaded`;
+    })
+    .catch(() => {});
+  _decES = new EventSource('/admin/decisions/stream');
+  _decES.onopen = () => { if (status) status.textContent = '● Live'; };
+  _decES.onmessage = (ev) => {
+    try { const e = JSON.parse(ev.data); if (e && e.kind) _appendDecEntry(e); } catch {}
   };
+  _decES.onerror = () => { if (status) status.textContent = '⚠ Retrying…'; };
+}
 
-  function _kindBadge(kind) {
-    const m = _kindMeta[kind] || { label: kind.toUpperCase(), bg:'#1e293b', color:'#e2e8f0' };
-    return `<span style="background:${m.bg};color:${m.color};padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.4px;margin-right:8px;">${m.label}</span>`;
+const _origNavigate = window.navigate;
+window.navigate = function(el) {
+  _origNavigate(el);
+  if (el.dataset.section === 'decisions') startDecisionStream();
+};
+
+// ── LLM Cost Log ─────────────────────────────────────────────────────────────
+let _costES = null;
+let _costEntries = [];
+let _costTotals = {};
+
+const _purposeColor = {
+  chat: '#22d3ee', proactive: '#f59e0b', triage: '#f59e0b', vision: '#a78bfa',
+};
+
+function _fmtTokens(n) {
+  if (n >= 1000000) return (n/1000000).toFixed(2) + 'M';
+  if (n >= 1000)    return (n/1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function _fmtCost(usd) {
+  if (usd === 0) return '<span style="color:var(--text3);">$0 local</span>';
+  if (usd < 0.001) return `<span style="color:var(--green);">$${usd.toFixed(6)}</span>`;
+  return `<span style="color:var(--green);">$${usd.toFixed(4)}</span>`;
+}
+
+function _costEntryHTML(e) {
+  const col = _purposeColor[e.purpose] || '#e2e8f0';
+  const rate = e.price_in > 0
+    ? `<span style="color:var(--text3);font-size:10px;">$${e.price_in}/$${e.price_out}/M</span>`
+    : '<span style="color:var(--text3);font-size:10px;">local</span>';
+  return `<div style="padding:4px 18px;border-bottom:1px solid rgba(255,255,255,.03);
+                      display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+    <span style="color:var(--text3);min-width:58px;flex-shrink:0;">${e.ts}</span>
+    <span style="background:rgba(255,255,255,.06);color:${col};padding:1px 8px;border-radius:4px;font-size:10px;font-weight:700;flex-shrink:0;">${(e.purpose||'chat').toUpperCase()}</span>
+    <span style="color:#818cf8;flex-shrink:0;">${e.model}</span>
+    <span style="color:var(--text3);">↑${_fmtTokens(e.input_tokens)} ↓${_fmtTokens(e.output_tokens)}</span>
+    ${_fmtCost(e.cost_usd)}
+    <span style="color:var(--text3);">${e.elapsed_ms}ms</span>
+    ${rate}
+  </div>`;
+}
+
+function _updateCostSummary(totals) {
+  _costTotals = totals;
+  const el = id => document.getElementById(id);
+  if (el('cost-calls'))      el('cost-calls').textContent = _fmtTokens(totals.session_calls || 0);
+  if (el('cost-input-tok'))  el('cost-input-tok').textContent = _fmtTokens(totals.session_input_tokens || 0);
+  if (el('cost-output-tok')) el('cost-output-tok').textContent = _fmtTokens(totals.session_output_tokens || 0);
+  if (el('cost-total'))      el('cost-total').textContent = '$' + (totals.session_cost_usd || 0).toFixed(6);
+
+  const bm = document.getElementById('cost-by-model');
+  if (!bm) return;
+  const models = Object.entries(totals.by_model || {});
+  if (models.length === 0) {
+    bm.innerHTML = '<div style="padding:12px 18px;color:var(--text3);font-size:13px;">No invocations yet.</div>';
+    return;
   }
+  bm.innerHTML = models.map(([key, m]) => `
+    <div style="display:flex;align-items:center;gap:14px;padding:8px 18px;border-bottom:1px solid rgba(255,255,255,.03);flex-wrap:wrap;">
+      <span style="color:#818cf8;min-width:180px;font-weight:500;">${key}</span>
+      <span style="color:var(--text3);font-size:12px;">${m.calls} calls</span>
+      <span style="color:var(--text3);font-size:12px;">↑${_fmtTokens(m.input_tokens)} ↓${_fmtTokens(m.output_tokens)}</span>
+      <span style="font-size:13px;">${_fmtCost(m.cost_usd)}</span>
+      <span style="color:var(--text3);font-size:11px;margin-left:auto;">$${m.price_in}/$${m.price_out} per M</span>
+    </div>
+  `).join('');
+}
 
-  function _decEntryHTML(e) {
-    let detail = '';
-    if (e.kind === 'triage_announce' || e.kind === 'triage_silence') {
-      const ents = (e.entities || []).join(', ');
-      detail = `<span style="color:var(--muted);">${ents}</span>`;
-      if (e.message) detail += ` <span style="color:#86efac;">→ "${e.message}"</span>`;
-      if (e.reason)  detail += ` <span style="color:var(--muted);">(${e.reason})</span>`;
-    } else if (e.kind === 'tool_call') {
-      const args = Object.entries(e.args || {}).map(([k,v])=>`${k}=${v}`).join(', ');
-      const ok   = e.success ? '<span style="color:#4ade80;">✓</span>' : '<span style="color:#f87171;">✗</span>';
-      detail = `${ok} <span style="color:#a5b4fc;">${e.tool || ''}</span>(<span style="color:#e2e8f0;">${args}</span>)`;
-      if (e.result) detail += ` <span style="color:var(--muted);">→ ${e.result}</span>`;
-    } else if (e.kind === 'chat_response') {
-      detail = `<span style="color:#7dd3fc;">"${e.query || ''}"</span>`;
-      if (e.tool_count > 0) detail += ` <span style="color:var(--muted);">[${e.tool_count} tool${e.tool_count>1?'s':''}]</span>`;
-      if (e.response) detail += ` <span style="color:var(--muted);">→ "${e.response}"</span>`;
-      if (e.ms) detail += ` <span style="color:#475569;">(${e.ms}ms)</span>`;
-    } else if (e.kind === 'motion_announce' || e.kind === 'weather_announce') {
-      detail = `<span style="color:#fcd34d;">${e.camera || (e.old + ' → ' + e.new)}</span>`;
-      if (e.message) detail += ` <span style="color:#86efac;">→ "${e.message}"</span>`;
-    }
-    return `<div class="dec-entry" data-kind="${e.kind}"
-                 style="padding:4px 20px;border-bottom:1px solid rgba(255,255,255,.04);
-                        display:flex;align-items:baseline;gap:4px;">
-      <span style="color:#475569;min-width:60px;">${e.ts}</span>
-      ${_kindBadge(e.kind)}
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${detail}</span>
-    </div>`;
-  }
+function _appendCostEntry(e) {
+  _costEntries.push(e);
+  if (_costEntries.length > 500) _costEntries.shift();
+  const log = document.getElementById('cost-log');
+  if (!log) return;
+  if (log.querySelector('div[style*="Waiting"]')) log.innerHTML = '';
+  log.insertAdjacentHTML('beforeend', _costEntryHTML(e));
+  if (document.getElementById('cost-autoscroll')?.checked) log.scrollTop = log.scrollHeight;
+  let si=0, so=0, sc=0;
+  _costEntries.forEach(x => { si += x.input_tokens; so += x.output_tokens; sc += x.cost_usd; });
+  _updateCostSummary({ session_calls: _costEntries.length, session_input_tokens: si, session_output_tokens: so, session_cost_usd: sc, by_model: _costTotals.by_model || {} });
+}
 
-  function _appendDecEntry(e) {
-    _decEntries.push(e);
-    if (_decEntries.length > 500) _decEntries.shift();
-    if (_decFilter !== 'all' && e.kind !== _decFilter) return;
-    const log = document.getElementById('dec-log');
-    if (!log) return;
-    // Remove placeholder text on first real entry
-    if (log.querySelector('div[style*="Waiting"]')) log.innerHTML = '';
-    log.insertAdjacentHTML('beforeend', _decEntryHTML(e));
-    if (document.getElementById('dec-autoscroll')?.checked) {
-      log.scrollTop = log.scrollHeight;
-    }
-  }
+function clearCosts() {
+  _costEntries = [];
+  const log = document.getElementById('cost-log');
+  if (log) log.innerHTML = '<div style="padding:12px 18px;color:var(--text3);">Log cleared.</div>';
+}
 
-  function filterDecisions(btn) {
-    _decFilter = btn.dataset.kind;
-    document.querySelectorAll('.dec-filter').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    const log = document.getElementById('dec-log');
-    if (!log) return;
-    const entries = _decFilter === 'all'
-      ? _decEntries
-      : _decEntries.filter(e => e.kind === _decFilter);
-    if (entries.length === 0) {
-      log.innerHTML = '<div style="padding:0 20px;color:var(--muted);">No entries for this filter.</div>';
-    } else {
-      log.innerHTML = entries.map(_decEntryHTML).join('');
-      log.scrollTop = log.scrollHeight;
-    }
-  }
-
-  function clearDecisions() {
-    _decEntries = [];
-    const log = document.getElementById('dec-log');
-    if (log) log.innerHTML = '<div style="padding:0 20px;color:var(--muted);">Log cleared.</div>';
-  }
-
-  function startDecisionStream() {
-    if (_decES) { _decES.close(); _decES = null; }
-    const status = document.getElementById('dec-status');
-    if (status) status.textContent = 'Connecting…';
-
-    // First load backlog via JSON, then switch to SSE for live updates
-    fetch('/admin/decisions', { credentials:'include' })
-      .then(r => r.json())
-      .then(data => {
-        (data.decisions || []).forEach(_appendDecEntry);
-        if (status) status.textContent = `${_decEntries.length} entries loaded`;
-      })
-      .catch(() => {});
-
-    _decES = new EventSource('/admin/decisions/stream');
-    _decES.onopen = () => { if (status) status.textContent = '● Live'; };
-    _decES.onmessage = (ev) => {
-      try {
-        const e = JSON.parse(ev.data);
-        if (e && e.kind) _appendDecEntry(e);
-      } catch {}
-    };
-    _decES.onerror = () => {
-      if (status) status.textContent = '⚠ Disconnected — retrying…';
-    };
-  }
-
-  // Start streaming when the decisions section becomes visible
-  const _origNavigate = window.navigate;
-  window.navigate = function(el) {
-    _origNavigate(el);
-    if (el.dataset.section === 'decisions') startDecisionStream();
+function startCostStream() {
+  if (_costES) { _costES.close(); _costES = null; }
+  const status = document.getElementById('cost-status');
+  if (status) status.textContent = 'Connecting…';
+  fetch('/admin/costs', { credentials: 'include' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.totals) _updateCostSummary(data.totals);
+      (data.entries || []).forEach(_appendCostEntry);
+      if (status) status.textContent = `${_costEntries.length} loaded`;
+    })
+    .catch(() => {});
+  _costES = new EventSource('/admin/costs/stream');
+  _costES.onopen = () => { if (status) status.textContent = '● Live'; };
+  _costES.onmessage = (ev) => {
+    try { const e = JSON.parse(ev.data); if (e && e.model) _appendCostEntry(e); } catch {}
   };
+  _costES.onerror = () => { if (status) status.textContent = '⚠ Retrying…'; };
+}
 
-
-  // ── LLM Cost Log ───────────────────────────────────────────────────────────
-  let _costES   = null;
-  let _costEntries = [];
-  let _costTotals = {};
-
-  const _purposeColor = {
-    chat:       '#7dd3fc',
-    proactive:  '#fcd34d',
-    triage:     '#fcd34d',
-    vision:     '#c084fc',
-  };
-
-  function _fmtTokens(n) {
-    if (n >= 1000000) return (n/1000000).toFixed(2) + 'M';
-    if (n >= 1000)    return (n/1000).toFixed(1) + 'K';
-    return String(n);
-  }
-
-  function _fmtCost(usd) {
-    if (usd === 0) return '<span style="color:#64748b;">$0 (local)</span>';
-    if (usd < 0.001) return `<span style="color:#4ade80;">$${usd.toFixed(6)}</span>`;
-    return `<span style="color:#4ade80;">$${usd.toFixed(4)}</span>`;
-  }
-
-  function _costEntryHTML(e) {
-    const col = _purposeColor[e.purpose] || '#e2e8f0';
-    const rate = e.price_in > 0
-      ? `<span style="color:#475569;font-size:10px;">${e.price_in}/$${e.price_out}/M</span>`
-      : '<span style="color:#475569;font-size:10px;">local</span>';
-    return `<div style="padding:3px 20px;border-bottom:1px solid rgba(255,255,255,.04);
-                        display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;">
-      <span style="color:#475569;min-width:60px;">${e.ts}</span>
-      <span style="background:#1e293b;color:${col};padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;">${(e.purpose||'chat').toUpperCase()}</span>
-      <span style="color:#a5b4fc;">${e.model}</span>
-      <span style="color:var(--muted);">in:${_fmtTokens(e.input_tokens)} out:${_fmtTokens(e.output_tokens)}</span>
-      ${_fmtCost(e.cost_usd)}
-      <span style="color:#475569;">${e.elapsed_ms}ms</span>
-      ${rate}
-    </div>`;
-  }
-
-  function _updateCostSummary(totals) {
-    _costTotals = totals;
-    const el = id => document.getElementById(id);
-    if (el('cost-calls'))      el('cost-calls').textContent = _fmtTokens(totals.session_calls || 0);
-    if (el('cost-input-tok'))  el('cost-input-tok').textContent = _fmtTokens(totals.session_input_tokens || 0);
-    if (el('cost-output-tok')) el('cost-output-tok').textContent = _fmtTokens(totals.session_output_tokens || 0);
-    if (el('cost-total'))      el('cost-total').textContent = '$' + (totals.session_cost_usd || 0).toFixed(6);
-
-    const bm = document.getElementById('cost-by-model');
-    if (!bm) return;
-    const models = Object.entries(totals.by_model || {});
-    if (models.length === 0) {
-      bm.innerHTML = '<div style="padding:4px 20px;color:var(--muted);font-size:13px;">No invocations yet.</div>';
-      return;
-    }
-    bm.innerHTML = models.map(([key, m]) => `
-      <div style="display:flex;align-items:center;gap:12px;padding:6px 20px;border-bottom:1px solid rgba(255,255,255,.04);">
-        <span style="color:#a5b4fc;min-width:200px;">${key}</span>
-        <span style="color:var(--muted);font-size:12px;">${m.calls} calls</span>
-        <span style="color:var(--muted);font-size:12px;">in:${_fmtTokens(m.input_tokens)} out:${_fmtTokens(m.output_tokens)}</span>
-        <span style="font-size:12px;">${_fmtCost(m.cost_usd)}</span>
-        <span style="color:#475569;font-size:11px;">$${m.price_in}/$${m.price_out} per M</span>
-      </div>
-    `).join('');
-  }
-
-  function _appendCostEntry(e) {
-    _costEntries.push(e);
-    if (_costEntries.length > 500) _costEntries.shift();
-    const log = document.getElementById('cost-log');
-    if (!log) return;
-    if (log.querySelector('div[style*="Waiting"]')) log.innerHTML = '';
-    log.insertAdjacentHTML('beforeend', _costEntryHTML(e));
-    if (document.getElementById('cost-autoscroll')?.checked) {
-      log.scrollTop = log.scrollHeight;
-    }
-    // Recompute running totals from entries
-    let si=0, so=0, sc=0;
-    _costEntries.forEach(x => { si += x.input_tokens; so += x.output_tokens; sc += x.cost_usd; });
-    _updateCostSummary({
-      session_calls: _costEntries.length,
-      session_input_tokens: si,
-      session_output_tokens: so,
-      session_cost_usd: sc,
-      by_model: _costTotals.by_model || {},
-    });
-  }
-
-  function clearCosts() {
-    _costEntries = [];
-    const log = document.getElementById('cost-log');
-    if (log) log.innerHTML = '<div style="padding:0 20px;color:var(--muted);">Log cleared.</div>';
-  }
-
-  function startCostStream() {
-    if (_costES) { _costES.close(); _costES = null; }
-    const status = document.getElementById('cost-status');
-    if (status) status.textContent = 'Connecting…';
-
-    fetch('/admin/costs', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => {
-        if (data.totals) _updateCostSummary(data.totals);
-        (data.entries || []).forEach(_appendCostEntry);
-        if (status) status.textContent = `${_costEntries.length} entries loaded`;
-      })
-      .catch(() => {});
-
-    _costES = new EventSource('/admin/costs/stream');
-    _costES.onopen = () => { if (status) status.textContent = '● Live'; };
-    _costES.onmessage = (ev) => {
-      try {
-        const e = JSON.parse(ev.data);
-        if (e && e.model) _appendCostEntry(e);
-      } catch {}
-    };
-    _costES.onerror = () => {
-      if (status) status.textContent = '⚠ Disconnected — retrying…';
-    };
-  }
-
-  // Hook into navigate()
-  const _origNavigateCost = window.navigate;
-  window.navigate = function(el) {
-    _origNavigateCost(el);
-    if (el.dataset.section === 'costs') startCostStream();
-  };
+const _origNavigateCost = window.navigate;
+window.navigate = function(el) {
+  _origNavigateCost(el);
+  if (el.dataset.section === 'costs') startCostStream();
+};
 
 </script>
 </body>
