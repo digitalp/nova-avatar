@@ -66,6 +66,11 @@ async def run_chat(
     final_text = ""
     model_name = ""
 
+    # Sanitize history: remove any trailing assistant tool-call turns that have no
+    # corresponding tool-response. These cause Gemini HTTP 400 ("function call turn
+    # comes immediately after a user turn").
+    messages = _drop_dangling_tool_calls(messages)
+
     for round_num in range(_MAX_TOOL_ROUNDS + 1):
         text, tool_calls = await llm.chat(messages)
         model_name = llm.model_name
@@ -106,6 +111,7 @@ async def run_chat(
             await sm.add_message(session_id, "tool", result.message)
 
         messages = _inject_datetime(await sm.get_messages(session_id), now_str)  # now_str already has tz
+        messages = _drop_dangling_tool_calls(messages)
 
         if round_num == _MAX_TOOL_ROUNDS:
             _LOGGER.warning("chat.max_tool_rounds_reached",
@@ -124,6 +130,31 @@ async def run_chat(
         model=llm.model_name,
         session_id=session_id,
     )
+
+
+def _drop_dangling_tool_calls(messages: list[dict]) -> list[dict]:
+    """Remove trailing assistant tool-call turns not followed by a tool response.
+
+    Gemini rejects a conversation where an assistant message containing function
+    calls is immediately followed by a user turn (or is the last message).
+    This happens when an exception interrupts the tool-execution loop, leaving
+    the session history in an invalid state.
+    """
+    if len(messages) < 2:
+        return messages
+    result = list(messages)
+    # Walk backwards from the end; drop orphaned assistant+tool_calls entries
+    while len(result) >= 2:
+        last = result[-1]
+        prev = result[-2]
+        # An assistant message with tool_calls that is NOT followed by a tool response
+        if (prev.get("role") == "assistant"
+                and prev.get("tool_calls")
+                and last.get("role") != "tool"):
+            result.pop(-2)  # remove the dangling assistant turn
+        else:
+            break
+    return result
 
 
 def _inject_datetime(messages: list[dict], now_str: str) -> list[dict]:

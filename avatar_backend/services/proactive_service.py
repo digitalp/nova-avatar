@@ -75,10 +75,14 @@ _WATCH_DOMAINS = {
     "cover",
     "alarm_control_panel",
     "input_boolean",
+    "climate",  # heating mode changes (off↔heat) monitored proactively
 }
 
+# Climate states worth announcing — ignore attribute-only changes and idle fluctuations
+_CLIMATE_ANNOUNCE_STATES = {"heat", "cool", "heat_cool", "auto", "dry", "fan_only", "off"}
+
 # ── Weather monitoring ────────────────────────────────────────────────────────
-_WEATHER_ENTITY = "weather.home"
+_WEATHER_ENTITY = "weather.met_office_ince_in_makerfield"
 
 # Weather conditions that are significant enough to warrant an announcement
 # when they start or end.
@@ -321,6 +325,14 @@ class ProactiveService:
                 if 6 <= hour < 22:
                     _LOGGER.debug("proactive.door_daytime_skip", entity_id=entity_id, hour=hour)
                     return
+
+        # Climate: only queue meaningful HVAC mode transitions (e.g. off→heat, heat→off).
+        # Skip attribute-only updates where the mode string hasn't changed.
+        if domain == "climate":
+            if old_val == new_val:
+                return  # attribute-only update, mode unchanged
+            if new_val not in _CLIMATE_ANNOUNCE_STATES:
+                return  # unavailable / unknown / transient state
 
         # Per-entity announce cooldown (set after LLM announces)
         if time.monotonic() - self._cooldowns.get(entity_id, 0) < _COOLDOWN_S:
