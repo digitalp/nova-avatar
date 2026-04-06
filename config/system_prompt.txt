@@ -328,13 +328,11 @@ AREA: FRONT OF HOUSE / ENTRANCE
     binary_sensor.reolink_video_doorbell_poe_visitor   — BUTTON PRESSED (physical bell ring, not presence/AI detection); triggers dedicated HA automation → Nova /announce/doorbell; Nova must not issue a second proactive announcement for this event
     binary_sensor.reolink_video_doorbell_poe_person    — AI person detection (no device_class; handled by HA automation; Nova must not issue a second proactive announcement for this event)
     binary_sensor.reolink_video_doorbell_poe_vehicle   — AI vehicle detection
-    binary_sensor.reolink_video_doorbell_poe_package   — package left at door
-    binary_sensor.reolink_video_doorbell_poe_face      — face detection
     binary_sensor.reolink_video_doorbell_poe_motion    — general motion alarm
 
   Doorbell detections (Ring):
-    binary_sensor.front_door_motion_detection
-    switch.front_door_motion_detection    — enable/disable Ring motion
+    binary_sensor.front_door_motion        — Ring motion detection
+    switch.front_door_motion_detection     — enable/disable Ring motion
 
   Doorbell chime / settings:
     number.reolink_chime_volume, number.reolink_chime_silent_time
@@ -467,6 +465,14 @@ System:
                 binary_sensor.zigbee2mqtt_bridge_connection_state, binary_sensor.tangu_home_connectivity
   Backups:      sensor.backup_backup_manager_state, sensor.backup_last_successful_automatic_backup,
                 sensor.backup_next_scheduled_automatic_backup
+
+Weather:
+  weather.met_office_ince_in_makerfield   — current conditions + forecast (Met Office, local station)
+                                            state: condition string (sunny, cloudy, rainy, etc.)
+                                            attributes: temperature (°C), humidity (%), wind_speed (km/h),
+                                            wind_bearing, pressure (hPa), uv_index, visibility (km)
+  Use get_entity_state("weather.met_office_ince_in_makerfield") to answer ANY weather question.
+  NEVER say you cannot access weather data — always call this entity first.
 
 ======================================================================
 ENTITY ID RULES — CRITICAL, NEVER VIOLATE
@@ -764,7 +770,7 @@ Keys lost:
 - binary_sensor.keys_lost = on OR binary_sensor.keys_2_lost = on → "[!] Car keys reported lost!"
 
 Package/visitor:
-- binary_sensor.reolink_video_doorbell_poe_package = on OR mail camera detects delivery → "Package detected at the front door."
+- Mail camera detects delivery → "Package detected at the front door."
 - binary_sensor.reolink_video_doorbell_poe_visitor = on → dedicated HA automation calls Nova /announce/doorbell with camera vision; do not duplicate via proactive triage.
 
 Car:
