@@ -6,215 +6,7 @@
 <title>Nova Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
-// ── Format helpers ────────────────────────────────────────────────────────────
-function _fmtBytes(b) {
-  if (b == null) return '—';
-  if (b >= 1e12) return (b/1e12).toFixed(2) + ' TB';
-  if (b >= 1e9)  return (b/1e9).toFixed(2)  + ' GB';
-  if (b >= 1e6)  return (b/1e6).toFixed(1)  + ' MB';
-  return (b/1e3).toFixed(0) + ' KB';
-}
-
-function _pct(used, total) { return total ? Math.round(used / total * 100) : 0; }
-
-function _barColor(pct) {
-  if (pct > 85) return 'red';
-  if (pct > 65) return 'yellow';
-  return 'green';
-}
-
-// ── Chart defaults ────────────────────────────────────────────────────────────
-Chart.defaults.color           = '#64748b';
-Chart.defaults.borderColor     = 'rgba(255,255,255,.05)';
-Chart.defaults.font.family     = 'Inter, sans-serif';
-Chart.defaults.font.size       = 11;
-
-function _lineDataset(label, data, color, fill=false) {
-  return {
-    label, data,
-    borderColor: color,
-    backgroundColor: fill ? color.replace(')',', 0.12)').replace('rgb','rgba') : 'transparent',
-    borderWidth: 2,
-    pointRadius: 2,
-    pointHoverRadius: 4,
-    tension: 0.35,
-    fill,
-  };
-}
-
-function _barDataset(label, data, color) {
-  return {
-    label, data,
-    backgroundColor: color,
-    borderRadius: 4,
-    borderWidth: 0,
-  };
-}
-
-const _chartRegistry = {};
-
-function _getOrCreate(id, cfg) {
-  if (_chartRegistry[id]) { _chartRegistry[id].destroy(); }
-  const ctx = document.getElementById(id);
-  if (!ctx) return null;
-  const c = new Chart(ctx, cfg);
-  _chartRegistry[id] = c;
-  return c;
-}
-
-// ── System Metrics ────────────────────────────────────────────────────────────
-let _metricsES = null;
-
-function _applyGauges(s) {
-  if (!s) return;
-  const _b = id => document.getElementById(id);
-
-  // CPU
-  const cpu = s.cpu_pct ?? 0;
-  _b('m-cpu-val') && (_b('m-cpu-val').textContent = cpu.toFixed(1) + '%');
-  _b('m-cpu-pct') && (_b('m-cpu-pct').textContent = '');
-  const cpuBar = _b('m-cpu-bar');
-  if (cpuBar) { cpuBar.style.width = Math.min(cpu,100) + '%'; cpuBar.className = 'gauge-bar-fill ' + _barColor(cpu); }
-
-  // RAM
-  const rp = _pct(s.ram_used, s.ram_total);
-  _b('m-ram-val') && (_b('m-ram-val').textContent = _fmtBytes(s.ram_used));
-  _b('m-ram-pct') && (_b('m-ram-pct').textContent = rp + '%');
-  _b('m-ram-sub') && (_b('m-ram-sub').textContent = 'of ' + _fmtBytes(s.ram_total));
-  const ramBar = _b('m-ram-bar');
-  if (ramBar) { ramBar.style.width = rp + '%'; ramBar.className = 'gauge-bar-fill ' + _barColor(rp); }
-
-  // Disk
-  const dp = _pct(s.disk_used, s.disk_total);
-  _b('m-disk-val') && (_b('m-disk-val').textContent = _fmtBytes(s.disk_used));
-  _b('m-disk-pct') && (_b('m-disk-pct').textContent = dp + '%');
-  _b('m-disk-sub') && (_b('m-disk-sub').textContent = 'of ' + _fmtBytes(s.disk_total));
-  const diskBar = _b('m-disk-bar');
-  if (diskBar) { diskBar.style.width = dp + '%'; diskBar.className = 'gauge-bar-fill ' + _barColor(dp); }
-
-  // GPU
-  const gpu = s.gpu_util ?? null;
-  const gmp = s.gpu_mem_used != null ? _pct(s.gpu_mem_used, s.gpu_mem_total) : null;
-  _b('m-gpu-val') && (_b('m-gpu-val').textContent = gpu != null ? gpu.toFixed(0) + '%' : 'N/A');
-  _b('m-gpu-pct') && (_b('m-gpu-pct').textContent = gpu != null ? gpu.toFixed(0) + '%' : '');
-  _b('m-gpu-sub') && (_b('m-gpu-sub').textContent = s.gpu_mem_used != null ? _fmtBytes(s.gpu_mem_used) + ' / ' + _fmtBytes(s.gpu_mem_total) : '');
-  const gpuBar = _b('m-gpu-bar');
-  if (gpuBar && gpu != null) { gpuBar.style.width = gpu + '%'; gpuBar.className = 'gauge-bar-fill ' + _barColor(gpu); }
-}
-
-function _buildMetricsCharts(history) {
-  const labels = history.map(h => h.hour ? h.hour.slice(11,16) : '');
-  const cpus   = history.map(h => h.cpu_pct != null ? +h.cpu_pct.toFixed(1) : null);
-  const rams   = history.map(h => (h.ram_used != null && h.ram_total) ? +(h.ram_used / h.ram_total * 100).toFixed(1) : null);
-  const gpus   = history.map(h => h.gpu_util != null ? +h.gpu_util.toFixed(1) : null);
-
-  _getOrCreate('chart-cpu-ram', {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        _lineDataset('CPU %', cpus, '#22d3ee', true),
-        _lineDataset('RAM %', rams, '#818cf8', false),
-      ],
-    },
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: true, position: 'top' } },
-      scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }, x: { ticks: { maxTicksLimit: 12 } } },
-    },
-  });
-
-  _getOrCreate('chart-gpu', {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [_lineDataset('GPU %', gpus, '#10b981', true)],
-    },
-    options: { responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }, x: { ticks: { maxTicksLimit: 12 } } },
-    },
-  });
-}
-
-async function loadMetrics() {
-  try {
-    const d = await api('GET', '/admin/metrics');
-    _applyGauges(d.latest);
-    if (d.history && d.history.length) _buildMetricsCharts(d.history);
-  } catch(e) { console.warn('metrics load err', e); }
-
-  // SSE live updates
-  if (_metricsES) { _metricsES.close(); _metricsES = null; }
-  _metricsES = new EventSource('/admin/metrics/stream');
-  _metricsES.onmessage = (ev) => {
-    try { const s = JSON.parse(ev.data); if (s.cpu_pct != null) { _applyGauges(s); _applyGaugeDash(s); } } catch {}
-  };
-}
-
-// Stop metrics SSE when leaving section
-const _origNavigateMetrics = window.navigate;
-window.navigate = function(el) {
-  _origNavigateMetrics(el);
-  if (el.dataset.section !== 'metrics' && _metricsES) {
-    _metricsES.close(); _metricsES = null;
-  }
-  if (el.dataset.section === 'metrics') loadMetrics();
-};
-
-// ── Persistent LLM Cost Chart ─────────────────────────────────────────────────
-let _costPeriod = 'month';
-
-function selectCostPeriod(btn) {
-  _costPeriod = btn.dataset.period;
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  loadCostHistory(_costPeriod);
-}
-
-function _buildCostChart(byDay) {
-  const labels = byDay.map(r => r.day || r.month || '');
-  const costs  = byDay.map(r => +(r.cost_usd || 0).toFixed(6));
-  _getOrCreate('chart-cost', {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [_barDataset('Cost (USD)', costs, 'rgba(16,185,129,.7)')],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { ticks: { callback: v => '$' + (v < 0.001 ? v.toFixed(6) : v.toFixed(4)) } },
-        x: { ticks: { maxTicksLimit: 14, maxRotation: 45 } },
-      },
-    },
-  });
-}
-
-async function loadCostHistory(period='month') {
-  try {
-    const d = await api('GET', '/admin/costs/history?period=' + period);
-    const s = d.summary || {};
-    const cost = s.cost_usd || 0;
-    document.getElementById('cost-db-calls') && (document.getElementById('cost-db-calls').textContent = _fmtTokens(s.calls || 0));
-    document.getElementById('cost-db-in')    && (document.getElementById('cost-db-in').textContent    = _fmtTokens(s.input_tokens || 0));
-    document.getElementById('cost-db-out')   && (document.getElementById('cost-db-out').textContent   = _fmtTokens(s.output_tokens || 0));
-    document.getElementById('cost-db-total') && (document.getElementById('cost-db-total').textContent = '$' + (cost < 0.01 ? cost.toFixed(6) : cost.toFixed(4)));
-
-    const chartData = period === 'year' ? (d.monthly || []) : (d.by_day || []);
-    if (chartData.length) _buildCostChart(chartData);
-  } catch(e) { console.warn('cost history err', e); }
-}
-
-// Hook into cost section navigation to also load DB history
-const _origNavigateCostHist = window.navigate;
-window.navigate = function(el) {
-  _origNavigateCostHist(el);
-  if (el.dataset.section === 'costs') loadCostHistory(_costPeriod);
-};
-
-</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 /* ── Design tokens ──────────────────────────────────────────────────────────── */
 :root {
@@ -2308,6 +2100,214 @@ window.navigate = function(el) {
   if (el.dataset.section === 'costs') startCostStream();
 };
 
+</script>
+<script>
+// ── Format helpers ────────────────────────────────────────────────────────────
+function _fmtBytes(b) {
+  if (b == null) return '—';
+  if (b >= 1e12) return (b/1e12).toFixed(2) + ' TB';
+  if (b >= 1e9)  return (b/1e9).toFixed(2)  + ' GB';
+  if (b >= 1e6)  return (b/1e6).toFixed(1)  + ' MB';
+  return (b/1e3).toFixed(0) + ' KB';
+}
+
+function _pct(used, total) { return total ? Math.round(used / total * 100) : 0; }
+
+function _barColor(pct) {
+  if (pct > 85) return 'red';
+  if (pct > 65) return 'yellow';
+  return 'green';
+}
+
+// ── Chart defaults ────────────────────────────────────────────────────────────
+Chart.defaults.color           = '#64748b';
+Chart.defaults.borderColor     = 'rgba(255,255,255,.05)';
+Chart.defaults.font.family     = 'Inter, sans-serif';
+Chart.defaults.font.size       = 11;
+
+function _lineDataset(label, data, color, fill=false) {
+  return {
+    label, data,
+    borderColor: color,
+    backgroundColor: fill ? color.replace(')',', 0.12)').replace('rgb','rgba') : 'transparent',
+    borderWidth: 2,
+    pointRadius: 2,
+    pointHoverRadius: 4,
+    tension: 0.35,
+    fill,
+  };
+}
+
+function _barDataset(label, data, color) {
+  return {
+    label, data,
+    backgroundColor: color,
+    borderRadius: 4,
+    borderWidth: 0,
+  };
+}
+
+const _chartRegistry = {};
+
+function _getOrCreate(id, cfg) {
+  if (_chartRegistry[id]) { _chartRegistry[id].destroy(); }
+  const ctx = document.getElementById(id);
+  if (!ctx) return null;
+  const c = new Chart(ctx, cfg);
+  _chartRegistry[id] = c;
+  return c;
+}
+
+// ── System Metrics ────────────────────────────────────────────────────────────
+let _metricsES = null;
+
+function _applyGauges(s) {
+  if (!s) return;
+  const _b = id => document.getElementById(id);
+
+  // CPU
+  const cpu = s.cpu_pct ?? 0;
+  _b('m-cpu-val') && (_b('m-cpu-val').textContent = cpu.toFixed(1) + '%');
+  _b('m-cpu-pct') && (_b('m-cpu-pct').textContent = '');
+  const cpuBar = _b('m-cpu-bar');
+  if (cpuBar) { cpuBar.style.width = Math.min(cpu,100) + '%'; cpuBar.className = 'gauge-bar-fill ' + _barColor(cpu); }
+
+  // RAM
+  const rp = _pct(s.ram_used, s.ram_total);
+  _b('m-ram-val') && (_b('m-ram-val').textContent = _fmtBytes(s.ram_used));
+  _b('m-ram-pct') && (_b('m-ram-pct').textContent = rp + '%');
+  _b('m-ram-sub') && (_b('m-ram-sub').textContent = 'of ' + _fmtBytes(s.ram_total));
+  const ramBar = _b('m-ram-bar');
+  if (ramBar) { ramBar.style.width = rp + '%'; ramBar.className = 'gauge-bar-fill ' + _barColor(rp); }
+
+  // Disk
+  const dp = _pct(s.disk_used, s.disk_total);
+  _b('m-disk-val') && (_b('m-disk-val').textContent = _fmtBytes(s.disk_used));
+  _b('m-disk-pct') && (_b('m-disk-pct').textContent = dp + '%');
+  _b('m-disk-sub') && (_b('m-disk-sub').textContent = 'of ' + _fmtBytes(s.disk_total));
+  const diskBar = _b('m-disk-bar');
+  if (diskBar) { diskBar.style.width = dp + '%'; diskBar.className = 'gauge-bar-fill ' + _barColor(dp); }
+
+  // GPU
+  const gpu = s.gpu_util ?? null;
+  const gmp = s.gpu_mem_used != null ? _pct(s.gpu_mem_used, s.gpu_mem_total) : null;
+  _b('m-gpu-val') && (_b('m-gpu-val').textContent = gpu != null ? gpu.toFixed(0) + '%' : 'N/A');
+  _b('m-gpu-pct') && (_b('m-gpu-pct').textContent = gpu != null ? gpu.toFixed(0) + '%' : '');
+  _b('m-gpu-sub') && (_b('m-gpu-sub').textContent = s.gpu_mem_used != null ? _fmtBytes(s.gpu_mem_used) + ' / ' + _fmtBytes(s.gpu_mem_total) : '');
+  const gpuBar = _b('m-gpu-bar');
+  if (gpuBar && gpu != null) { gpuBar.style.width = gpu + '%'; gpuBar.className = 'gauge-bar-fill ' + _barColor(gpu); }
+}
+
+function _buildMetricsCharts(history) {
+  const labels = history.map(h => h.hour ? h.hour.slice(11,16) : '');
+  const cpus   = history.map(h => h.cpu_pct != null ? +h.cpu_pct.toFixed(1) : null);
+  const rams   = history.map(h => (h.ram_used != null && h.ram_total) ? +(h.ram_used / h.ram_total * 100).toFixed(1) : null);
+  const gpus   = history.map(h => h.gpu_util != null ? +h.gpu_util.toFixed(1) : null);
+
+  _getOrCreate('chart-cpu-ram', {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        _lineDataset('CPU %', cpus, '#22d3ee', true),
+        _lineDataset('RAM %', rams, '#818cf8', false),
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: true, position: 'top' } },
+      scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }, x: { ticks: { maxTicksLimit: 12 } } },
+    },
+  });
+
+  _getOrCreate('chart-gpu', {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [_lineDataset('GPU %', gpus, '#10b981', true)],
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } }, x: { ticks: { maxTicksLimit: 12 } } },
+    },
+  });
+}
+
+async function loadMetrics() {
+  try {
+    const d = await api('GET', '/admin/metrics');
+    _applyGauges(d.latest);
+    if (d.history && d.history.length) _buildMetricsCharts(d.history);
+  } catch(e) { console.warn('metrics load err', e); }
+
+  // SSE live updates
+  if (_metricsES) { _metricsES.close(); _metricsES = null; }
+  _metricsES = new EventSource('/admin/metrics/stream');
+  _metricsES.onmessage = (ev) => {
+    try { const s = JSON.parse(ev.data); if (s.cpu_pct != null) { _applyGauges(s); _applyGaugeDash(s); } } catch {}
+  };
+}
+
+// Stop metrics SSE when leaving section
+const _origNavigateMetrics = window.navigate;
+window.navigate = function(el) {
+  _origNavigateMetrics(el);
+  if (el.dataset.section !== 'metrics' && _metricsES) {
+    _metricsES.close(); _metricsES = null;
+  }
+  if (el.dataset.section === 'metrics') loadMetrics();
+};
+
+// ── Persistent LLM Cost Chart ─────────────────────────────────────────────────
+let _costPeriod = 'month';
+
+function selectCostPeriod(btn) {
+  _costPeriod = btn.dataset.period;
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadCostHistory(_costPeriod);
+}
+
+function _buildCostChart(byDay) {
+  const labels = byDay.map(r => r.day || r.month || '');
+  const costs  = byDay.map(r => +(r.cost_usd || 0).toFixed(6));
+  _getOrCreate('chart-cost', {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [_barDataset('Cost (USD)', costs, 'rgba(16,185,129,.7)')],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { ticks: { callback: v => '$' + (v < 0.001 ? v.toFixed(6) : v.toFixed(4)) } },
+        x: { ticks: { maxTicksLimit: 14, maxRotation: 45 } },
+      },
+    },
+  });
+}
+
+async function loadCostHistory(period='month') {
+  try {
+    const d = await api('GET', '/admin/costs/history?period=' + period);
+    const s = d.summary || {};
+    const cost = s.cost_usd || 0;
+    document.getElementById('cost-db-calls') && (document.getElementById('cost-db-calls').textContent = _fmtTokens(s.calls || 0));
+    document.getElementById('cost-db-in')    && (document.getElementById('cost-db-in').textContent    = _fmtTokens(s.input_tokens || 0));
+    document.getElementById('cost-db-out')   && (document.getElementById('cost-db-out').textContent   = _fmtTokens(s.output_tokens || 0));
+    document.getElementById('cost-db-total') && (document.getElementById('cost-db-total').textContent = '$' + (cost < 0.01 ? cost.toFixed(6) : cost.toFixed(4)));
+
+    const chartData = period === 'year' ? (d.monthly || []) : (d.by_day || []);
+    if (chartData.length) _buildCostChart(chartData);
+  } catch(e) { console.warn('cost history err', e); }
+}
+
+// Hook into cost section navigation to also load DB history
+const _origNavigateCostHist = window.navigate;
+window.navigate = function(el) {
+  _origNavigateCostHist(el);
+  if (el.dataset.section === 'costs') loadCostHistory(_costPeriod);
+};
 </script>
 </body>
 </html>
