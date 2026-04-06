@@ -253,6 +253,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
       Live Logs
     </div>
+    <div class="nav-item" data-section="decisions" onclick="navigate(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/><path d="M9.5 3.5L12 2l2.5 1.5"/><path d="M3.5 9.5L2 12l1.5 2.5"/><path d="M20.5 9.5L22 12l-1.5 2.5"/></svg>
+      AI Decisions
+    </div>
     <div class="nav-item" data-section="sessions" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Sessions
@@ -433,6 +437,47 @@
     </div>
 
     <!-- USERS (admin only) -->
+
+    <!-- ── AI Decision Log ─────────────────────────────────────────── -->
+    <div id="section-decisions" class="section">
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);">
+          <div>
+            <div class="card-title" style="margin:0;">AI Decision Log</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+              Live stream of Nova's proactive triage, tool calls, and chat responses
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;">
+              <input type="checkbox" id="dec-autoscroll" checked style="cursor:pointer;"> Auto-scroll
+            </label>
+            <button class="btn btn-sm btn-outline" onclick="clearDecisions()">Clear</button>
+            <span id="dec-status" style="font-size:11px;color:var(--muted);">Connecting…</span>
+          </div>
+        </div>
+
+        <!-- Filter bar -->
+        <div style="display:flex;gap:6px;padding:10px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+          <button class="btn btn-sm btn-outline dec-filter active" data-kind="all" onclick="filterDecisions(this)">All</button>
+          <button class="btn btn-sm btn-outline dec-filter" data-kind="triage_announce" onclick="filterDecisions(this)" style="border-color:#22c55e;color:#22c55e;">▲ Announce</button>
+          <button class="btn btn-sm btn-outline dec-filter" data-kind="triage_silence"  onclick="filterDecisions(this)" style="border-color:#64748b;color:#64748b;">— Silent</button>
+          <button class="btn btn-sm btn-outline dec-filter" data-kind="tool_call"        onclick="filterDecisions(this)" style="border-color:#6366f1;color:#6366f1;">⚙ Tool Call</button>
+          <button class="btn btn-sm btn-outline dec-filter" data-kind="chat_response"   onclick="filterDecisions(this)" style="border-color:#0ea5e9;color:#0ea5e9;">💬 Chat</button>
+          <button class="btn btn-sm btn-outline dec-filter" data-kind="motion_announce" onclick="filterDecisions(this)" style="border-color:#f59e0b;color:#f59e0b;">📷 Motion</button>
+          <button class="btn btn-sm btn-outline dec-filter" data-kind="weather_announce" onclick="filterDecisions(this)" style="border-color:#38bdf8;color:#38bdf8;">🌤 Weather</button>
+        </div>
+
+        <!-- Log entries -->
+        <div id="dec-log"
+             style="font-family:monospace;font-size:12px;line-height:1.7;
+                    height:600px;overflow-y:auto;padding:12px 0;
+                    background:var(--surface);">
+          <div style="padding:0 20px;color:var(--muted);">Waiting for events…</div>
+        </div>
+      </div>
+    </div>
+
     <div id="section-users" class="section">
       <div class="card">
         <div class="card-title">Users</div>
@@ -1055,6 +1100,126 @@ async function submitPasswordChange() {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+  // ── AI Decision Log ────────────────────────────────────────────────────
+  let _decES   = null;
+  let _decFilter = 'all';
+  let _decEntries = [];
+  const _kindMeta = {
+    triage_announce: { label:'▲ ANNOUNCE',  bg:'#14532d', color:'#4ade80' },
+    triage_silence:  { label:'— SILENT',    bg:'#1e293b', color:'#94a3b8' },
+    tool_call:       { label:'⚙ TOOL',      bg:'#1e1b4b', color:'#a5b4fc' },
+    chat_response:   { label:'💬 CHAT',      bg:'#0c2e48', color:'#7dd3fc' },
+    motion_announce: { label:'📷 MOTION',   bg:'#3b2200', color:'#fcd34d' },
+    weather_announce:{ label:'🌤 WEATHER',  bg:'#0c2748', color:'#7dd3fc' },
+  };
+
+  function _kindBadge(kind) {
+    const m = _kindMeta[kind] || { label: kind.toUpperCase(), bg:'#1e293b', color:'#e2e8f0' };
+    return `<span style="background:${m.bg};color:${m.color};padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.4px;margin-right:8px;">${m.label}</span>`;
+  }
+
+  function _decEntryHTML(e) {
+    let detail = '';
+    if (e.kind === 'triage_announce' || e.kind === 'triage_silence') {
+      const ents = (e.entities || []).join(', ');
+      detail = `<span style="color:var(--muted);">${ents}</span>`;
+      if (e.message) detail += ` <span style="color:#86efac;">→ "${e.message}"</span>`;
+      if (e.reason)  detail += ` <span style="color:var(--muted);">(${e.reason})</span>`;
+    } else if (e.kind === 'tool_call') {
+      const args = Object.entries(e.args || {}).map(([k,v])=>`${k}=${v}`).join(', ');
+      const ok   = e.success ? '<span style="color:#4ade80;">✓</span>' : '<span style="color:#f87171;">✗</span>';
+      detail = `${ok} <span style="color:#a5b4fc;">${e.tool || ''}</span>(<span style="color:#e2e8f0;">${args}</span>)`;
+      if (e.result) detail += ` <span style="color:var(--muted);">→ ${e.result}</span>`;
+    } else if (e.kind === 'chat_response') {
+      detail = `<span style="color:#7dd3fc;">"${e.query || ''}"</span>`;
+      if (e.tool_count > 0) detail += ` <span style="color:var(--muted);">[${e.tool_count} tool${e.tool_count>1?'s':''}]</span>`;
+      if (e.response) detail += ` <span style="color:var(--muted);">→ "${e.response}"</span>`;
+      if (e.ms) detail += ` <span style="color:#475569;">(${e.ms}ms)</span>`;
+    } else if (e.kind === 'motion_announce' || e.kind === 'weather_announce') {
+      detail = `<span style="color:#fcd34d;">${e.camera || (e.old + ' → ' + e.new)}</span>`;
+      if (e.message) detail += ` <span style="color:#86efac;">→ "${e.message}"</span>`;
+    }
+    return `<div class="dec-entry" data-kind="${e.kind}"
+                 style="padding:4px 20px;border-bottom:1px solid rgba(255,255,255,.04);
+                        display:flex;align-items:baseline;gap:4px;">
+      <span style="color:#475569;min-width:60px;">${e.ts}</span>
+      ${_kindBadge(e.kind)}
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${detail}</span>
+    </div>`;
+  }
+
+  function _appendDecEntry(e) {
+    _decEntries.push(e);
+    if (_decEntries.length > 500) _decEntries.shift();
+    if (_decFilter !== 'all' && e.kind !== _decFilter) return;
+    const log = document.getElementById('dec-log');
+    if (!log) return;
+    // Remove placeholder text on first real entry
+    if (log.querySelector('div[style*="Waiting"]')) log.innerHTML = '';
+    log.insertAdjacentHTML('beforeend', _decEntryHTML(e));
+    if (document.getElementById('dec-autoscroll')?.checked) {
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+
+  function filterDecisions(btn) {
+    _decFilter = btn.dataset.kind;
+    document.querySelectorAll('.dec-filter').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const log = document.getElementById('dec-log');
+    if (!log) return;
+    const entries = _decFilter === 'all'
+      ? _decEntries
+      : _decEntries.filter(e => e.kind === _decFilter);
+    if (entries.length === 0) {
+      log.innerHTML = '<div style="padding:0 20px;color:var(--muted);">No entries for this filter.</div>';
+    } else {
+      log.innerHTML = entries.map(_decEntryHTML).join('');
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+
+  function clearDecisions() {
+    _decEntries = [];
+    const log = document.getElementById('dec-log');
+    if (log) log.innerHTML = '<div style="padding:0 20px;color:var(--muted);">Log cleared.</div>';
+  }
+
+  function startDecisionStream() {
+    if (_decES) { _decES.close(); _decES = null; }
+    const status = document.getElementById('dec-status');
+    if (status) status.textContent = 'Connecting…';
+
+    // First load backlog via JSON, then switch to SSE for live updates
+    fetch('/admin/decisions', { credentials:'include' })
+      .then(r => r.json())
+      .then(data => {
+        (data.decisions || []).forEach(_appendDecEntry);
+        if (status) status.textContent = `${_decEntries.length} entries loaded`;
+      })
+      .catch(() => {});
+
+    _decES = new EventSource('/admin/decisions/stream');
+    _decES.onopen = () => { if (status) status.textContent = '● Live'; };
+    _decES.onmessage = (ev) => {
+      try {
+        const e = JSON.parse(ev.data);
+        if (e && e.kind) _appendDecEntry(e);
+      } catch {}
+    };
+    _decES.onerror = () => {
+      if (status) status.textContent = '⚠ Disconnected — retrying…';
+    };
+  }
+
+  // Start streaming when the decisions section becomes visible
+  const _origNavigate = window.navigate;
+  window.navigate = function(el) {
+    _origNavigate(el);
+    if (el.dataset.section === 'decisions') startDecisionStream();
+  };
+
 </script>
 </body>
 </html>

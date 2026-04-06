@@ -14,6 +14,7 @@ from avatar_backend.config import get_settings
 from avatar_backend.models.acl import ACLManager
 from avatar_backend.services.ha_proxy import HAProxy
 from avatar_backend.services.llm_service import LLMService
+from avatar_backend.services.decision_log import DecisionLog
 from avatar_backend.services.session_manager import SessionManager
 from avatar_backend.services.speaker_service import SpeakerService
 from avatar_backend.services.stt_service import STTService
@@ -171,6 +172,13 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(
         _session_cleanup_loop(app.state.session_manager)
     )
+
+    # Decision log — shared by proactive service and chat service
+    decision_log = DecisionLog()
+    app.state.decision_log = decision_log
+    proactive = getattr(app.state, 'proactive_service', None)
+    if proactive:
+        proactive.set_decision_log(decision_log)
 
     logger.info("avatar_backend.ready")
     yield

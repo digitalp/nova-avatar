@@ -438,7 +438,15 @@ Car: KO66EWX
                   Flag any tyre deviating > 30 kPa from the others as possible slow puncture.
   Status:         binary_sensor.ko66ewx_windows_closed, sensor.ko66ewx_lock,
                   sensor.ko66ewx_ignition_state, sensor.ko66ewx_odometer
-  Lock:           lock.ko66ewx_lock
+  Lock:           lock.ko66ewx_lock (currently unavailable — use sensor.ko66ewx_lock instead)
+  sensor.ko66ewx_lock — door/lock state (read via get_entity_state):
+    Attributes to check:
+      doorstatusfrontleft, doorstatusfrontright, doorstatusrearleft, doorstatusrearright:
+        false = LOCKED, true = UNLOCKED (for that individual door)
+      doorStatusOverall: 0 = all doors locked, 1 = one or more doors unlocked
+      sunroofstatus: 0 = sunroof closed/locked
+    To answer "is the car locked?": check doorStatusOverall — 0 means fully locked,
+    1 means unlocked. Cite which specific doors are open if doorStatusOverall == 1.
   When asked about the car: always report fuel, all four tyre pressures, windows, lock state,
   ignition state, and any active warning lights.
 

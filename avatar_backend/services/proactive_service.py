@@ -155,6 +155,10 @@ class ProactiveService:
         self._last_weather_condition: str = ""
         self._last_weather_announce_time: float = 0.0
         self._last_forecast_date: str = ""
+        self._decision_log = None
+
+    def set_decision_log(self, log) -> None:
+        self._decision_log = log
 
     def update_system_prompt(self, prompt: str) -> None:
         """Called by sync-prompt to keep the proactive context current."""
@@ -625,6 +629,12 @@ class ProactiveService:
 
         if not result.get("announce"):
             _LOGGER.debug("proactive.no_action")
+            if self._decision_log:
+                self._decision_log.record(
+                    "triage_silence",
+                    entities=[c["entity_id"] for c in changes],
+                    reason="LLM: no announcement needed",
+                )
             return
 
         message = (result.get("message") or "").strip()
@@ -636,6 +646,13 @@ class ProactiveService:
             return
 
         _LOGGER.info("proactive.announcing", chars=len(message), priority=priority)
+        if self._decision_log:
+            self._decision_log.record(
+                "triage_announce",
+                entities=[c["entity_id"] for c in changes],
+                priority=priority,
+                message=message,
+            )
 
         now = time.monotonic()
         self._last_announce_time = now

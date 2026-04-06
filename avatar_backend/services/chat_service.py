@@ -15,6 +15,7 @@ import structlog
 
 from avatar_backend.models.messages import ChatResponse, ToolCall
 from avatar_backend.models.tool_result import ToolResult
+from avatar_backend.services.decision_log import DecisionLog
 from avatar_backend.services.ha_proxy import HAProxy
 from avatar_backend.services.llm_service import LLMService
 from avatar_backend.services.session_manager import SessionManager
@@ -40,6 +41,7 @@ async def run_chat(
     llm: LLMService,
     sm: SessionManager,
     ha: HAProxy,
+    decision_log: DecisionLog | None = None,
 ) -> ChatResult:
     """
     Full multi-round chat → tool execution loop.
@@ -106,6 +108,15 @@ async def run_chat(
             else:
                 result = await ha.execute_tool_call(tc)
             tc.acl_status = "allowed" if result.success else "denied"
+            if decision_log:
+                decision_log.record(
+                    "tool_call",
+                    tool=tc.function_name,
+                    args={k: str(v)[:80] for k, v in tc.arguments.items()},
+                    success=result.success,
+                    result=result.message[:120] if result.message else "",
+                    session=session_id,
+                )
             tc.acl_reason = result.message if not result.success else ""
             all_tool_calls.append(tc)
             await sm.add_message(session_id, "tool", result.message)
@@ -123,6 +134,15 @@ async def run_chat(
 
     elapsed_ms = int((time.monotonic() - t_start) * 1000)
 
+    if decision_log and (final_text or all_tool_calls):
+        decision_log.record(
+            "chat_response",
+            session=session_id,
+            query=user_text[:100],
+            tool_count=len(all_tool_calls),
+            response=final_text[:150] if final_text else "",
+            ms=elapsed_ms,
+        )
     return ChatResult(
         text=final_text,
         tool_calls=all_tool_calls,

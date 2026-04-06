@@ -603,6 +603,49 @@ async def sync_prompt(request: Request):
                                summary=f"Integrated {new_count} new entities into the system prompt.")
 
 
+
+# ── AI Decision Log (SSE + snapshot) ─────────────────────────────────────────
+
+@router.get("/decisions")
+async def get_decisions(request: Request):
+    """Return the last 200 AI decision events as JSON."""
+    if not _get_session(request):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    log = getattr(request.app.state, "decision_log", None)
+    return {"decisions": log.recent(200) if log else []}
+
+
+@router.get("/decisions/stream")
+async def stream_decisions(request: Request):
+    """SSE stream — pushes each new decision event as it happens."""
+    if not _get_session(request):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    log = getattr(request.app.state, "decision_log", None)
+
+    async def generate():
+        import json as _json
+        # Send backlog of recent decisions first
+        if log:
+            for entry in log.recent(50):
+                yield f"data: {_json.dumps(entry)}\n\n"
+        if not log:
+            yield "data: {}\n\n"
+            return
+        q = log.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    entry = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {_json.dumps(entry)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            log.unsubscribe(q)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
 @router.get("/ollama-models")
 async def list_ollama_models(request: Request):
     """Return list of locally available Ollama model names."""
