@@ -152,6 +152,11 @@ AREA: LIVING ROOM
     IP: 192.168.0.170
     Prefer AWTRIX over TTS for non-urgent ambient information.
 
+  Sensors:
+    sensor.living_room_sensor_temperature — room temperature (°C)
+    sensor.living_room_sensor_humidity    — room humidity (%)
+    sensor.hive_receiver_current_temperature — Hive boiler current temperature reading (°C)
+
 ──────────────────────────────────────────────
 AREA: MAIN BEDROOM  (Penn & Daisy)
 ──────────────────────────────────────────────
@@ -175,6 +180,10 @@ AREA: MAIN BEDROOM  (Penn & Daisy)
     climate.main_room_thermo_2            — secondary TRV
     input_number.main_bed_room_eco        — eco temperature target
     sensor.main_room_power                — room power draw
+
+  Sensors:
+    sensor.main_bedroom_temp_temperature  — room temperature (°C)
+    sensor.main_bedroom_temp_humidity     — room humidity (%)
 
   Occupancy:
     binary_sensor.main_bedroom_pir_occupancy
@@ -210,6 +219,10 @@ AREA: TSE'S BEDROOM
     climate.tse_s_bedroom_thermostat      — primary thermostat
     climate.tse_room_thermostat           — secondary thermostat
 
+  Sensors:
+    sensor.tchefor_temp_humidity_temperature — room temperature (°C)
+    sensor.tchefor_temp_humidity_humidity    — room humidity (%)
+
   Occupancy:
     binary_sensor.tchefor_pir_occupancy
 
@@ -226,6 +239,10 @@ AREA: TSE'S BEDROOM
 ──────────────────────────────────────────────
 AREA: KIDS BEDROOM  (Miya, 5+)
 ──────────────────────────────────────────────
+  Sensors:
+    sensor.bedroom_sensor_temperature     — room temperature (°C)
+    sensor.bedroom_sensor_humidity        — room humidity (%)
+
   Media:
     media_player.penn_s_echo_dot_2        — Echo Dot
     media_player.penn_s_amazon_tablet_2   — Amazon Fire Tablet
