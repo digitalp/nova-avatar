@@ -60,6 +60,8 @@ _SNAPSHOT_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "sensor.ble_",              # BLE beacon noise
     "sensor.cpu_",              # system metrics
     "sensor.awtrix_b21ffc_",   # matrix clock device
+    "sensor.tangu_home_",         # Nova server hardware sensors (CPU/RAM/disk)
+    "sensor.192_168_",            # network IP sensors
     "sensor.calex_",           # single smart plug — already low value
     "sensor.octopus_energy_a_ffd8c137_",  # loyalty points, spins — not actionable
     "sensor.octopus_energy_electricity_16p0478729_",  # rate/standing charge info
@@ -125,7 +127,18 @@ _THRESHOLD_RULES: dict[str, dict] = {
     },
 }
 
-# ── Temperature thresholds applied to ALL temperature sensors ─────────────────
+# ── Temperature sensor entity prefixes to SKIP in threshold check ─────────────
+# (server hardware, TRV internals, door sensors — not room ambient sensors)
+_TEMP_EXCLUDE_PREFIXES: tuple[str, ...] = (
+    "sensor.tangu_home_",
+    "sensor.192_168_",
+    "sensor.awtrix_",
+    "sensor.back_door_device_",
+    "sensor.back_entrance_device_",
+    "sensor.bedroom_1_thermo_",
+)
+
+# ── Temperature thresholds applied to room temperature sensors ─────────────────
 _TEMP_MAX_C = 32.0   # room too hot
 _TEMP_MIN_C = 10.0   # room too cold
 
@@ -360,6 +373,9 @@ class SensorWatchService:
             await self._announce_now(entity_id, msg, priority)
 
     async def _check_temperature(self, entity_id: str, friendly: str, raw_val: str) -> None:
+        # Skip non-room temperature sensors
+        if any(entity_id.startswith(p) for p in _TEMP_EXCLUDE_PREFIXES):
+            return
         if self._entity_on_cooldown(entity_id) or self._global_on_cooldown():
             return
         try:
