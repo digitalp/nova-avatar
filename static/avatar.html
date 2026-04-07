@@ -383,33 +383,32 @@ async function testMic() {
   }
 }
 
-// ── Auto-start (skip tap gate via ?autostart URL param) ─────────────────────
-// Avatar loads immediately. If the browser requires a gesture for AudioContext
-// (desktop Chrome), a small banner appears and resolves on the first touch.
-// On kiosk/trusted browsers AudioContext starts 'running' — fully hands-free.
-if (new URLSearchParams(window.location.search).has('autostart')) {
-  (async () => {
-    $gate.classList.add('hidden');
-    $overlay.classList.add('show');
+// ── Auto-boot — avatar loads immediately on page open ───────────────────────
+// The tap gate is hidden by default. AudioContext is created immediately;
+// on kiosk/trusted browsers it starts 'running' (fully hands-free).
+// On strict browsers (desktop Chrome) it starts 'suspended' — a small
+// banner prompts the first touch to unlock audio, then disappears.
+(async () => {
+  $gate.classList.add('hidden');
+  $overlay.classList.add('show');
 
-    audioCtx = new AudioContext();
-    if (audioCtx.state === 'suspended') {
-      const banner = document.getElementById('audio-unlock-banner');
-      banner.style.display = 'block';
-      const unlock = async () => { await audioCtx.resume(); banner.style.display = 'none'; };
-      document.addEventListener('pointerdown', unlock, { capture: true, once: true });
-    }
+  audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') {
+    const banner = document.getElementById('audio-unlock-banner');
+    banner.style.display = 'block';
+    const unlock = async () => { await audioCtx.resume(); banner.style.display = 'none'; };
+    document.addEventListener('pointerdown', unlock, { capture: true, once: true });
+  }
 
-    try {
-      const s = await fetch(`${SERVER}/admin/avatar-settings`,
-        { headers: { 'X-API-Key': API_KEY } }).then(r => r.json());
-      if (typeof s.skin_tone === 'number') _skinToneIndex = s.skin_tone;
-      if (s.avatar_url) AVATAR_URL = s.avatar_url;
-    } catch (_) {}
+  try {
+    const s = await fetch(`${SERVER}/admin/avatar-settings`,
+      { headers: { 'X-API-Key': API_KEY } }).then(r => r.json());
+    if (typeof s.skin_tone === 'number') _skinToneIndex = s.skin_tone;
+    if (s.avatar_url) AVATAR_URL = s.avatar_url;
+  } catch (_) {}
 
-    initHead().catch(e => { $loadText.textContent = 'Load error: ' + e.message; });
-  })();
-}
+  initHead().catch(e => { $loadText.textContent = 'Load error: ' + e.message; });
+})();
 
 // ── TalkingHead ───────────────────────────────────────────────────────────────
 async function initHead() {
