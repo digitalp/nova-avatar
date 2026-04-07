@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Literal
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, status
+import re as _re
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -467,6 +468,53 @@ async def save_avatar_settings(body: AvatarSettings, request: Request):
     _AVATAR_SETTINGS_FILE.write_text(_json.dumps(body.model_dump()))
     _LOGGER.info("admin.avatar_settings_saved", skin_tone=body.skin_tone)
     return {"saved": True}
+
+
+# ── Avatar library ───────────────────────────────────────────────────────────
+
+_AVATARS_DIR = _INSTALL_DIR / "static" / "avatars"
+_AVATAR_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+@router.get("/avatars")
+async def list_avatars(request: Request):
+    """Return all GLB filenames available in static/avatars/."""
+    _require_session(request, min_role="viewer")
+    files = sorted(p.name for p in _AVATARS_DIR.glob("*.glb")) if _AVATARS_DIR.exists() else []
+    return {"avatars": files}
+
+
+@router.post("/avatars/upload")
+async def upload_avatar(request: Request, file: UploadFile = File(...)):
+    """Upload a new GLB avatar (admin only, 50 MB max)."""
+    _require_session(request, min_role="admin")
+    if not (file.filename or "").lower().endswith(".glb"):
+        raise HTTPException(status_code=400, detail="Only .glb files are accepted.")
+    safe = _re.sub(r"[^a-zA-Z0-9._-]", "_", file.filename or "avatar.glb")
+    if not safe.lower().endswith(".glb"):
+        safe += ".glb"
+    content = await file.read()
+    if len(content) > _AVATAR_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 50 MB).")
+    _AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+    (_AVATARS_DIR / safe).write_bytes(content)
+    _LOGGER.info("admin.avatar_uploaded", filename=safe, bytes=len(content))
+    return {"uploaded": safe}
+
+
+@router.delete("/avatars/{filename}")
+async def delete_avatar(filename: str, request: Request):
+    """Delete a GLB avatar file (admin only). Cannot delete brunette.glb."""
+    _require_session(request, min_role="admin")
+    if not _re.match(r"^[a-zA-Z0-9._-]+\.glb$", filename):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+    if filename == "brunette.glb":
+        raise HTTPException(status_code=403, detail="Cannot delete the default avatar.")
+    dest = _AVATARS_DIR / filename
+    if not dest.exists():
+        raise HTTPException(status_code=404, detail="Avatar not found.")
+    dest.unlink()
+    _LOGGER.info("admin.avatar_deleted", filename=filename)
+    return {"deleted": filename}
 
 
 # ── Prompt sync ───────────────────────────────────────────────────────────────
