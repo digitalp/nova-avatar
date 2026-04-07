@@ -394,8 +394,13 @@ const _SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AA
 async function _tryUnlockAudio(ctx) {
   if (ctx.state === 'running') return true;
 
+  // Wrap all attempts in a 3-second timeout so a stalled play() or resume()
+  // can never block initHead() on refresh.
+  const _t = ms => new Promise(r => setTimeout(r, ms));
+  const _race = (p) => Promise.race([p, _t(800).then(() => {})]);
+
   // Attempt A: direct resume (works on Android/kiosk where policy is relaxed)
-  try { await ctx.resume(); } catch (_) {}
+  try { await _race(ctx.resume()); } catch (_) {}
   if (ctx.state === 'running') return true;
 
   // Attempt B: silent one-sample BufferSource (classic WebAudio unlock trick)
@@ -403,23 +408,23 @@ async function _tryUnlockAudio(ctx) {
     const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
     const src = ctx.createBufferSource();
     src.buffer = buf; src.connect(ctx.destination); src.start(0);
-    await ctx.resume();
+    await _race(ctx.resume());
   } catch (_) {}
   if (ctx.state === 'running') return true;
 
-  // Attempt C: muted HTMLAudioElement play — some browsers allow muted autoplay
-  // and that gesture-equivalent can ungate the AudioContext
+  // Attempt C: muted HTMLAudioElement — some browsers allow muted autoplay
+  // which can ungate the AudioContext. Capped at 1 s to avoid hanging on refresh.
   try {
     const a = document.createElement('audio');
     a.src = _SILENT_WAV; a.volume = 0; a.muted = true;
-    await a.play().catch(() => {});
-    await ctx.resume();
+    await _race(a.play().catch(() => {}));
+    await _race(ctx.resume());
   } catch (_) {}
   if (ctx.state === 'running') return true;
 
-  // Attempt D: wait briefly then retry (handles timing edge cases on some devices)
-  await new Promise(r => setTimeout(r, 200));
-  try { await ctx.resume(); } catch (_) {}
+  // Attempt D: short pause then one final retry
+  await _t(150);
+  try { await _race(ctx.resume()); } catch (_) {}
   return ctx.state === 'running';
 }
 
@@ -445,7 +450,14 @@ async function _tryUnlockAudio(ctx) {
     if (s.avatar_url) AVATAR_URL = s.avatar_url.startsWith("/") ? SERVER + s.avatar_url : s.avatar_url;
   } catch (_) {}
 
-  initHead().catch(e => { $loadText.textContent = 'Load error: ' + e.message; });
+  initHead().catch(e => {
+    console.error('[Nova] initHead failed:', e);
+    $overlay.classList.remove('show');   // hide loading spinner
+    $gate.classList.remove('hidden');    // show gate with error message
+    $gate.querySelector('h2').textContent = '⚠ Load Failed';
+    $gate.querySelector('p').textContent  = e.message || 'Could not load avatar.';
+    $btnStart.textContent = 'Retry';
+  });
 })();
 
 // ── TalkingHead ───────────────────────────────────────────────────────────────
