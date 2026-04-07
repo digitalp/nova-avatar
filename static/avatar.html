@@ -341,7 +341,7 @@ $btnStart.addEventListener('click', async () => {
   try {
     const s = await fetch(`${SERVER}/admin/avatar-settings`, { headers: { "X-API-Key": API_KEY } }).then(r => r.json());
     if (typeof s.skin_tone === 'number') _skinToneIndex = s.skin_tone;
-    if (s.avatar_url) AVATAR_URL = s.avatar_url;
+    if (s.avatar_url) AVATAR_URL = s.avatar_url.startsWith("/") ? SERVER + s.avatar_url : s.avatar_url;
   } catch (_) {}
 
   initHead().catch(e => { $loadText.textContent = 'Error: ' + e.message; console.error(e); });
@@ -388,12 +388,50 @@ async function testMic() {
 // on kiosk/trusted browsers it starts 'running' (fully hands-free).
 // On strict browsers (desktop Chrome) it starts 'suspended' — a small
 // banner prompts the first touch to unlock audio, then disappears.
+// 1-sample silent WAV (data URI) — used to nudge autoplay policy
+const _SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+
+async function _tryUnlockAudio(ctx) {
+  if (ctx.state === 'running') return true;
+
+  // Attempt A: direct resume (works on Android/kiosk where policy is relaxed)
+  try { await ctx.resume(); } catch (_) {}
+  if (ctx.state === 'running') return true;
+
+  // Attempt B: silent one-sample BufferSource (classic WebAudio unlock trick)
+  try {
+    const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.connect(ctx.destination); src.start(0);
+    await ctx.resume();
+  } catch (_) {}
+  if (ctx.state === 'running') return true;
+
+  // Attempt C: muted HTMLAudioElement play — some browsers allow muted autoplay
+  // and that gesture-equivalent can ungate the AudioContext
+  try {
+    const a = document.createElement('audio');
+    a.src = _SILENT_WAV; a.volume = 0; a.muted = true;
+    await a.play().catch(() => {});
+    await ctx.resume();
+  } catch (_) {}
+  if (ctx.state === 'running') return true;
+
+  // Attempt D: wait briefly then retry (handles timing edge cases on some devices)
+  await new Promise(r => setTimeout(r, 200));
+  try { await ctx.resume(); } catch (_) {}
+  return ctx.state === 'running';
+}
+
 (async () => {
   $gate.classList.add('hidden');
   $overlay.classList.add('show');
 
   audioCtx = new AudioContext();
-  if (audioCtx.state === 'suspended') {
+  const audioUnlocked = await _tryUnlockAudio(audioCtx);
+
+  if (!audioUnlocked) {
+    // All automatic attempts failed — show banner as last resort
     const banner = document.getElementById('audio-unlock-banner');
     banner.style.display = 'block';
     const unlock = async () => { await audioCtx.resume(); banner.style.display = 'none'; };
@@ -404,7 +442,7 @@ async function testMic() {
     const s = await fetch(`${SERVER}/admin/avatar-settings`,
       { headers: { 'X-API-Key': API_KEY } }).then(r => r.json());
     if (typeof s.skin_tone === 'number') _skinToneIndex = s.skin_tone;
-    if (s.avatar_url) AVATAR_URL = s.avatar_url;
+    if (s.avatar_url) AVATAR_URL = s.avatar_url.startsWith("/") ? SERVER + s.avatar_url : s.avatar_url;
   } catch (_) {}
 
   initHead().catch(e => { $loadText.textContent = 'Load error: ' + e.message; });
