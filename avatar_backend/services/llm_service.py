@@ -1,5 +1,6 @@
 """
 LLM service — supports Ollama (local), OpenAI, Google Gemini, and Anthropic.
+Automatically falls back to Ollama gemma2:9b when the cloud provider is unavailable.
 
 Set LLM_PROVIDER in .env to switch providers:
   LLM_PROVIDER=ollama      (default)
@@ -603,6 +604,63 @@ async def _openai_describe_image(image_bytes: bytes, api_key: str, model: str, p
     return resp.json()["choices"][0]["message"]["content"].strip()
 
 
+
+class _OllamaFallbackBackend:
+    """Lightweight Ollama backend used as failover for cloud providers."""
+
+    def __init__(self, base_url: str, model: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model    = model
+
+    async def chat(self, messages: list[dict], use_tools: bool) -> tuple[str, list[ToolCall]]:
+        # gemma2 does not support tool_calls natively — strip tools, rely on text
+        payload: dict[str, Any] = {
+            "model":    self._model,
+            "messages": messages,
+            "stream":   False,
+            "options":  {"temperature": 0.7, "num_ctx": 4096, "num_predict": 400},
+        }
+        if use_tools:
+            payload["tools"] = HA_TOOLS
+
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
+            resp = await client.post(f"{self._base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+
+        data    = resp.json()
+        message = data.get("message", {})
+        text    = (message.get("content") or "").strip()
+        tools   = _parse_tool_calls_openai(message.get("tool_calls") or [])
+        _log("ollama_fallback", self._model, t0, text, tools,
+             input_tokens=data.get("prompt_eval_count", 0),
+             output_tokens=data.get("eval_count", 0))
+        return text, tools
+
+    async def generate_text(self, prompt: str, timeout_s: float = 120.0) -> str:
+        payload: dict[str, Any] = {
+            "model":    self._model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream":   False,
+            "options":  {"temperature": 0.2, "num_ctx": 8192},
+        }
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s)) as client:
+            resp = await client.post(f"{self._base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+        _d = resp.json()
+        text = (_d.get("message", {}).get("content") or "").strip()
+        _log("ollama_fallback", self._model, t0, text, [],
+             input_tokens=_d.get("prompt_eval_count", 0),
+             output_tokens=_d.get("eval_count", 0),
+             purpose="proactive")
+        return text
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+
 # ── Public service ────────────────────────────────────────────────────────────
 
 class LLMService:
@@ -610,6 +668,8 @@ class LLMService:
     Routes LLM requests to the configured provider.
     Switch providers via LLM_PROVIDER in .env — no code changes needed.
     """
+
+    _FALLBACK_MODEL = "gemma2:9b"
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -623,7 +683,17 @@ class LLMService:
         else:
             self._backend = _OllamaBackend(settings)
         self._provider = provider
-        logger.info("llm.provider", provider=provider, model=self._backend.model_name)
+
+        # Ollama gemma2:9b failover — only for cloud providers
+        if provider != "ollama":
+            self._fallback: _OllamaBackend | None = _OllamaFallbackBackend(
+                settings.ollama_url, self._FALLBACK_MODEL
+            )
+        else:
+            self._fallback = None
+
+        logger.info("llm.provider", provider=provider, model=self._backend.model_name,
+                    fallback=self._FALLBACK_MODEL if self._fallback else None)
 
     async def chat(
         self,
@@ -632,14 +702,18 @@ class LLMService:
     ) -> tuple[str, list[ToolCall]]:
         try:
             return await self._backend.chat(messages, use_tools)
-        except httpx.ConnectError as exc:
-            raise RuntimeError(f"LLM unreachable: {exc}") from exc
-        except httpx.TimeoutException:
-            raise RuntimeError("LLM inference timed out") from None
-        except httpx.HTTPStatusError as exc:
-            raise RuntimeError(
-                f"LLM HTTP {exc.response.status_code}: {exc.response.text[:200]}"
-            ) from exc
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            if self._fallback is None:
+                _reason = str(exc)[:120]
+                raise RuntimeError(f"LLM unavailable: {_reason}") from exc
+            logger.warning("llm.primary_failed_using_fallback",
+                           provider=self._provider,
+                           fallback=self._FALLBACK_MODEL,
+                           reason=str(exc)[:120])
+            try:
+                return await self._fallback.chat(messages, use_tools)
+            except Exception as fb_exc:
+                raise RuntimeError(f"LLM fallback also failed: {fb_exc}") from fb_exc
 
     def set_cost_log(self, log: _CostLog) -> None:
         global _cost_log
@@ -673,12 +747,17 @@ class LLMService:
         """
         try:
             return await self._backend.generate_text(prompt, timeout_s=timeout_s)
-        except httpx.TimeoutException:
-            raise RuntimeError(f"LLM inference timed out after {timeout_s}s") from None
-        except httpx.HTTPStatusError as exc:
-            raise RuntimeError(
-                f"LLM HTTP {exc.response.status_code}: {exc.response.text[:200]}"
-            ) from exc
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            if self._fallback is None:
+                raise RuntimeError(f"LLM unavailable: {exc}") from exc
+            logger.warning("llm.primary_failed_using_fallback",
+                           provider=self._provider,
+                           fallback=self._FALLBACK_MODEL,
+                           reason=str(exc)[:120])
+            try:
+                return await self._fallback.generate_text(prompt, timeout_s=min(timeout_s, 120.0))
+            except Exception as fb_exc:
+                raise RuntimeError(f"LLM fallback also failed: {fb_exc}") from fb_exc
 
     async def describe_image(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None) -> str:
         """Describe a camera image using vision capability of the active LLM provider."""
