@@ -344,7 +344,14 @@ $btnStart.addEventListener('click', async () => {
     if (s.avatar_url) AVATAR_URL = s.avatar_url.startsWith("/") ? SERVER + s.avatar_url : s.avatar_url;
   } catch (_) {}
 
-  initHead().catch(e => { $loadText.textContent = 'Error: ' + e.message; console.error(e); });
+  initHead().catch(e => {
+    console.error('[Nova] initHead failed:', e);
+    $overlay.classList.remove('show');
+    $gate.classList.remove('hidden');
+    $gate.querySelector('h2').textContent = '⚠ Load Failed';
+    $gate.querySelector('p').textContent  = _avatarErrorMsg(e);
+    $btnStart.textContent = 'Retry';
+  });
 });
 
 async function testMic() {
@@ -455,10 +462,25 @@ async function _tryUnlockAudio(ctx) {
     $overlay.classList.remove('show');   // hide loading spinner
     $gate.classList.remove('hidden');    // show gate with error message
     $gate.querySelector('h2').textContent = '⚠ Load Failed';
-    $gate.querySelector('p').textContent  = e.message || 'Could not load avatar.';
+    $gate.querySelector('p').textContent  = _avatarErrorMsg(e);
     $btnStart.textContent = 'Retry';
   });
 })();
+
+// ── Avatar error helper ──────────────────────────────────────────────────────
+function _avatarErrorMsg(e) {
+  const m = e && (e.message || String(e));
+  if (/Avatar object .+ not found/i.test(m)) {
+    return 'Incompatible avatar skeleton. The model must use ReadyPlayerMe bone names (Armature root, Hips bone). Sketchfab and generic GLB files are not compatible.';
+  }
+  if (/Blend shapes not found/i.test(m)) {
+    return 'Avatar is missing face morph targets. The GLB must be exported with ARKit and Oculus Visemes blend shapes enabled.';
+  }
+  if (/Invalid parameter/i.test(m)) {
+    return 'Invalid avatar URL or file. Check the URL is reachable and points to a valid GLB.';
+  }
+  return m || 'Could not load avatar.';
+}
 
 // ── TalkingHead ───────────────────────────────────────────────────────────────
 async function initHead() {
