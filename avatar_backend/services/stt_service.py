@@ -115,7 +115,7 @@ class STTService:
             return ""
 
         segments, info = self._wake_model.transcribe(
-            audio_f32, language="en", beam_size=1, vad_filter=True,
+            audio_f32, language="en", beam_size=1, vad_filter=False,
         )
         transcript = " ".join(seg.text.strip() for seg in segments).strip()
         _LOGGER.info("stt.wake_transcribed",

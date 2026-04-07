@@ -281,6 +281,7 @@ let isBusy         = false;    // Nova is thinking/speaking
 
 // Recording state
 let recording      = false;
+let lastResponseWasQuestion = false;  // auto-mic after Nova asks a question
 let mediaRec       = null;
 let mediaChunks    = [];
 let micStream      = null;
@@ -521,11 +522,16 @@ async function connectWs() {
       const msg = JSON.parse(evt.data);
       if (msg.type === 'state' || msg.type === 'avatar_state') handleState(msg.state);
       if (msg.type === 'transcript')  showSub('You: ' + msg.text);
-      if (msg.type === 'response')    showSub('Nova: ' + msg.text);
+      if (msg.type === 'response') {
+        showSub('Nova: ' + msg.text);
+        lastResponseWasQuestion = /[\u003f]\s*$/.test((msg.text || '').trim());
+      }
       if (msg.type === 'word_timings') pendingWordTimings = msg.word_timings;
       if (msg.type === 'announce') {
         showSub('Nova: ' + msg.text);
         if (msg.word_timings) pendingWordTimings = msg.word_timings;
+        // Announcements are system-initiated — don't auto-mic on them
+        lastResponseWasQuestion = false;
       }
     } catch (_) {}
   };
@@ -549,8 +555,16 @@ function handleState(state) {
   if (state === 'idle') {
     isBusy = false;
     if (!recording && wsReady) {
-      wakeSupported ? setStatus('Say "Nova" to talk', 'dot-waking') : setStatus('Ready', 'dot-online');
-      if (!wakeActive && !wakeVadActive) setTimeout(startWakeWord, 300);
+      if (lastResponseWasQuestion) {
+        lastResponseWasQuestion = false;
+        setStatus('Listening for your reply…', 'dot-recding');
+        holdMode = false;
+        stopWakeWord();
+        setTimeout(startRecording, 400);
+      } else {
+        wakeSupported ? setStatus('Say "Nova" to talk', 'dot-waking') : setStatus('Ready', 'dot-online');
+        if (!wakeActive && !wakeVadActive) setTimeout(startWakeWord, 300);
+      }
     }
   } else if (state === 'thinking') {
     isBusy = true; setStatus('Thinking…', 'dot-online');

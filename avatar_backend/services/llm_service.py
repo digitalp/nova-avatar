@@ -530,6 +530,14 @@ _DOORBELL_IMAGE_PROMPT = (
 )
 
 
+_MOTION_IMAGE_PROMPT = (
+    "Motion has been detected on an outdoor camera. Analyse this image and decide if it warrants an alert. "
+    "Only alert if you see: a person, an unfamiliar or unexpected vehicle, or unexpected activity. "
+    "If the motion was caused only by a known/parked vehicle or there is no obvious cause, "
+    "reply with exactly: NO_MOTION "
+    "Otherwise reply with a single concise sentence describing what you see."
+)
+
 async def _ollama_describe_image(image_bytes: bytes, base_url: str, model: str, prompt: str = _DEFAULT_IMAGE_PROMPT) -> str:
     import base64 as _b64
     b64 = _b64.b64encode(image_bytes).decode()
@@ -548,7 +556,7 @@ async def _ollama_describe_image(image_bytes: bytes, base_url: str, model: str, 
     return resp.json()["message"]["content"].strip()
 
 
-async def _gemini_describe_image(image_bytes: bytes, api_key: str, model: str, prompt: str = _DEFAULT_IMAGE_PROMPT) -> str:
+async def _gemini_describe_image(image_bytes: bytes, api_key: str, model: str, prompt: str = _DEFAULT_IMAGE_PROMPT, system_instruction: str | None = None) -> str:
     import base64 as _b64
     b64 = _b64.b64encode(image_bytes).decode()
     payload = {
@@ -560,6 +568,8 @@ async def _gemini_describe_image(image_bytes: bytes, api_key: str, model: str, p
             ],
         }],
     }
+    if system_instruction:
+        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         resp = await client.post(url, json=payload,
@@ -670,12 +680,12 @@ class LLMService:
                 f"LLM HTTP {exc.response.status_code}: {exc.response.text[:200]}"
             ) from exc
 
-    async def describe_image(self, image_bytes: bytes, prompt: str | None = None) -> str:
+    async def describe_image(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None) -> str:
         """Describe a camera image using vision capability of the active LLM provider."""
         _prompt = prompt or _DEFAULT_IMAGE_PROMPT
         try:
             if self._provider == "google":
-                return await _gemini_describe_image(image_bytes, self._backend._api_key, self._backend._model, _prompt)
+                return await _gemini_describe_image(image_bytes, self._backend._api_key, self._backend._model, _prompt, system_instruction)
             if self._provider == "openai":
                 return await _openai_describe_image(image_bytes, self._backend._api_key, self._backend._model, _prompt)
             if self._provider == "ollama":
@@ -685,6 +695,22 @@ class LLMService:
             _log_struct = structlog.get_logger()
             _log_struct.error("llm.describe_image_error", exc=str(exc))
             return "I couldn't analyze the camera image right now."
+
+    async def describe_image_with_gemini(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None) -> str:
+        """
+        Describe a camera image using Gemini vision, regardless of the active LLM provider.
+        Falls back to the active provider if Google API key is not configured.
+        """
+        settings = get_settings()
+        api_key = settings.google_api_key
+        model = settings.cloud_model if settings.llm_provider.lower() == "google" else _DEFAULT_MODELS["google"]
+        if api_key:
+            try:
+                return await _gemini_describe_image(image_bytes, api_key, model, prompt or _DEFAULT_IMAGE_PROMPT, system_instruction)
+            except Exception as exc:
+                structlog.get_logger().error("llm.describe_image_gemini_error", exc=str(exc))
+        # Fallback to active provider
+        return await self.describe_image(image_bytes, prompt, system_instruction)
 
     @property
     def model_name(self) -> str:

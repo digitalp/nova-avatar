@@ -275,12 +275,27 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
 
     _LOGGER.info("motion.triggered", camera=camera_id, location=location)
 
-    # 1. Fetch camera snapshot
+    # 1. Fetch camera snapshot and describe using Gemini with system prompt context
+    from avatar_backend.services.llm_service import _MOTION_IMAGE_PROMPT
     image_bytes = await ha.fetch_camera_image(camera_id)
+    system_prompt: str = getattr(request.app.state, "system_prompt", "")
 
     if image_bytes:
         try:
-            description = await llm.describe_image(image_bytes)
+            description = await llm.describe_image_with_gemini(
+                image_bytes,
+                prompt=_MOTION_IMAGE_PROMPT,
+                system_instruction=system_prompt or None,
+            )
+            if description.strip().startswith("NO_MOTION"):
+                _LOGGER.info("motion.suppressed", camera=camera_id, reason="no_concern")
+                return MotionAnnounceResponse(
+                    status="ok",
+                    message="no_motion_concern",
+                    camera_used=camera_id,
+                    wav_bytes=0,
+                    elapsed_ms=int((time.monotonic() - t0) * 1000),
+                )
             message = f"Motion detected {location}. {description}"
             _LOGGER.info("motion.described", chars=len(description))
         except Exception as exc:

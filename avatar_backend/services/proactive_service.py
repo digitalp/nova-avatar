@@ -54,10 +54,15 @@ _BYPASS_GLOBAL_MOTION_CAMERAS: set[str] = {"camera.rlc_1224a_fluent"}
 # Per-camera vision prompts — override _DEFAULT_IMAGE_PROMPT for specific cameras.
 _DRIVEWAY_IMAGE_PROMPT = (
     "This is a security camera snapshot of a residential driveway. "
-    "Describe what you see in 1-2 sentences focusing on people, vehicles, and any packages or parcels. "
+    "The owner\'s car (a blue Mercedes B200 2017 AMG, plate KO66EWX) is normally parked here — "
+    "ignore it as a motion cause unless it is moving or something unusual is happening with it. "
+    "Only alert if you see: a person, an unfamiliar vehicle, an unexpected object, or unusual activity. "
+    "If motion was caused solely by the owner\'s parked car (e.g. lighting change) or has no obvious cause, "
+    "reply with exactly: NO_MOTION\n"
+    "Otherwise describe what you see in 1-2 sentences. "
     "Do NOT mention age, race, gender or personal attributes. "
-    "If you can see someone who appears to be making a delivery (carrying a parcel, wearing a "
-    "delivery uniform, or arriving in a liveried van), append a new line with EXACTLY this format:\n"
+    "If you can see someone making a delivery (carrying a parcel, delivery uniform, or liveried van), "
+    "append a new line with EXACTLY:\n"
     "DELIVERY: <company>\n"
     "where <company> is one of: DHL, Royal Mail, Amazon, or Unknown. "
     "Only include the DELIVERY line if you are confident a delivery is taking place."
@@ -264,15 +269,17 @@ class ProactiveService:
 
             _LOGGER.info("proactive.subscribed_to_state_changed")
 
-            # Start batch processor and daily forecast loop alongside event loop
-            batch_task = asyncio.create_task(self._batch_loop(), name="proactive_batcher")
+            # Start batch processor, daily forecast, and heating control loops
+            batch_task   = asyncio.create_task(self._batch_loop(), name="proactive_batcher")
             forecast_task = asyncio.create_task(self._daily_forecast_loop(), name="proactive_forecast")
+            heating_task  = asyncio.create_task(self._heating_control_loop(), name="proactive_heating")
             try:
                 async for raw in ws:
                     self._on_message(json.loads(raw))
             finally:
                 batch_task.cancel()
                 forecast_task.cancel()
+                heating_task.cancel()
                 for t in (batch_task, forecast_task):
                     try:
                         await t
@@ -420,10 +427,20 @@ class ProactiveService:
         if image_bytes:
             vision_prompt = _CAMERA_VISION_PROMPTS.get(camera_id)
             try:
-                raw_desc = await self._llm.describe_image(image_bytes, prompt=vision_prompt)
+                raw_desc = await self._llm.describe_image_with_gemini(
+                    image_bytes,
+                    prompt=vision_prompt,
+                    system_instruction=self._system_prompt or None,
+                )
             except Exception as exc:
                 _LOGGER.warning("proactive.motion_describe_failed", camera=camera_id, exc=str(exc))
                 raw_desc = ""
+
+            if raw_desc and raw_desc.strip().startswith("NO_MOTION"):
+                _LOGGER.info("proactive.motion_suppressed", camera=camera_id, reason="owner_car_or_no_cause")
+                if self._decision_log:
+                    self._decision_log.record("motion_suppressed", camera=camera_id, reason="NO_MOTION")
+                return
 
             if raw_desc:
                 # Parse delivery detection line  (format: "DELIVERY: <company>")
@@ -757,3 +774,119 @@ class ProactiveService:
             self._cooldowns[c["entity_id"]] = now
 
         await self._announce(message, priority)
+
+
+    # ── Autonomous Heating Control ────────────────────────────────────────────
+
+    _HEATING_INTERVAL_S = 1800  # evaluate every 30 minutes
+
+    async def _heating_control_loop(self) -> None:
+        """
+        Runs every 30 minutes. Reads room/outdoor temperatures and presence,
+        then lets the LLM (with full tool access) decide whether to adjust
+        the Hive boiler and winter_mode. Nova is the sole heating controller
+        — the schedule-based HA automations have been disabled.
+        """
+        # Stagger first run by 2 minutes so Nova finishes startup first
+        await asyncio.sleep(120)
+        while True:
+            try:
+                await self._evaluate_heating()
+            except Exception as exc:
+                _LOGGER.warning("heating.eval_error", exc=str(exc))
+            await asyncio.sleep(self._HEATING_INTERVAL_S)
+
+    async def _evaluate_heating(self) -> None:
+        """
+        Runs a full agentic loop (LLM + tool execution) to evaluate and
+        adjust heating. The system prompt contains the decision rules.
+        """
+        import datetime as _dt
+        now_str = _dt.datetime.now().strftime("%A, %d %B %Y %H:%M")
+        month = _dt.datetime.now().month
+        season = "spring/summer" if 4 <= month <= 9 else "autumn/winter"
+
+        task_msg = (
+            f"[Autonomous heating evaluation — {now_str}, {season}] "
+            "Read all room temperature sensors, the outdoor temperature, and current presence. "
+            "Then apply the heating decision rules from your system prompt and take action if needed. "
+            "Be concise — one sentence announcement only if something changed, silent otherwise."
+        )
+
+        messages = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user",   "content": task_msg},
+        ]
+
+        _MAX_ROUNDS = 6
+        _LOGGER.info("heating.eval_start")
+        if self._decision_log:
+            self._decision_log.record("heating_eval_start", season=season, time=now_str)
+
+        all_tool_calls: list[str] = []
+
+        for round_num in range(_MAX_ROUNDS):
+            text, tool_calls = await self._llm.chat(messages, use_tools=True)
+
+            if not tool_calls:
+                # LLM gave a final text response
+                if text and text.strip() and "nothing changed" not in text.lower() and "no change" not in text.lower():
+                    _LOGGER.info("heating.eval_announce", message=text[:120])
+                    if self._decision_log:
+                        self._decision_log.record(
+                            "heating_action",
+                            message=text.strip()[:300],
+                            tool_calls=all_tool_calls,
+                        )
+                    await self._announce(text.strip(), "normal")
+                else:
+                    _LOGGER.info("heating.eval_silent")
+                    if self._decision_log:
+                        self._decision_log.record(
+                            "heating_eval_silent",
+                            reason=text.strip()[:200] if text else "no change needed",
+                            tool_calls=all_tool_calls,
+                        )
+                break
+
+            # Build assistant turn in OpenAI wire format
+            raw_tcs = [
+                {"id": f"htool_{i}", "type": "function",
+                 "function": {"name": tc.function_name, "arguments": tc.arguments}}
+                for i, tc in enumerate(tool_calls)
+            ]
+            messages.append({"role": "assistant", "content": text or "", "tool_calls": raw_tcs})
+
+            # Execute each tool call
+            for i, tc in enumerate(tool_calls):
+                result = await self._ha.execute_tool_call(tc)
+                summary = f"{tc.function_name}({tc.arguments}) → {(result.message or '')[:80]}"
+                all_tool_calls.append(summary)
+                _LOGGER.info(
+                    "heating.tool_call",
+                    tool=tc.function_name,
+                    args=tc.arguments,
+                    success=result.success,
+                    result=(result.message or "")[:120],
+                )
+                if self._decision_log:
+                    self._decision_log.record(
+                        "heating_tool_call",
+                        tool=tc.function_name,
+                        args={k: str(v)[:80] for k, v in tc.arguments.items()},
+                        success=result.success,
+                        result=(result.message or "")[:200],
+                    )
+                messages.append({
+                    "role":         "tool",
+                    "tool_call_id": f"htool_{i}",
+                    "content":      result.message or "",
+                })
+
+            if round_num == _MAX_ROUNDS - 1:
+                _LOGGER.warning("heating.eval_max_rounds")
+                if self._decision_log:
+                    self._decision_log.record("heating_eval_max_rounds", rounds=_MAX_ROUNDS)
+                break
+
+        _LOGGER.info("heating.eval_done")

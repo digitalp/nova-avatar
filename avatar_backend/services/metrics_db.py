@@ -53,6 +53,17 @@ CREATE TABLE IF NOT EXISTS decision_events (
     data  TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_dec_ts ON decision_events(ts);
+
+CREATE TABLE IF NOT EXISTS server_logs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts      TEXT NOT NULL,          -- ISO-8601 UTC
+    level   TEXT NOT NULL,          -- info / warning / error / debug / critical
+    event   TEXT NOT NULL,          -- the log message
+    logger  TEXT NOT NULL DEFAULT '',
+    data    TEXT NOT NULL DEFAULT '{}'  -- JSON of extra fields
+);
+CREATE INDEX IF NOT EXISTS idx_log_ts    ON server_logs(ts);
+CREATE INDEX IF NOT EXISTS idx_log_level ON server_logs(level);
 """
 
 
@@ -234,6 +245,45 @@ class MetricsDB:
             entry["kind"] = r["kind"]
             out.append(entry)
         return out
+
+    # ── Server logs ──────────────────────────────────────────────────────────────────────────
+
+    def insert_log(self, entry: dict) -> None:
+        import json as _json
+        data = dict(entry)
+        ts     = data.pop("ts", datetime.now(timezone.utc).isoformat())
+        level  = data.pop("level", "info")
+        event  = data.pop("event", "")
+        logger = data.pop("logger", "")
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO server_logs (ts, level, event, logger, data) VALUES (?, ?, ?, ?, ?)",
+                (ts, level, event, logger, _json.dumps(data)),
+            )
+
+    def recent_logs(self, n: int = 500, level: str | None = None) -> list[dict]:
+        import json as _json
+        if level:
+            sql  = "SELECT ts, level, event, logger, data FROM server_logs WHERE level=? ORDER BY id DESC LIMIT ?"
+            args = (level, n)
+        else:
+            sql  = "SELECT ts, level, event, logger, data FROM server_logs ORDER BY id DESC LIMIT ?"
+            args = (n,)
+        with self._conn() as conn:
+            rows = conn.execute(sql, args).fetchall()
+        out = []
+        for r in reversed(rows):
+            extra = _json.loads(r["data"])
+            entry = {"ts": r["ts"][11:19], "level": r["level"], "event": r["event"], "logger": r["logger"]}
+            entry.update(extra)
+            out.append(entry)
+        return out
+
+    def purge_old_logs(self, keep_days: int = 7) -> int:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+        with self._lock, self._conn() as conn:
+            cur = conn.execute("DELETE FROM server_logs WHERE ts < ?", (cutoff,))
+            return cur.rowcount
 
     def purge_old_decisions(self, keep_days: int = 30) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()

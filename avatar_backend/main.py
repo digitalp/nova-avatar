@@ -16,6 +16,7 @@ from avatar_backend.services.ha_proxy import HAProxy
 from avatar_backend.services.llm_service import LLMService
 from avatar_backend.services.cost_log import CostLog
 from avatar_backend.services.decision_log import DecisionLog
+from avatar_backend.services.log_store import LogStore
 from avatar_backend.services.session_manager import SessionManager
 from avatar_backend.services.speaker_service import SpeakerService
 from avatar_backend.services.stt_service import STTService
@@ -116,6 +117,7 @@ async def lifespan(app: FastAPI):
 
     app.state.llm_service     = LLMService()
     app.state.session_manager = SessionManager(system_prompt)
+    app.state.system_prompt   = system_prompt
     app.state.ha_proxy        = HAProxy(
         ha_url=settings.ha_url,
         ha_token=settings.ha_token,
@@ -195,6 +197,13 @@ async def lifespan(app: FastAPI):
     app.state.cost_log = cost_log
     app.state.llm_service.set_cost_log(cost_log)
     decision_log.set_db(metrics_db)  # persist decisions across restarts
+
+    # Log store — captures structlog output into DB + SSE for admin panel
+    import logging as _logging
+    log_store = LogStore()
+    log_store.set_db(metrics_db)
+    app.state.log_store = log_store
+    _logging.getLogger().addHandler(log_store.make_handler())
     proactive = getattr(app.state, 'proactive_service', None)
     if proactive:
         proactive.set_decision_log(decision_log)

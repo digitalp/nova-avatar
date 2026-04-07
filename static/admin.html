@@ -779,6 +779,10 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
       Live Logs
     </div>
+    <div class="nav-item" data-section="pylog" onclick="navigate(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      Server Logs
+    </div>
     <div class="nav-item" data-section="decisions" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
       AI Decisions
@@ -793,6 +797,7 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
     </div>
 
     <div class="nav-group-label" style="margin-top:4px;">Manage</div>
+
     <div class="nav-item" data-section="sessions" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Sessions
@@ -1039,6 +1044,40 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
       </div>
     </div>
 
+    <!-- ══════════════ SERVER LOGS ══════════════ -->
+    <div id="section-pylog" class="section">
+      <div class="page-header">
+        <div class="page-title">Server Logs</div>
+        <div class="page-sub">Real-time Python logger output — persistent across restarts</div>
+      </div>
+      <div class="card card-flush">
+        <div class="stream-toolbar">
+          <div style="flex:1;min-width:0;"><div class="stream-title">Python Logger</div></div>
+          <input id="pylog-search" type="text" placeholder="Filter…" oninput="filterPylog()"
+                 style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+                        padding:3px 9px;font-size:12px;color:var(--text);width:140px;outline:none;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;margin:0;">
+            <input type="checkbox" id="pylog-autoscroll" checked> Auto-scroll
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="clearPylog()">Clear</button>
+          <span id="pylog-status" style="font-size:11px;color:var(--text3);"></span>
+        </div>
+        <div class="filter-bar">
+          <button class="filter-chip active pylog-level" data-level=""        onclick="setPylogLevel(this)">All</button>
+          <button class="filter-chip pylog-level" data-level="debug"    onclick="setPylogLevel(this)" style="--chip-color:#64748b;">debug</button>
+          <button class="filter-chip pylog-level" data-level="info"     onclick="setPylogLevel(this)" style="--chip-color:#94a3b8;">info</button>
+          <button class="filter-chip pylog-level" data-level="warning"  onclick="setPylogLevel(this)" style="--chip-color:#fbbf24;">warning</button>
+          <button class="filter-chip pylog-level" data-level="error"    onclick="setPylogLevel(this)" style="--chip-color:#f87171;">error</button>
+          <button class="filter-chip pylog-level" data-level="critical" onclick="setPylogLevel(this)" style="--chip-color:#f97316;">critical</button>
+        </div>
+        <div id="pylog-output"
+             style="font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.75;
+                    height:600px;overflow-y:auto;padding:8px 0;background:var(--bg);">
+          <div style="padding:12px 18px;color:var(--text3);">Loading…</div>
+        </div>
+      </div>
+    </div>
+
     <!-- ══════════════ SESSIONS ══════════════ -->
     <div id="section-sessions" class="section">
       <div class="page-header">
@@ -1265,6 +1304,8 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
     </div>
 
     <!-- ══════════════ USERS ══════════════ -->
+
+
     <div id="section-users" class="section">
       <div class="page-header">
         <div class="page-title">Users</div>
@@ -1371,7 +1412,7 @@ const TITLES = {
   dashboard:'Dashboard', config:'Configuration', prompt:'System Prompt',
   acl:'ACL Rules', logs:'Live Logs', sessions:'Sessions',
   avatar:'Avatar', tools:'Tools', users:'Users',
-  decisions:'AI Decisions', costs:'LLM Cost', metrics:'System Metrics',
+  decisions:'AI Decisions', costs:'LLM Cost', metrics:'System Metrics', pylog:'Server Logs',
 };
 
 const SKIN_LABELS = ['Porcelain','Light','Medium','Dark','Deep'];
@@ -1530,6 +1571,7 @@ function navigate(el) {
   if (sec === 'dashboard') loadDashboard();
   if (sec === 'users')     loadUsers();
   if (sec === 'metrics')   loadMetrics();
+  if (sec === 'pylog')     initPylog();
 }
 
 function refreshSection() {
@@ -1551,7 +1593,7 @@ function toast(msg, type='ok') {
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 async function api(method, path, body) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: {}, credentials: 'include' };
   if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const r = await fetch(path, opts);
   if (r.status === 401) { window.location.href = '/admin/login'; throw new Error('Session expired'); }
@@ -2465,6 +2507,88 @@ window.navigate = function(el) {
   _origNavigateCostHist(el);
   if (el.dataset.section === 'costs') loadCostHistory(_costPeriod);
 };
+
+
+
+  // ── Server Logs (pylog) ───────────────────────────────────────────
+  let _pylogES = null, _pylogAll = [], _pylogLevel = '', _pylogSearch = '';
+  const _LEVEL_COL = {debug:'#475569',info:'#94a3b8',warning:'#fbbf24',error:'#f87171',critical:'#f97316'};
+
+  function initPylog() {
+    if (_pylogES) return;
+    fetch('/admin/pylog?n=500').then(r=>r.json()).then(d=>{
+      _pylogAll = d.entries||[];
+      _renderPylog();
+    }).catch(()=>{});
+    _pylogES = new EventSource('/admin/pylog/stream');
+    _pylogES.onopen  = ()=>{ document.getElementById('pylog-status').textContent='live'; };
+    _pylogES.onerror = ()=>{ document.getElementById('pylog-status').textContent='disconnected'; };
+    _pylogES.onmessage = e => {
+      try {
+        const entry = JSON.parse(e.data);
+        _pylogAll.push(entry);
+        if (_pylogAll.length > 2000) _pylogAll.shift();
+        if (_pylogMatch(entry)) {
+          _appendPylogLine(entry);
+          if (document.getElementById('pylog-autoscroll').checked) {
+            const o = document.getElementById('pylog-output'); o.scrollTop = o.scrollHeight;
+          }
+        }
+      } catch(_){}
+    };
+  }
+
+  function _pylogMatch(e) {
+    if (_pylogLevel && e.level !== _pylogLevel) return false;
+    if (_pylogSearch) {
+      const q = _pylogSearch.toLowerCase();
+      if (!(e.event||'').toLowerCase().includes(q) &&
+          !(e.logger||'').toLowerCase().includes(q) &&
+          !JSON.stringify(e).toLowerCase().includes(q)) return false;
+    }
+    return true;
+  }
+
+  function _renderPylog() {
+    const out = document.getElementById('pylog-output');
+    out.innerHTML = '';
+    const filtered = _pylogAll.filter(_pylogMatch);
+    if (!filtered.length) {
+      out.innerHTML = '<div style="padding:12px 18px;color:var(--text3);">No entries match filter.</div>';
+      return;
+    }
+    filtered.forEach(_appendPylogLine);
+    if (document.getElementById('pylog-autoscroll').checked) out.scrollTop = out.scrollHeight;
+  }
+
+  function _appendPylogLine(entry) {
+    const out = document.getElementById('pylog-output');
+    const placeholder = out.querySelector('div[style*="color:var(--text3)"]');
+    if (placeholder) placeholder.remove();
+    const col = _LEVEL_COL[entry.level]||'#94a3b8';
+    const extras = Object.entries(entry)
+      .filter(([k])=>!['ts','level','event','logger'].includes(k))
+      .map(([k,v])=>`<span style="color:#64748b;">${k}=</span><span style="color:#7dd3fc;">${_esc(JSON.stringify(v))}</span>`)
+      .join(' ');
+    const div = document.createElement('div');
+    div.style.cssText='padding:1px 18px;white-space:pre-wrap;word-break:break-all;border-bottom:1px solid rgba(255,255,255,0.03);';
+    div.innerHTML =
+      `<span style="color:#475569;">${entry.ts||''}</span> ` +
+      `<span style="color:${col};font-weight:600;display:inline-block;min-width:54px;">${(entry.level||'').toUpperCase()}</span> ` +
+      `<span style="color:#64748b;">[${_esc(entry.logger||'')}]</span> ` +
+      `<span style="color:var(--text);">${_esc(entry.event||'')}</span>` +
+      (extras ? ` <span style="margin-left:8px;">${extras}</span>` : '');
+    out.appendChild(div);
+  }
+
+  function setPylogLevel(btn) {
+    document.querySelectorAll('.pylog-level').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active'); _pylogLevel=btn.dataset.level; _renderPylog();
+  }
+  function filterPylog() { _pylogSearch=document.getElementById('pylog-search').value; _renderPylog(); }
+  function clearPylog() { _pylogAll=[]; document.getElementById('pylog-output').innerHTML='<div style="padding:12px 18px;color:var(--text3);">Cleared.</div>'; }
+  function _esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
 </script>
 </body>
 </html>

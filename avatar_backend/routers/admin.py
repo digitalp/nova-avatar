@@ -652,6 +652,50 @@ async def sync_prompt(request: Request):
 
 
 
+
+# ── Python Logger (SSE + snapshot) ────────────────────────────────────────────────────────────
+
+@router.get("/pylog")
+async def get_pylog(request: Request, n: int = 500, level: str = ""):
+    """Return recent server log entries as JSON (optionally filtered by level)."""
+    if not _get_session(request):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    store = getattr(request.app.state, "log_store", None)
+    entries = store.recent(n, level or None) if store else []
+    return {"entries": entries}
+
+
+@router.get("/pylog/stream")
+async def stream_pylog(request: Request):
+    """SSE stream — pushes each new log entry as JSON."""
+    if not _get_session(request):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+
+    store = getattr(request.app.state, "log_store", None)
+    if not store:
+        return JSONResponse({"detail": "Log store not available"}, status_code=503)
+
+    import json as _json
+
+    async def generate():
+        q = store.subscribe()
+        try:
+            for entry in store.recent(200):
+                yield f"data: {_json.dumps(entry)}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    entry = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {_json.dumps(entry)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            store.unsubscribe(q)
+
+    return StreamingResponse(generate(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
 # ── AI Decision Log (SSE + snapshot) ─────────────────────────────────────────
 
 
