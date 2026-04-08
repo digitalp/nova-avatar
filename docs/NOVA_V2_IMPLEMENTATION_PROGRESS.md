@@ -13,7 +13,7 @@ Status legend:
 
 | Milestone | Scope | Completion | Basis |
 | --- | --- | ---: | --- |
-| `Milestone 1` | Shared event model | `10%` | Runtime has compatibility event payloads, but no canonical schema or persistent event bus/store yet. |
+| `Milestone 1` | Shared event model | `18%` | A canonical event normalizer now exists for visual events, but there is still no broad event bus, persistent event store, or cross-service adoption. |
 | `Milestone 2` | Camera event unification | `20%` | V2 routes real camera traffic and related-camera actions exist, but camera events still do not run through one canonical backend service. |
 | `Milestone 3` | Surface state and event delivery | `63%` | Surface snapshots, recent-event recovery, statuses, action acks, related-camera opens, and snooze all work, but this is still compatibility-first rather than canonical. |
 | `Milestone 4` | Conversation and realtime voice | `53%` | Conversation and realtime voice foundations are real and event-linked, but transport streaming and deeper conversation-state architecture are still missing. |
@@ -27,7 +27,7 @@ Status legend:
 
 | Ticket | Status | Notes |
 | --- | --- | --- |
-| `V2-001` | `not_started` | Canonical event schema and event bus not built yet. |
+| `V2-001` | `in_progress` | `EventService` now exists as a compatibility-first canonical event normalizer used by the visual-event path, but there is still no full event bus or broad adoption across the backend. |
 | `V2-002` | `not_started` | Persistent event store not started. |
 
 ### Milestone 2: Camera Event Unification
@@ -76,6 +76,21 @@ Landed outside the milestone tickets but required for safe V2 development:
 - separate HTTPS proxy on `8444`
 - separate Home Assistant `nova_v2_*` REST commands
 - selective automation cutover to V2
+
+### `V2-001` Current Evidence
+
+Current landed pieces:
+
+- new [event_service.py](/opt/avatar-server/avatar_backend/services/event_service.py) provides a compatibility-first canonical event record for visual events
+- [main.py](/opt/avatar-server/avatar_backend/main.py) now wires `EventService` into `app.state`
+- [announce.py](/opt/avatar-server/avatar_backend/routers/announce.py) now uses `EventService` to normalize visual-event payloads before surface-state registration and event-context storage
+- [test_event_service.py](/opt/avatar-server/tests/test_event_service.py) covers canonical event construction and payload shaping
+
+Still required before `V2-001` can be marked `completed`:
+
+- expand canonical event usage beyond the visual-event router path
+- replace ad hoc event payload creation in proactive and action flows
+- introduce an actual event bus and persistent event store
 
 ### `V2-031` Current Evidence
 
