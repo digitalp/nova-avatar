@@ -18,8 +18,8 @@ Status legend:
 | `Milestone 3` | Surface state and event delivery | `63%` | Surface snapshots, recent-event recovery, statuses, action acks, related-camera opens, and snooze all work, but this is still compatibility-first rather than canonical. |
 | `Milestone 4` | Conversation and realtime voice | `53%` | Conversation and realtime voice foundations are real and event-linked, but transport streaming and deeper conversation-state architecture are still missing. |
 | `Milestone 5` | Actions and open loops | `42%` | Suggested actions, confirmations, follow-up prompts, camera hops, and snooze are live, but there is no dedicated ActionService or richer policy engine yet. |
-| `Milestone 6` | Admin, metrics, and productization | `61%` | Parallel runtime, runtime-path work, and installer groundwork exist, and the V2 admin now has a durable cross-event history feed with direct filtering, status-aware incident slicing, grouped history sections, real review paths for persisted and surface events, drill-down actions back into the archive filters, admin-side acknowledge/resolve/reopen actions, persisted admin notes on incident transitions, and inline note visibility in the Event History list, but the broader admin event timeline and productization work are still mostly ahead. |
-| `Overall` | Weighted V2 roadmap progress | `62%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
+| `Milestone 6` | Admin, metrics, and productization | `62%` | Parallel runtime, runtime-path work, and installer groundwork exist, and the V2 admin now has a durable cross-event history feed with direct filtering, free-text search, status-aware incident slicing, grouped history sections, real review paths for persisted and surface events, drill-down actions back into the archive filters, admin-side acknowledge/resolve/reopen actions, persisted admin notes on incident transitions, and inline note visibility in the Event History list, but the broader admin event timeline and productization work are still mostly ahead. |
+| `Overall` | Weighted V2 roadmap progress | `63%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
 
 ## Milestone Status
 
@@ -100,6 +100,8 @@ Current landed pieces:
 - [admin.py](/opt/avatar-server/avatar_backend/routers/admin.py) now accepts `admin_note` on `/admin/event-history/action`
 - [admin.html](/opt/avatar-server/static/admin.html) now includes an `Incident Note` field in the review modal so admin-side incident actions can capture why the status changed
 - [admin.html](/opt/avatar-server/static/admin.html) now surfaces saved `admin_note` directly in the Event History list, with open-loop context shown inline as a fallback when no admin note exists
+- [admin.py](/opt/avatar-server/avatar_backend/routers/admin.py) now accepts a free-text `query` on `/admin/event-history` and matches it across event title, summary, event type, source, open-loop note, and saved admin note
+- [admin.html](/opt/avatar-server/static/admin.html) now adds an Event History search field so operators can find incidents by natural text instead of only dropdown slices
 - [test_admin_motion.py](/opt/avatar-server/tests/test_admin_motion.py) now covers canonical motion-event serialization, cross-event history composition, direct event-history filtering, and `before_ts` windowed history reads
 - [test_event_service.py](/opt/avatar-server/tests/test_event_service.py) now covers durable event-history persistence on canonical visual-event publication
 - [test_admin_motion.py](/opt/avatar-server/tests/test_admin_motion.py) covers the admin serializer exposure of canonical motion-event metadata
