@@ -13,13 +13,13 @@ Status legend:
 
 | Milestone | Scope | Completion | Basis |
 | --- | --- | ---: | --- |
-| `Milestone 1` | Shared event model | `34%` | A canonical event normalizer now exists, multiple producers publish through it, and visual-event publication plus recent-event context registration are now centralized in the canonical layer, but there is still no broad event bus, persistent event store, or full cross-service adoption. |
+| `Milestone 1` | Shared event model | `38%` | A canonical event normalizer now exists, multiple producers publish through it, visual-event publication plus recent-event context registration are centralized in the canonical layer, and direct motion archives now persist canonical event metadata, but there is still no broad event bus, persistent event store, or full cross-service adoption. |
 | `Milestone 2` | Camera event unification | `20%` | V2 routes real camera traffic and related-camera actions exist, but camera events still do not run through one canonical backend service. |
 | `Milestone 3` | Surface state and event delivery | `63%` | Surface snapshots, recent-event recovery, statuses, action acks, related-camera opens, and snooze all work, but this is still compatibility-first rather than canonical. |
 | `Milestone 4` | Conversation and realtime voice | `53%` | Conversation and realtime voice foundations are real and event-linked, but transport streaming and deeper conversation-state architecture are still missing. |
 | `Milestone 5` | Actions and open loops | `42%` | Suggested actions, confirmations, follow-up prompts, camera hops, and snooze are live, but there is no dedicated ActionService or richer policy engine yet. |
 | `Milestone 6` | Admin, metrics, and productization | `18%` | Parallel runtime, runtime-path work, and installer groundwork exist, but the V2 admin event timeline and broader productization work are still mostly ahead. |
-| `Overall` | Weighted V2 roadmap progress | `45%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
+| `Overall` | Weighted V2 roadmap progress | `46%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
 
 ## Milestone Status
 
@@ -87,7 +87,10 @@ Current landed pieces:
 - [announce.py](/opt/avatar-server/avatar_backend/routers/announce.py) now routes visual-event publication through the shared canonical publish helper instead of duplicating payload, context, and surface-state logic
 - [avatar_ws.py](/opt/avatar-server/avatar_backend/routers/avatar_ws.py) now also routes `show_related_camera` through the same shared canonical publish helper, giving the canonical event model a second real producer on V2
 - [proactive_service.py](/opt/avatar-server/avatar_backend/services/proactive_service.py) now also uses `EventService` to normalize motion and delivery camera events before clip archiving, giving the canonical event model its first non-router producer on V2
+- [announce.py](/opt/avatar-server/avatar_backend/routers/announce.py) now also attaches canonical `motion_detected` metadata to direct `/announce/motion` clip archives so both motion paths persist normalized event context
+- [metrics_db.py](/opt/avatar-server/avatar_backend/services/metrics_db.py) now exposes `canonical_event_id`, `canonical_event_type`, and `canonical_event` fields when reading motion clips, creating a small persistence bridge between the canonical event model and archived motion evidence
 - [test_event_service.py](/opt/avatar-server/tests/test_event_service.py) covers canonical event construction plus the centralized publish-and-context path
+- [test_announce.py](/opt/avatar-server/tests/test_announce.py) now covers canonical event metadata on direct motion archive scheduling
 
 Still required before `V2-001` can be marked `completed`:
 
