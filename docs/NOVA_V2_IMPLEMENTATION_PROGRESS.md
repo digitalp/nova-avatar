@@ -29,8 +29,8 @@ Status legend:
 
 | Ticket | Status | Notes |
 | --- | --- | --- |
-| `V2-020` | `in_progress` | `SurfaceStateService` now exists as a compatibility-first registry for `avatar_state`, `active_event`, and `recent_events`, avatar/voice clients now receive `surface_state` snapshots alongside existing websocket payloads, and the V2 avatar client can restore the active popup plus a reopenable recent-events strip from those snapshots after reconnect. The avatar surface also supports server-backed dismiss/reactivate actions through `avatar_ws`, but a broader canonical event model and richer surface protocols are still missing. |
-| `V2-021` | `partial` | `static/avatar.html` now supports camera popups, gallery cards, turn-aware voice interruption handling, a lightweight recent-events strip backed by `surface_state`, and server-backed close/reopen behavior for the active/recent event stack. It is still not a full event console with acknowledgements, prioritization, and richer action controls. |
+| `V2-020` | `in_progress` | `SurfaceStateService` now exists as a compatibility-first registry for `avatar_state`, `active_event`, and `recent_events`, avatar/voice clients now receive `surface_state` snapshots alongside existing websocket payloads, and the V2 avatar client can restore the active popup plus a reopenable recent-events strip from those snapshots after reconnect. The avatar surface also supports server-backed dismiss/reactivate actions through `avatar_ws`, and recent entries now carry explicit `active`/`dismissed`/`acknowledged` status. A broader canonical event model and richer surface protocols are still missing. |
+| `V2-021` | `partial` | `static/avatar.html` now supports camera popups, gallery cards, turn-aware voice interruption handling, a lightweight recent-events strip backed by `surface_state`, server-backed close/reopen behavior for the active/recent event stack, visible status chips for active, dismissed, and acknowledged events, an explicit popup acknowledge action, and per-entry acknowledge/dismiss controls in the recent-events strip. It is still not a full event console with prioritization, richer action controls, and broader recent-event interaction patterns. |
 
 ### Milestone 4: Conversation and Realtime Voice
 
@@ -98,13 +98,19 @@ Current landed pieces:
 - [avatar.html](/opt/avatar-server/static/avatar.html) now consumes `surface_state` snapshots so the active event popup can recover from backend state after reconnect
 - [avatar.html](/opt/avatar-server/static/avatar.html) now renders a lightweight recent-events strip from `surface_state.recent_events`, allowing reconnect-safe reopening of recent camera and visual events
 - [surface_state_service.py](/opt/avatar-server/avatar_backend/services/surface_state_service.py) now supports server-backed `dismiss_active_event` and `activate_recent_event` transitions
+- [surface_state_service.py](/opt/avatar-server/avatar_backend/services/surface_state_service.py) now tags recent events with explicit `active`/`dismissed`/`acknowledged` status and preserves that status through dismiss/reactivate/acknowledge actions
 - [avatar_ws.py](/opt/avatar-server/avatar_backend/routers/avatar_ws.py) now accepts `surface_action` websocket messages and replies with `surface_action_ack`
+- [avatar.html](/opt/avatar-server/static/avatar.html) now renders status chips in the recent-events strip so active, dismissed, and acknowledged entries are visually distinct
+- [avatar.html](/opt/avatar-server/static/avatar.html) now exposes an explicit `Acknowledge` popup action that persists through backend surface-state updates
+- [surface_state_service.py](/opt/avatar-server/avatar_backend/services/surface_state_service.py) now supports per-entry `dismiss_recent_event` and `acknowledge_recent_event` transitions without forcing a reopen first
+- [avatar_ws.py](/opt/avatar-server/avatar_backend/routers/avatar_ws.py) now accepts `dismiss_recent_event` and `acknowledge_recent_event` actions with per-event acknowledgements
+- [avatar.html](/opt/avatar-server/static/avatar.html) now renders per-entry `Acknowledge` and `Dismiss` controls in the recent-events strip so recent events can be triaged without reopening them
 - [test_surface_state_service.py](/opt/avatar-server/tests/test_surface_state_service.py) and [test_avatar_ws.py](/opt/avatar-server/tests/test_avatar_ws.py) cover the compatibility slice
 
 Still required before `V2-020` can be marked `completed`:
 
 - canonical event-derived surface state instead of router-fed compatibility updates
-- richer surface protocol for recent-event stacks, acknowledgements, and action affordances
+- richer surface protocol for recent-event stacks and action affordances beyond the current acknowledge/dismiss/reactivate slice
 - broader client adoption of `surface_state` beyond the avatar surface
 
 ### `V2-030` Current Evidence
@@ -122,6 +128,7 @@ Current landed pieces:
 - [avatar.html](/opt/avatar-server/static/avatar.html) now remembers the active visual-event `event_id`, sends it before the next recorded voice turn, and exposes an explicit “Ask about this” action on the popup
 - [test_conversation_service.py](/opt/avatar-server/tests/test_conversation_service.py) covers text context injection, raw voice-turn pass-through, and event-follow-up context shaping
 - [test_announce.py](/opt/avatar-server/tests/test_announce.py), [test_chat.py](/opt/avatar-server/tests/test_chat.py), and [test_realtime_voice_service.py](/opt/avatar-server/tests/test_realtime_voice_service.py) cover stored event context, `/chat/followup-event`, and event-linked voice follow-up routing
+- [proactive_service.py](/opt/avatar-server/avatar_backend/services/proactive_service.py) now expands aggregate `binary_sensor.house_needs_attention` events with the live `sensor.house_attention_summary` text before LLM triage, so generic household anomaly alerts can carry a concrete cause such as `back door open`
 
 Still required before `V2-030` can be marked `completed`:
 
