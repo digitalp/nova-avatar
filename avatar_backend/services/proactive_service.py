@@ -904,16 +904,16 @@ class ProactiveService:
         summary = await self._get_house_attention_summary()
         if not summary:
             return message
+        return self._direct_house_attention_message(summary)
 
-        lowered_message = message.lower()
-        lowered_summary = summary.lower()
-        if lowered_summary in lowered_message:
-            return message
-
-        base = message.rstrip()
-        if base and base[-1] not in ".!?":
-            base += "."
-        return f"{base} The issue is {summary}."
+    @staticmethod
+    def _direct_house_attention_message(summary: str) -> str:
+        clean = " ".join(str(summary or "").split()).strip()
+        if not clean:
+            return "I've noticed something at home that needs attention."
+        if clean[-1] not in ".!?":
+            clean += "."
+        return f"I've noticed {clean[0].lower() + clean[1:] if len(clean) > 1 else clean.lower()}"
 
 
     # ── Autonomous Heating Control ────────────────────────────────────────────
