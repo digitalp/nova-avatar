@@ -101,6 +101,38 @@ async def _session_cleanup_loop(sm: SessionManager, interval: int = 300) -> None
         await sm.cleanup_expired()
 
 
+async def _restart_fully_kiosk_after_startup(app: FastAPI, delay_s: float = 5.0) -> None:
+    await asyncio.sleep(delay_s)
+    logger = structlog.get_logger()
+    ws_mgr = getattr(app.state, "ws_manager", None)
+    ha = getattr(app.state, "ha_proxy", None)
+    if ha is None:
+        logger.warning("avatar_backend.kiosk_restart_skipped", reason="ha_proxy_unavailable")
+    else:
+        try:
+            result = await ha.call_service("button", "press", "button.rk3566_restart_browser")
+        except Exception as exc:
+            logger.warning(
+                "avatar_backend.kiosk_restart_failed",
+                entity_id="button.rk3566_restart_browser",
+                error=str(exc),
+            )
+        else:
+            if not result.success:
+                logger.warning(
+                    "avatar_backend.kiosk_restart_failed",
+                    entity_id="button.rk3566_restart_browser",
+                    detail=result.message,
+                )
+            else:
+                logger.info("avatar_backend.kiosk_restart_requested", entity_id="button.rk3566_restart_browser")
+    if ws_mgr is not None:
+        payload = {"type": "server_restarted"}
+        await ws_mgr.broadcast_json(payload)
+        await ws_mgr.broadcast_to_voice_json(payload)
+        logger.info("avatar_backend.restart_signal_broadcast")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -218,6 +250,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.sensor_watch = sensor_watch
     await sensor_watch.start()
+    kiosk_restart_task = asyncio.create_task(_restart_fully_kiosk_after_startup(app))
 
     cleanup_task = asyncio.create_task(
         _session_cleanup_loop(app.state.session_manager)
@@ -258,6 +291,11 @@ async def lifespan(app: FastAPI):
     logger.info("avatar_backend.ready")
     yield
 
+    kiosk_restart_task.cancel()
+    try:
+        await kiosk_restart_task
+    except asyncio.CancelledError:
+        pass
     cleanup_task.cancel()
     await proactive.stop()
     await app.state.sensor_watch.stop()
