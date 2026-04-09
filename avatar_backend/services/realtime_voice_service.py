@@ -47,6 +47,7 @@ class VoiceSessionState:
     input_stream_open: bool = False
     input_audio_chunks: list[bytes] = field(default_factory=list)
     input_audio_bytes: int = 0
+    output_streaming_enabled: bool = False
     state: str = IDLE
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -121,6 +122,16 @@ class RealtimeVoiceService:
                 "type": "turn_context_ack",
                 "event_id": session.pending_event_id,
                 "followup_prompt": session.pending_followup_prompt,
+            })
+            return True
+
+        if data.get("type") == "client_capabilities":
+            session = await self._get_or_create_session(session_key)
+            capabilities = data if isinstance(data, dict) else {}
+            session.output_streaming_enabled = bool(capabilities.get("output_streaming"))
+            await self._send_json(ws, {
+                "type": "client_capabilities_ack",
+                "output_streaming": session.output_streaming_enabled,
             })
             return True
 
@@ -359,7 +370,7 @@ class RealtimeVoiceService:
                         "type": "word_timings",
                         "word_timings": word_timings,
                     }, turn_id=turn_id)
-                    await self._send_wav(ctx.ws, wav_bytes)
+                    await self._send_audio_output(ctx.ws, session_key, wav_bytes, turn_id=turn_id)
 
                     if speaker_task is not None:
                         await speaker_task
@@ -388,6 +399,7 @@ class RealtimeVoiceService:
         await self._send_json(ws, {
             "type": "voice_capabilities",
             "input_streaming": True,
+            "output_streaming": True,
             "turn_context": True,
         })
 
@@ -423,6 +435,35 @@ class RealtimeVoiceService:
             await surface_state.set_avatar_state(ws_mgr, state)
         else:
             await ws_mgr.broadcast_json({"type": "avatar_state", "state": state})
+
+    async def _send_audio_output(
+        self,
+        ws: WebSocket,
+        session_key: str | None,
+        wav_bytes: bytes,
+        *,
+        turn_id: int | None,
+    ) -> None:
+        if session_key:
+            session = await self._get_or_create_session(session_key)
+            if session.output_streaming_enabled:
+                chunk_size = 32 * 1024
+                chunks = [
+                    wav_bytes[i:i + chunk_size]
+                    for i in range(0, len(wav_bytes), chunk_size)
+                ] or [b""]
+                await self._send_json(ws, {
+                    "type": "output_audio_start",
+                    "byte_length": len(wav_bytes),
+                    "chunk_count": len(chunks),
+                }, turn_id=turn_id)
+                for chunk in chunks:
+                    await self._send_wav(ws, chunk)
+                await self._send_json(ws, {
+                    "type": "output_audio_end",
+                }, turn_id=turn_id)
+                return
+        await self._send_wav(ws, wav_bytes)
 
     async def _get_or_create_session(self, session_key: str) -> VoiceSessionState:
         async with self._sessions_lock:

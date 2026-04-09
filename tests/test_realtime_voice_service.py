@@ -432,3 +432,74 @@ async def test_streaming_input_cancel_discards_buffered_audio():
     stt.transcribe.assert_not_called()
     cancel_ack = _messages_of_type(ws, "input_audio_cancel_ack")[0]
     assert cancel_ack["active"] is True
+
+
+@pytest.mark.asyncio
+async def test_client_output_streaming_sends_chunked_audio_messages():
+    service = RealtimeVoiceService()
+    ws = FakeWebSocket()
+    ws_mgr = MagicMock(spec=ConnectionManager)
+    ws_mgr.broadcast_json = AsyncMock()
+
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(return_value="stream output")
+
+    tts = MagicMock()
+    wav_bytes = b"RIFF" + (b"\x01\x02" * 20000)
+    tts.synthesise_with_timing = AsyncMock(return_value=(wav_bytes, []))
+
+    conversation_service = MagicMock()
+    conversation_service.handle_voice_turn = AsyncMock(return_value=SimpleNamespace(
+        text="Streaming output reply.",
+        session_id="voice_test",
+        tool_calls=[],
+        processing_time_ms=41,
+    ))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            conversation_service=conversation_service,
+            llm_service=MagicMock(),
+            session_manager=MagicMock(),
+            ha_proxy=MagicMock(),
+            decision_log=None,
+            memory_service=None,
+            recent_event_contexts={},
+        )
+    )
+    ws.app = app
+
+    ctx = VoiceTurnContext(
+        ws=ws,
+        ws_mgr=ws_mgr,
+        session_id="voice_test",
+        stt=stt,
+        tts=tts,
+        speaker=None,
+        app=app,
+    )
+
+    await service.connect_session("voice_test:socket")
+    try:
+        handled = await service.handle_text_frame(
+            ws,
+            "voice_test:socket",
+            json.dumps({"type": "client_capabilities", "output_streaming": True}),
+        )
+        assert handled is True
+
+        await service.start_audio_turn("voice_test:socket", ctx, b"fake-audio")
+        await asyncio.sleep(0.05)
+    finally:
+        with suppress(Exception):
+            await service.disconnect_session("voice_test:socket")
+
+    stream_start = _messages_of_type(ws, "output_audio_start")[0]
+    stream_end = _messages_of_type(ws, "output_audio_end")[0]
+    capabilities_ack = _messages_of_type(ws, "client_capabilities_ack")[0]
+    assert capabilities_ack["output_streaming"] is True
+    assert stream_start["turn_id"] == 1
+    assert stream_start["byte_length"] == len(wav_bytes)
+    assert stream_start["chunk_count"] == len(ws.binary_messages)
+    assert stream_end["turn_id"] == 1
+    assert len(ws.binary_messages) > 1

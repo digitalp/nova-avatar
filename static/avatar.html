@@ -610,6 +610,9 @@ let pendingWordTimings = null;  // word timings arriving just before audio
 let pendingWordTimingsTurnId = null;
 let pendingAudioTurnId = null;
 let currentPlaybackTurnId = null;
+let serverVoiceCapabilities = { input_streaming: false, output_streaming: false, turn_context: false };
+let activeOutputStreamTurnId = null;
+let activeOutputStreamChunks = [];
 let activeEventId = null;
 let latestSurfaceState = null;
 let pendingSurfaceConfirmation = null;
@@ -873,13 +876,22 @@ async function connectWs() {
   ws.onopen = () => {
     wsReady = true; reconnectDelay = 1000;
     $btnMic.disabled = false;
+    ws.send(JSON.stringify({ type: 'client_capabilities', output_streaming: true }));
     startWakeWord();
   };
 
   ws.onmessage = async (evt) => {
-    if (evt.data instanceof ArrayBuffer) { await playWav(evt.data); return; }
+    if (evt.data instanceof ArrayBuffer) {
+      if (activeOutputStreamTurnId != null) {
+        activeOutputStreamChunks.push(evt.data);
+        return;
+      }
+      await playWav(evt.data);
+      return;
+    }
     try {
       const msg = JSON.parse(evt.data);
+      if (msg.type === 'voice_capabilities') serverVoiceCapabilities = { ...serverVoiceCapabilities, ...msg };
       if (msg.type === 'state' || msg.type === 'avatar_state') handleState(msg.state);
       if (msg.type === 'surface_state') applySurfaceState(msg);
       if (msg.type === 'turn_interrupted') handleTurnInterrupted(msg);
@@ -893,6 +905,23 @@ async function connectWs() {
         lastResponseWasQuestion = /[\u003f]\s*$/.test((msg.text || '').trim());
       }
       if (msg.type === 'audio_start') pendingAudioTurnId = msg.turn_id ?? null;
+      if (msg.type === 'output_audio_start') {
+        pendingAudioTurnId = msg.turn_id ?? null;
+        activeOutputStreamTurnId = msg.turn_id ?? null;
+        activeOutputStreamChunks = [];
+      }
+      if (msg.type === 'output_audio_end') {
+        if (activeOutputStreamTurnId === (msg.turn_id ?? null) && activeOutputStreamChunks.length) {
+          const blob = new Blob(activeOutputStreamChunks, { type: 'audio/wav' });
+          const buffer = await blob.arrayBuffer();
+          activeOutputStreamTurnId = null;
+          activeOutputStreamChunks = [];
+          await playWav(buffer);
+        } else {
+          activeOutputStreamTurnId = null;
+          activeOutputStreamChunks = [];
+        }
+      }
       if (msg.type === 'word_timings') {
         pendingWordTimings = msg.word_timings;
         pendingWordTimingsTurnId = msg.turn_id ?? null;
@@ -958,6 +987,8 @@ function stopActiveSpeechPlayback() {
   pendingWordTimingsTurnId = null;
   pendingAudioTurnId = null;
   currentPlaybackTurnId = null;
+  activeOutputStreamTurnId = null;
+  activeOutputStreamChunks = [];
   if (currentPlaybackSource) {
     try { currentPlaybackSource.stop(); } catch (_) {}
     try { currentPlaybackSource.disconnect(); } catch (_) {}
@@ -976,6 +1007,10 @@ function handleTurnInterrupted(msg) {
     pendingWordTimings = null;
     if (pendingWordTimingsTurnId === msg.interrupted_turn_id) pendingWordTimingsTurnId = null;
     if (pendingAudioTurnId === msg.interrupted_turn_id) pendingAudioTurnId = null;
+    if (activeOutputStreamTurnId === msg.interrupted_turn_id) {
+      activeOutputStreamTurnId = null;
+      activeOutputStreamChunks = [];
+    }
     return;
   }
   stopActiveSpeechPlayback();
