@@ -1,5 +1,7 @@
 import asyncio
+import io
 import json
+import wave
 from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -35,6 +37,16 @@ def _messages_of_type(ws: FakeWebSocket, message_type: str) -> list[dict]:
         for message in ws.text_messages
         if json.loads(message).get("type") == message_type
     ]
+
+
+def _pcm_wav_bytes(sample_count: int = 4000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(22050)
+        wf.writeframes(b"\x01\x02" * sample_count)
+    return buf.getvalue()
 
 
 @pytest.mark.asyncio
@@ -445,7 +457,7 @@ async def test_client_output_streaming_sends_chunked_audio_messages():
     stt.transcribe = AsyncMock(return_value="stream output")
 
     tts = MagicMock()
-    wav_bytes = b"RIFF" + (b"\x01\x02" * 20000)
+    wav_bytes = _pcm_wav_bytes(20000)
     tts.synthesise_with_timing = AsyncMock(return_value=(wav_bytes, []))
 
     conversation_service = MagicMock()
@@ -484,7 +496,11 @@ async def test_client_output_streaming_sends_chunked_audio_messages():
         handled = await service.handle_text_frame(
             ws,
             "voice_test:socket",
-            json.dumps({"type": "client_capabilities", "output_streaming": True}),
+            json.dumps({
+                "type": "client_capabilities",
+                "output_streaming": True,
+                "output_audio_format": "pcm_s16le",
+            }),
         )
         assert handled is True
 
@@ -498,8 +514,13 @@ async def test_client_output_streaming_sends_chunked_audio_messages():
     stream_end = _messages_of_type(ws, "output_audio_end")[0]
     capabilities_ack = _messages_of_type(ws, "client_capabilities_ack")[0]
     assert capabilities_ack["output_streaming"] is True
+    assert capabilities_ack["output_audio_format"] == "pcm_s16le"
     assert stream_start["turn_id"] == 1
-    assert stream_start["byte_length"] == len(wav_bytes)
+    assert stream_start["audio_format"] == "pcm_s16le"
+    assert stream_start["sample_rate"] == 22050
+    assert stream_start["channels"] == 1
+    assert stream_start["sample_width_bytes"] == 2
+    assert stream_start["byte_length"] == len(wav_bytes) - 44
     assert stream_start["chunk_count"] == len(ws.binary_messages)
     assert stream_end["turn_id"] == 1
     assert len(ws.binary_messages) > 1

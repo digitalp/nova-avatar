@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import wave
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,6 +50,7 @@ class VoiceSessionState:
     input_audio_chunks: list[bytes] = field(default_factory=list)
     input_audio_bytes: int = 0
     output_streaming_enabled: bool = False
+    output_audio_format: str = "wav"
     state: str = IDLE
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -129,9 +132,12 @@ class RealtimeVoiceService:
             session = await self._get_or_create_session(session_key)
             capabilities = data if isinstance(data, dict) else {}
             session.output_streaming_enabled = bool(capabilities.get("output_streaming"))
+            output_audio_format = str(capabilities.get("output_audio_format") or "wav").strip().lower()
+            session.output_audio_format = output_audio_format if output_audio_format in {"wav", "pcm_s16le"} else "wav"
             await self._send_json(ws, {
                 "type": "client_capabilities_ack",
                 "output_streaming": session.output_streaming_enabled,
+                "output_audio_format": session.output_audio_format,
             })
             return True
 
@@ -400,6 +406,7 @@ class RealtimeVoiceService:
             "type": "voice_capabilities",
             "input_streaming": True,
             "output_streaming": True,
+            "output_audio_formats": ["wav", "pcm_s16le"],
             "turn_context": True,
         })
 
@@ -447,15 +454,28 @@ class RealtimeVoiceService:
         if session_key:
             session = await self._get_or_create_session(session_key)
             if session.output_streaming_enabled:
+                audio_format = session.output_audio_format
+                if audio_format == "pcm_s16le":
+                    pcm_bytes, sample_rate, channels, sample_width_bytes = self._extract_pcm_stream(wav_bytes)
+                    payload_bytes = pcm_bytes
+                else:
+                    payload_bytes = wav_bytes
+                    sample_rate = None
+                    channels = None
+                    sample_width_bytes = None
                 chunk_size = 32 * 1024
                 chunks = [
-                    wav_bytes[i:i + chunk_size]
-                    for i in range(0, len(wav_bytes), chunk_size)
+                    payload_bytes[i:i + chunk_size]
+                    for i in range(0, len(payload_bytes), chunk_size)
                 ] or [b""]
                 await self._send_json(ws, {
                     "type": "output_audio_start",
-                    "byte_length": len(wav_bytes),
+                    "audio_format": audio_format,
+                    "byte_length": len(payload_bytes),
                     "chunk_count": len(chunks),
+                    "sample_rate": sample_rate,
+                    "channels": channels,
+                    "sample_width_bytes": sample_width_bytes,
                 }, turn_id=turn_id)
                 for chunk in chunks:
                     await self._send_wav(ws, chunk)
@@ -464,6 +484,14 @@ class RealtimeVoiceService:
                 }, turn_id=turn_id)
                 return
         await self._send_wav(ws, wav_bytes)
+
+    def _extract_pcm_stream(self, wav_bytes: bytes) -> tuple[bytes, int, int, int]:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+            sample_rate = wf.getframerate()
+            channels = wf.getnchannels()
+            sample_width_bytes = wf.getsampwidth()
+            pcm_bytes = wf.readframes(wf.getnframes())
+        return pcm_bytes, sample_rate, channels, sample_width_bytes
 
     async def _get_or_create_session(self, session_key: str) -> VoiceSessionState:
         async with self._sessions_lock:

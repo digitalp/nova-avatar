@@ -606,13 +606,14 @@ let ws                = null;
 let audioCtx          = null;
 let wsReady           = false;
 let currentPlaybackSource = null;
+let progressivePlaybackSources = [];
+let progressivePlaybackCursor = 0;
 let pendingWordTimings = null;  // word timings arriving just before audio
 let pendingWordTimingsTurnId = null;
 let pendingAudioTurnId = null;
 let currentPlaybackTurnId = null;
 let serverVoiceCapabilities = { input_streaming: false, output_streaming: false, turn_context: false };
-let activeOutputStreamTurnId = null;
-let activeOutputStreamChunks = [];
+let activeOutputStream = null;
 let activeEventId = null;
 let latestSurfaceState = null;
 let pendingSurfaceConfirmation = null;
@@ -876,14 +877,23 @@ async function connectWs() {
   ws.onopen = () => {
     wsReady = true; reconnectDelay = 1000;
     $btnMic.disabled = false;
-    ws.send(JSON.stringify({ type: 'client_capabilities', output_streaming: true }));
+    const wantsProgressiveOutput = !head;
+    ws.send(JSON.stringify({
+      type: 'client_capabilities',
+      output_streaming: wantsProgressiveOutput,
+      output_audio_format: wantsProgressiveOutput ? 'pcm_s16le' : 'wav',
+    }));
     startWakeWord();
   };
 
   ws.onmessage = async (evt) => {
     if (evt.data instanceof ArrayBuffer) {
-      if (activeOutputStreamTurnId != null) {
-        activeOutputStreamChunks.push(evt.data);
+      if (activeOutputStream?.turnId != null) {
+        if (activeOutputStream.audioFormat === 'pcm_s16le') {
+          await queueProgressivePcmChunk(evt.data, activeOutputStream);
+        } else {
+          activeOutputStream.chunks.push(evt.data);
+        }
         return;
       }
       await playWav(evt.data);
@@ -907,19 +917,31 @@ async function connectWs() {
       if (msg.type === 'audio_start') pendingAudioTurnId = msg.turn_id ?? null;
       if (msg.type === 'output_audio_start') {
         pendingAudioTurnId = msg.turn_id ?? null;
-        activeOutputStreamTurnId = msg.turn_id ?? null;
-        activeOutputStreamChunks = [];
+        activeOutputStream = {
+          turnId: msg.turn_id ?? null,
+          audioFormat: msg.audio_format || 'wav',
+          sampleRate: msg.sample_rate || 22050,
+          channels: msg.channels || 1,
+          sampleWidthBytes: msg.sample_width_bytes || 2,
+          chunks: [],
+        };
+        if (activeOutputStream.audioFormat === 'pcm_s16le') {
+          currentPlaybackTurnId = activeOutputStream.turnId;
+          if (!audioCtx) audioCtx = new AudioContext();
+          if (audioCtx.state === 'suspended') await audioCtx.resume();
+          progressivePlaybackCursor = Math.max(audioCtx.currentTime + 0.02, progressivePlaybackCursor || 0);
+        }
       }
       if (msg.type === 'output_audio_end') {
-        if (activeOutputStreamTurnId === (msg.turn_id ?? null) && activeOutputStreamChunks.length) {
-          const blob = new Blob(activeOutputStreamChunks, { type: 'audio/wav' });
+        if (activeOutputStream?.turnId === (msg.turn_id ?? null) &&
+            activeOutputStream.audioFormat === 'wav' &&
+            activeOutputStream.chunks.length) {
+          const blob = new Blob(activeOutputStream.chunks, { type: 'audio/wav' });
           const buffer = await blob.arrayBuffer();
-          activeOutputStreamTurnId = null;
-          activeOutputStreamChunks = [];
+          activeOutputStream = null;
           await playWav(buffer);
         } else {
-          activeOutputStreamTurnId = null;
-          activeOutputStreamChunks = [];
+          activeOutputStream = null;
         }
       }
       if (msg.type === 'word_timings') {
@@ -987,8 +1009,13 @@ function stopActiveSpeechPlayback() {
   pendingWordTimingsTurnId = null;
   pendingAudioTurnId = null;
   currentPlaybackTurnId = null;
-  activeOutputStreamTurnId = null;
-  activeOutputStreamChunks = [];
+  activeOutputStream = null;
+  progressivePlaybackCursor = 0;
+  for (const src of progressivePlaybackSources) {
+    try { src.stop(); } catch (_) {}
+    try { src.disconnect(); } catch (_) {}
+  }
+  progressivePlaybackSources = [];
   if (currentPlaybackSource) {
     try { currentPlaybackSource.stop(); } catch (_) {}
     try { currentPlaybackSource.disconnect(); } catch (_) {}
@@ -1007,15 +1034,53 @@ function handleTurnInterrupted(msg) {
     pendingWordTimings = null;
     if (pendingWordTimingsTurnId === msg.interrupted_turn_id) pendingWordTimingsTurnId = null;
     if (pendingAudioTurnId === msg.interrupted_turn_id) pendingAudioTurnId = null;
-    if (activeOutputStreamTurnId === msg.interrupted_turn_id) {
-      activeOutputStreamTurnId = null;
-      activeOutputStreamChunks = [];
+    if (activeOutputStream?.turnId === msg.interrupted_turn_id) {
+      activeOutputStream = null;
+      progressivePlaybackCursor = 0;
+      for (const src of progressivePlaybackSources) {
+        try { src.stop(); } catch (_) {}
+        try { src.disconnect(); } catch (_) {}
+      }
+      progressivePlaybackSources = [];
     }
     return;
   }
   stopActiveSpeechPlayback();
   isBusy = false;
   handleState('idle');
+}
+
+async function queueProgressivePcmChunk(chunkBuffer, streamInfo) {
+  try {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    const pcm16 = new Int16Array(chunkBuffer);
+    const frameCount = Math.floor(pcm16.length / streamInfo.channels);
+    if (!frameCount) return;
+    const audioBuffer = audioCtx.createBuffer(streamInfo.channels, frameCount, streamInfo.sampleRate);
+    for (let channel = 0; channel < streamInfo.channels; channel++) {
+      const channelData = audioBuffer.getChannelData(channel);
+      for (let i = 0; i < frameCount; i++) {
+        const sample = pcm16[i * streamInfo.channels + channel] || 0;
+        channelData[i] = sample / 32768;
+      }
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = audioBuffer;
+    src.connect(audioCtx.destination);
+    const startAt = Math.max(audioCtx.currentTime + 0.02, progressivePlaybackCursor || 0);
+    progressivePlaybackCursor = startAt + audioBuffer.duration;
+    currentPlaybackSource = src;
+    progressivePlaybackSources.push(src);
+    src.onended = () => {
+      progressivePlaybackSources = progressivePlaybackSources.filter(item => item !== src);
+      if (currentPlaybackSource === src) currentPlaybackSource = null;
+      if (!progressivePlaybackSources.length) currentPlaybackTurnId = null;
+    };
+    src.start(startAt);
+  } catch (e) {
+    console.error('[Nova] Progressive PCM playback:', e);
+  }
 }
 
 // ── Wake word ─────────────────────────────────────────────────────────────────

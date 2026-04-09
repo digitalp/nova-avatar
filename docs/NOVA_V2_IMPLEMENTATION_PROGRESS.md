@@ -149,14 +149,14 @@ Current landed pieces:
 - explicit audio boundary via `audio_start`
 - optional streamed audio input via `input_audio_start`, `input_audio_commit`, and `input_audio_cancel`, while keeping the legacy one-blob turn path working
 - websocket capability advertisement via `voice_capabilities`, so newer clients can detect streamed transport support before switching protocols
-- opt-in chunked output transport via `client_capabilities`, `output_audio_start`, and `output_audio_end`, allowing upgraded clients to reassemble large WAV replies without relying on a single binary websocket frame
+- opt-in chunked output transport via `client_capabilities`, `output_audio_start`, and `output_audio_end`, with a progressive PCM scheduling path available for non-head fallback clients
 - [avatar.html](/opt/avatar-server/static/avatar.html) consumes interruption and turn-aware playback metadata
-- [avatar.html](/opt/avatar-server/static/avatar.html) now advertises streamed-output support and reassembles chunked audio replies before playback
-- [test_realtime_voice_service.py](/opt/avatar-server/tests/test_realtime_voice_service.py) covers happy-path interruption behavior, turn metadata, streamed-input commit/cancel behavior, and chunked output transport
+- [avatar.html](/opt/avatar-server/static/avatar.html) now keeps the existing buffered WAV path for the lipsynced 3D head and only requests progressive PCM output when running without a head-backed avatar surface
+- [test_realtime_voice_service.py](/opt/avatar-server/tests/test_realtime_voice_service.py) covers happy-path interruption behavior, turn metadata, streamed-input commit/cancel behavior, and the PCM streaming metadata path
 
 Still required before `V2-031` can be marked `completed`:
 
-- progressive output playback instead of buffering chunked WAV transport client-side before decode
+- bringing progressive playback to the main lipsynced avatar path instead of limiting it to non-head fallback clients
 - deeper conversation-state integration beyond the current compatibility coordinator handoff
 - provider-adapter layer for future native realtime backends
 - stronger end-to-end validation beyond syntax checks
