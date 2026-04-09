@@ -240,6 +240,7 @@ Current landed pieces:
 - [realtime_voice_service.py](/opt/avatar-server/avatar_backend/services/realtime_voice_service.py) now accepts `turn_context` frames so the next voice turn can resolve stored event context into `ConversationService`
 - [conversation_service.py](/opt/avatar-server/avatar_backend/services/conversation_service.py) now stores pending event-followup context separately from the underlying session history and consumes it on the next text or voice turn instead of requiring routers to execute a fully separate follow-up path
 - [chat.py](/opt/avatar-server/avatar_backend/routers/chat.py) and [realtime_voice_service.py](/opt/avatar-server/avatar_backend/services/realtime_voice_service.py) now register pending event context with `ConversationService` before the next ordinary turn runs, which makes the coordinator own the event-linked state boundary
+- [conversation_service.py](/opt/avatar-server/avatar_backend/services/conversation_service.py) now also owns `clear_session_state()`, so `/chat/{session_id}`, admin session clears, and voice corrupt-session recovery clear pending event context alongside the underlying session history
 - [main.py](/opt/avatar-server/avatar_backend/main.py) wires `conversation_service` into `app.state`
 - [announce.py](/opt/avatar-server/avatar_backend/routers/announce.py) now assigns `event_id` to visual events and stores recent follow-up context for camera and visual flows
 - [avatar.html](/opt/avatar-server/static/avatar.html) now remembers the active visual-event `event_id`, sends it before the next recorded voice turn, and exposes an explicit “Ask about this” action on the popup
@@ -251,7 +252,7 @@ Still required before `V2-030` can be marked `completed`:
 
 - event-linked follow-up flows connected to broader UI controls beyond the active avatar popup and next-turn voice context
 - richer structured context building beyond compatibility prompt shaping
-- broader conversation-state structure beyond the current pending-event-context split
+- broader conversation-state structure beyond the current pending-event-context split and reset cleanup
 - broader end-to-end validation of chat and voice through the new coordinator
 
 ## Next Recommended Ticket

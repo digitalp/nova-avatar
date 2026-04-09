@@ -298,7 +298,7 @@ class RealtimeVoiceService:
                     fallback_text = LLM_TIMEOUT_MSG
                 elif "400" in err and "bad request" in err.lower():
                     _LOGGER.warning("voice_ws.clearing_corrupt_session", session_id=ctx.session_id)
-                    await ctx.app.state.session_manager.clear(ctx.session_id)
+                    await ctx.app.state.conversation_service.clear_session_state(ctx.session_id)
                     try:
                         if event_id:
                             recent_events: dict[str, tuple[float, dict[str, Any]]] = getattr(

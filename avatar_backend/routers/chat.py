@@ -119,8 +119,7 @@ async def chat_followup_event(body: EventFollowupChatRequest, request: Request) 
 
 @router.delete("/chat/{session_id}", dependencies=[Depends(verify_api_key)])
 async def clear_session(session_id: str, request: Request) -> dict:
-    sm: SessionManager = request.app.state.session_manager
-    await sm.clear(session_id)
+    await request.app.state.conversation_service.clear_session_state(session_id)
     return {"cleared": session_id}
 
 

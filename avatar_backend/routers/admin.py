@@ -389,7 +389,7 @@ async def list_sessions(request: Request):
 @router.delete("/sessions/{session_id}")
 async def clear_session(session_id: str, request: Request):
     _require_session(request, min_role="admin")
-    await request.app.state.session_manager.clear(session_id)
+    await request.app.state.conversation_service.clear_session_state(session_id)
     return {"cleared": session_id}
 
 

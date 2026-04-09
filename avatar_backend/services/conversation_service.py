@@ -79,6 +79,10 @@ class ConversationService:
         async with self._pending_lock:
             self._pending_event_contexts.pop(session_id, None)
 
+    async def clear_session_state(self, session_id: str) -> None:
+        await self.clear_event_followup_context(session_id)
+        await self._app.state.session_manager.clear(session_id)
+
     async def _apply_pending_event_context(self, session_id: str, user_text: str) -> str:
         async with self._pending_lock:
             pending = self._pending_event_contexts.pop(session_id, None)

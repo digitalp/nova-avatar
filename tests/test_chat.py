@@ -139,6 +139,31 @@ def test_session_clear(mock_chat, mock_ready, client):
 
 
 @patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
+def test_session_clear_removes_pending_event_context(mock_ready, client):
+    conversation_service = client.app.state.conversation_service
+
+    async def seed_pending_context():
+        from avatar_backend.services.conversation_service import PendingEventFollowupContext
+        await conversation_service.set_event_followup_context(
+            "to_clear_pending",
+            PendingEventFollowupContext(
+                event_type="parcel_delivery",
+                event_summary="Package still outside",
+                event_context={"camera_entity_id": "camera.front_door"},
+            ),
+        )
+
+    import asyncio
+    asyncio.run(seed_pending_context())
+
+    resp = client.delete("/chat/to_clear_pending", headers=HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json()["cleared"] == "to_clear_pending"
+    assert "to_clear_pending" not in conversation_service._pending_event_contexts
+
+
+@patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
 @patch("avatar_backend.services.conversation_service.ConversationService.handle_text_turn", new_callable=AsyncMock)
 @patch("avatar_backend.services.conversation_service.ConversationService.set_event_followup_context", new_callable=AsyncMock)
 def test_chat_followup_event_uses_stored_event_context(mock_set_context, mock_handle_text_turn, mock_ready, client):
