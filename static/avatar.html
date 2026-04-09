@@ -1646,9 +1646,12 @@ function getSuggestedActions(event, isActive) {
     return actions;
   }
   if (event.status === 'dismissed' || event.status === 'resolved' || event.status === 'snoozed') {
-    return [{ action: 'activate_recent_event', label: event.status === 'snoozed' ? 'Unsnooze' : 'Reopen', tone: 'info', requires_confirmation: false }];
+    return [
+      { action: 'ask_about_event', label: 'Ask about this', tone: 'info', requires_confirmation: false },
+      { action: 'activate_recent_event', label: event.status === 'snoozed' ? 'Unsnooze' : 'Reopen', tone: 'info', requires_confirmation: false },
+    ];
   }
-  const actions = [];
+  const actions = [{ action: 'ask_about_event', label: 'Ask about this', tone: 'info', requires_confirmation: false }];
   if (event.status !== 'acknowledged') {
     actions.push({ action: 'acknowledge_recent_event', label: 'Acknowledge', tone: 'warn', requires_confirmation: true, confirm_text: 'Acknowledge this event?' });
   }
@@ -1705,10 +1708,13 @@ function requestSurfaceAction(actionDef, scope, eventId = null) {
   if (!actionDef?.action) return;
   if (actionDef.action === 'ask_about_event') {
     clearPendingSurfaceAction();
-    pendingTurnContext = activeEventId ? {
-      event_id: activeEventId,
+    const targetEventId = eventId || activeEventId;
+    if (targetEventId) activeEventId = targetEventId;
+    pendingTurnContext = targetEventId ? {
+      event_id: targetEventId,
       followup_prompt: actionDef.followup_prompt || '',
     } : null;
+    if (latestSurfaceState) renderRecentEvents(latestSurfaceState.recent_events || []);
     triggerAskAboutEvent();
     return;
   }
