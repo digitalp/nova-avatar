@@ -153,13 +153,14 @@ Current landed pieces:
 - [avatar.html](/opt/avatar-server/static/avatar.html) consumes interruption and turn-aware playback metadata
 - [avatar.html](/opt/avatar-server/static/avatar.html) now keeps the existing buffered WAV path for the lipsynced 3D head and only requests progressive PCM output when running without a head-backed avatar surface
 - [test_realtime_voice_service.py](/opt/avatar-server/tests/test_realtime_voice_service.py) covers happy-path interruption behavior, turn metadata, streamed-input commit/cancel behavior, and the PCM streaming metadata path
+- [test_voice_milestone.py](/opt/avatar-server/tests/test_voice_milestone.py) now exercises websocket capability negotiation and streamed output metadata through the real `/ws/voice` route using `TestClient`
 
 Still required before `V2-031` can be marked `completed`:
 
 - bringing progressive playback to the main lipsynced avatar path instead of limiting it to non-head fallback clients
 - richer conversation-state integration beyond the current pending-event-context handoff
 - provider-adapter layer for future native realtime backends
-- stronger end-to-end validation beyond syntax checks
+- broader end-to-end validation beyond the current websocket transport negotiation slice
 
 ### `V2-020` Current Evidence
 

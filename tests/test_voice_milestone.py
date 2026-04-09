@@ -168,3 +168,60 @@ def test_voice_ws_full_pipeline():
     assert transcript_seen, "expected a transcript message"
     assert response_seen,   "expected a response message"
     assert audio_received,  "expected WAV audio bytes"
+
+
+def test_voice_ws_negotiates_streamed_output_capabilities():
+    app = _build_test_app()
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/voice?api_key=test-key") as ws:
+            msg = json.loads(ws.receive_text())
+            assert msg["type"] == "state"
+            assert msg["state"] == "idle"
+
+            msg = json.loads(ws.receive_text())
+            assert msg["type"] == "voice_capabilities"
+            assert msg["input_streaming"] is True
+            assert msg["output_streaming"] is True
+            assert "pcm_s16le" in msg["output_audio_formats"]
+
+            ws.send_text(json.dumps({
+                "type": "client_capabilities",
+                "output_streaming": True,
+                "output_audio_format": "pcm_s16le",
+            }))
+
+            msg = json.loads(ws.receive_text())
+            assert msg["type"] == "client_capabilities_ack"
+            assert msg["output_streaming"] is True
+            assert msg["output_audio_format"] == "pcm_s16le"
+
+            ws.send_bytes(_make_silent_wav())
+
+            output_started = None
+            output_ended = False
+            chunk_count = 0
+
+            for _ in range(40):
+                data = ws.receive()
+                if data.get("bytes"):
+                    chunk_count += 1
+                    continue
+
+                msg = json.loads(data.get("text", ""))
+                if msg.get("type") == "output_audio_start":
+                    output_started = msg
+                elif msg.get("type") == "output_audio_end":
+                    output_ended = True
+                    break
+                elif msg.get("type") == "error":
+                    pytest.fail(f"Got error from server: {msg}")
+
+    assert output_started is not None, "expected output_audio_start metadata"
+    assert output_started["audio_format"] == "pcm_s16le"
+    assert output_started["sample_rate"] == 22050
+    assert output_started["channels"] == 1
+    assert output_started["sample_width_bytes"] == 2
+    assert output_started["chunk_count"] >= 1
+    assert chunk_count == output_started["chunk_count"]
+    assert output_ended is True
