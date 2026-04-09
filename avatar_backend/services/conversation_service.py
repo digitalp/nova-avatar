@@ -112,14 +112,21 @@ class ConversationService:
     ) -> str:
         pending: PendingEventFollowupContext | None = None
         sanitized_context = self._context_builder.sanitize_context(context)
+        context_was_provided = context is not None
         async with self._state_lock:
             session_state = self._session_states.get(session_id)
-            if session_state is None and sanitized_context:
+            if session_state is None and (sanitized_context or context_was_provided):
                 session_state = ConversationSessionState()
                 self._session_states[session_id] = session_state
             if session_state is not None:
-                if sanitized_context:
-                    session_state.home_context = sanitized_context
+                if context_was_provided:
+                    if sanitized_context:
+                        session_state.home_context = {
+                            **(session_state.home_context or {}),
+                            **sanitized_context,
+                        }
+                    else:
+                        session_state.home_context = None
                 effective_context = session_state.home_context
                 pending = session_state.pending_event_context
                 session_state.pending_event_context = None

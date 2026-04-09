@@ -215,6 +215,106 @@ async def test_home_context_persists_across_later_text_turns():
 
 
 @pytest.mark.asyncio
+async def test_home_context_merges_incremental_updates_across_turns():
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            llm_service=object(),
+            session_manager=object(),
+            ha_proxy=object(),
+            decision_log=None,
+            memory_service=None,
+        )
+    )
+    service = ConversationService(app)
+
+    captured: list[str] = []
+
+    async def fake_run_turn(*, session_id: str, user_text: str):
+        captured.append(user_text)
+        return "ok"
+
+    service._run_turn = AsyncMock(side_effect=fake_run_turn)
+
+    await service.handle_text_turn(
+        ConversationTurnRequest(
+            session_id="merge-text",
+            user_text="Initial state?",
+            context={"room": "Kitchen"},
+        )
+    )
+    await service.handle_text_turn(
+        ConversationTurnRequest(
+            session_id="merge-text",
+            user_text="Add mode.",
+            context={"mode": "Evening"},
+        )
+    )
+    await service.handle_text_turn(
+        ConversationTurnRequest(
+            session_id="merge-text",
+            user_text="What changed?",
+        )
+    )
+
+    assert captured[1] == (
+        "Add mode.\n\n[Home context]\n"
+        "  room: Kitchen\n"
+        "  mode: Evening"
+    )
+    assert captured[2] == (
+        "What changed?\n\n[Home context]\n"
+        "  room: Kitchen\n"
+        "  mode: Evening"
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_context_explicitly_clears_persisted_home_context():
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            llm_service=object(),
+            session_manager=object(),
+            ha_proxy=object(),
+            decision_log=None,
+            memory_service=None,
+        )
+    )
+    service = ConversationService(app)
+
+    captured: list[str] = []
+
+    async def fake_run_turn(*, session_id: str, user_text: str):
+        captured.append(user_text)
+        return "ok"
+
+    service._run_turn = AsyncMock(side_effect=fake_run_turn)
+
+    await service.handle_text_turn(
+        ConversationTurnRequest(
+            session_id="clear-text",
+            user_text="Start with context.",
+            context={"room": "Kitchen", "mode": "Evening"},
+        )
+    )
+    await service.handle_text_turn(
+        ConversationTurnRequest(
+            session_id="clear-text",
+            user_text="Clear it now.",
+            context={},
+        )
+    )
+    await service.handle_text_turn(
+        ConversationTurnRequest(
+            session_id="clear-text",
+            user_text="What changed?",
+        )
+    )
+
+    assert captured[1] == "Clear it now."
+    assert captured[2] == "What changed?"
+
+
+@pytest.mark.asyncio
 async def test_voice_turn_uses_persisted_home_context_and_pending_event_overlay():
     app = SimpleNamespace(
         state=SimpleNamespace(
