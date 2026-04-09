@@ -130,6 +130,83 @@ def test_session_history_grows(mock_chat, mock_ready, client):
 
 
 @patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
+@patch("avatar_backend.services.llm_service.LLMService.chat",     new_callable=AsyncMock)
+def test_chat_context_merges_incrementally_across_requests(mock_chat, mock_ready, client):
+    mock_chat.side_effect = [
+        ("Captured room.", []),
+        ("Captured mode.", []),
+        ("Merged context answer.", []),
+    ]
+
+    resp1 = client.post(
+        "/chat",
+        json={"session_id": "context-merge", "text": "Remember the room.", "context": {"room": "Kitchen"}},
+        headers=HEADERS,
+    )
+    resp2 = client.post(
+        "/chat",
+        json={"session_id": "context-merge", "text": "Add the mode.", "context": {"mode": "Evening"}},
+        headers=HEADERS,
+    )
+    resp3 = client.post(
+        "/chat",
+        json={"session_id": "context-merge", "text": "What changed?"},
+        headers=HEADERS,
+    )
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+    assert resp3.status_code == 200
+
+    third_messages = mock_chat.await_args_list[2].args[0]
+    assert third_messages[-1]["role"] == "user"
+    assert third_messages[-1]["content"] == (
+        "What changed?\n\n[Home context]\n"
+        "  room: Kitchen\n"
+        "  mode: Evening"
+    )
+
+
+@patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
+@patch("avatar_backend.services.llm_service.LLMService.chat",     new_callable=AsyncMock)
+def test_chat_empty_context_clears_persisted_context_for_later_requests(mock_chat, mock_ready, client):
+    mock_chat.side_effect = [
+        ("Captured context.", []),
+        ("Cleared context.", []),
+        ("No sticky context.", []),
+    ]
+
+    resp1 = client.post(
+        "/chat",
+        json={
+            "session_id": "context-clear",
+            "text": "Remember the driveway.",
+            "context": {"camera": "driveway", "severity": "normal"},
+        },
+        headers=HEADERS,
+    )
+    resp2 = client.post(
+        "/chat",
+        json={"session_id": "context-clear", "text": "Clear it.", "context": {}},
+        headers=HEADERS,
+    )
+    resp3 = client.post(
+        "/chat",
+        json={"session_id": "context-clear", "text": "What changed?"},
+        headers=HEADERS,
+    )
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+    assert resp3.status_code == 200
+
+    second_messages = mock_chat.await_args_list[1].args[0]
+    third_messages = mock_chat.await_args_list[2].args[0]
+    assert second_messages[-1]["content"] == "Clear it."
+    assert third_messages[-1]["content"] == "What changed?"
+
+
+@patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
 @patch("avatar_backend.services.llm_service.LLMService.chat",     new_callable=AsyncMock, return_value=("Cleared.", []))
 def test_session_clear(mock_chat, mock_ready, client):
     client.post("/chat", json={"session_id": "to_clear", "text": "hi"}, headers=HEADERS)
