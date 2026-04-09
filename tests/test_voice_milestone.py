@@ -351,6 +351,67 @@ def test_voice_ws_streamed_input_commit_combines_home_context_with_event_overlay
     )
 
 
+def test_voice_ws_streamed_input_cancel_discards_buffer_before_next_turn():
+    app = _build_test_app()
+
+    stale_chunk = b"discard-me"
+    fresh_audio = _make_silent_wav(n_samples=120, sample_rate=16000)
+
+    stt_mock = app.state.stt_service
+    stt_mock.transcribe = AsyncMock(return_value="What changed after cancel?")
+
+    llm_mock = app.state.llm_service
+    llm_mock.is_ready = AsyncMock(return_value=True)
+    llm_mock.chat = AsyncMock(return_value=("Only the fresh audio was used.", []))
+
+    app.state.session_manager = SessionManager("System prompt")
+    app.state.conversation_service = ConversationService(app)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/voice?api_key=test-key&session_id=coordinator-stream-cancel") as ws:
+            msg = json.loads(ws.receive_text())
+            assert msg["type"] == "state"
+            assert msg["state"] == "idle"
+
+            msg = json.loads(ws.receive_text())
+            assert msg["type"] == "voice_capabilities"
+            assert msg["input_streaming"] is True
+
+            ws.send_text(json.dumps({"type": "input_audio_start"}))
+            ack = json.loads(ws.receive_text())
+            assert ack["type"] == "input_audio_start_ack"
+
+            ws.send_bytes(stale_chunk)
+
+            ws.send_text(json.dumps({"type": "input_audio_cancel"}))
+            ack = json.loads(ws.receive_text())
+            assert ack["type"] == "input_audio_cancel_ack"
+            assert ack["active"] is True
+
+            ws.send_bytes(fresh_audio)
+
+            response_seen = False
+            audio_received = False
+            for _ in range(40):
+                data = ws.receive()
+                if data.get("bytes"):
+                    audio_received = True
+                    continue
+                msg = json.loads(data.get("text", ""))
+                if msg.get("type") == "response":
+                    response_seen = True
+                elif msg.get("type") == "state" and msg.get("state") == "idle" and response_seen:
+                    break
+                elif msg.get("type") == "error":
+                    pytest.fail(f"Got error from server: {msg}")
+
+    assert response_seen is True
+    assert audio_received is True
+    assert stt_mock.transcribe.await_count == 1
+    assert stt_mock.transcribe.await_args.args[0] == fresh_audio
+    assert llm_mock.chat.await_count == 1
+
+
 def test_voice_ws_uses_persisted_home_context_from_prior_chat_turn():
     app = _build_test_app()
 
