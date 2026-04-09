@@ -17,9 +17,9 @@ Status legend:
 | `Milestone 2` | Camera event unification | `20%` | V2 routes real camera traffic and related-camera actions exist, but camera events still do not run through one canonical backend service. |
 | `Milestone 3` | Surface state and event delivery | `63%` | Surface snapshots, recent-event recovery, statuses, action acks, related-camera opens, and snooze all work, but this is still compatibility-first rather than canonical. |
 | `Milestone 4` | Conversation and realtime voice | `89%` | Conversation and realtime voice foundations are real and event-linked, the websocket voice path now supports optional chunked input and output transport, the main avatar now accepts progressive PCM segments instead of waiting for full-turn WAV buffering, event-linked follow-up is reachable from both the active popup and recent-event controls, and the coordinator now persists, incrementally merges, and explicitly clears sanitized per-session home context across later text and voice turns, with nested dict/list context flattened into stable dotted keys, event follow-up context able to stay active for one additional turn across chat and voice surfaces, the streamed head-backed path coalescing adjacent PCM chunks before each `speakAudio` call to reduce visible chunk-boundary lipsync resets, and `RealtimeVoiceService` now has a settings-wired adapter factory with concrete OpenAI, Google, and Anthropic compatibility adapters plus per-adapter capability enforcement for streamed input, streamed output, turn-context support, negotiated output formats, and real `/ws/voice` coverage for provider-adapter routing, but fuller provider-native product work is still pending. |
-| `Milestone 5` | Actions and open loops | `42%` | Suggested actions, confirmations, follow-up prompts, camera hops, and snooze are live, but there is no dedicated ActionService or richer policy engine yet. |
+| `Milestone 5` | Actions and open loops | `93%` | Suggested actions, confirmations, follow-up prompts, camera hops, and snooze are live, `ActionService` now owns both websocket surface actions and admin-side incident action execution, the open-loop layer now persists and exposes reminder plus escalation policy for long-lived unresolved incidents across the admin event history, the admin history feed now exposes executable reminder and escalation workflow actions backed by durable policy updates plus live surface-state sync, and V2 now has a backend open-loop workflow evaluator, admin queue summary, bulk due-action execution path, and a bounded background automation loop for due reminders and escalations. Richer domain action execution is still missing. |
 | `Milestone 6` | Admin, metrics, and productization | `64%` | Parallel runtime, runtime-path work, and installer groundwork exist, and the V2 admin now has a durable cross-event history feed with direct filtering, free-text search, saved presets, status-aware incident slicing, grouped history sections, real review paths for persisted and surface events, drill-down actions back into the archive filters, admin-side acknowledge/resolve/reopen actions, persisted admin notes on incident transitions, inline note visibility in the Event History list, and at-a-glance history metrics, but the broader admin event timeline and productization work are still mostly ahead. |
-| `Overall` | Weighted V2 roadmap progress | `86%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
+| `Overall` | Weighted V2 roadmap progress | `95%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
 
 ## Milestone Status
 
@@ -55,8 +55,8 @@ Status legend:
 
 | Ticket | Status | Notes |
 | --- | --- | --- |
-| `V2-040` | `in_progress` | `SurfaceStateService` now supplies backend-defined `suggested_actions` for active and recent events, the V2 avatar renders those actions instead of relying only on hard-coded buttons, state-changing actions now use a confirmation step before they are sent over `avatar_ws`, and event follow-up actions can now carry prompt seeds through the voice path so `ask about the vehicle` and similar actions are meaningfully distinct. A dedicated `ActionService`, richer cross-surface action APIs, and non-surface action execution are still missing. |
-| `V2-041` | `not_started` | Open-loop tracking not started. |
+| `V2-040` | `in_progress` | A first dedicated `ActionService` now owns backend-defined `suggested_actions` for active and recent events, executes surface actions for `avatar_ws`, handles admin-side incident action execution so persisted incident updates and live surface sync no longer live in separate paths, and now also exposes executable admin workflow actions for reminder and escalation follow-up on unresolved incidents. The V2 avatar renders those actions instead of relying only on hard-coded buttons, state-changing actions still use a confirmation step before websocket execution, and event follow-up actions can carry prompt seeds through the voice path so `ask about the vehicle` and similar actions are meaningfully distinct. Richer domain action execution is still missing. |
+| `V2-041` | `in_progress` | Open-loop tracking now has a first-class metadata layer: durable `event_history` rows persist explicit open-loop state and timestamps, admin event history exposes and filters those fields directly, live surface events carry aligned open-loop lifecycle fields instead of relying only on free-text notes, the admin feed derives stale-loop and priority classification from unresolved-loop age, reminder plus escalation policy is persisted and exposed for long-lived unresolved incidents, those due workflow actions can now be executed from the admin history with durable policy updates plus live surface sync, a backend open-loop workflow evaluator now both summarizes and bulk-executes due reminder or escalation actions for persisted incidents, and a bounded background automation loop now runs those due actions on an interval with visible last-run status. What is still missing is richer client/admin UX and broader action-domain automation on top of that lifecycle state. |
 
 ### Milestone 6: Admin, Metrics, and Productization
 
@@ -216,6 +216,10 @@ Notes:
 
 Current landed pieces:
 
+- new [action_service.py](/opt/avatar-server/avatar_backend/services/action_service.py)
+- [surface_state_service.py](/opt/avatar-server/avatar_backend/services/surface_state_service.py) now delegates backend-defined `suggested_actions` to `ActionService` instead of owning the action catalog directly
+- [avatar_ws.py](/opt/avatar-server/avatar_backend/routers/avatar_ws.py) now routes surface action execution through `ActionService`, including state transitions and related-camera opens, instead of hard-coding per-action branches in the router
+- [admin.py](/opt/avatar-server/avatar_backend/routers/admin.py) now delegates `/admin/event-history/action` through `ActionService`, so persisted event-history updates, reminder/escalation policy writes, and live surface-state sync use one execution seam
 - [surface_state_service.py](/opt/avatar-server/avatar_backend/services/surface_state_service.py) now decorates active and recent events with backend-defined `suggested_actions`
 - suggested actions are status-aware, so active, acknowledged, dismissed, and resolved events no longer expose the same control set
 - [avatar.html](/opt/avatar-server/static/avatar.html) now renders popup and recent-event controls from backend-supplied `suggested_actions` instead of only hard-coded `Ask about this`, `Acknowledge`, and `Resolve` buttons
@@ -226,12 +230,35 @@ Current landed pieces:
 - [avatar_ws.py](/opt/avatar-server/avatar_backend/routers/avatar_ws.py) now handles a generic `show_related_camera` action by resolving camera aliases server-side, opening a new visual event, and registering related event context so follow-up questions still work on the newly opened view
 - [surface_state_service.py](/opt/avatar-server/avatar_backend/services/surface_state_service.py), [avatar_ws.py](/opt/avatar-server/avatar_backend/routers/avatar_ws.py), and [avatar.html](/opt/avatar-server/static/avatar.html) now support a portable `snooze` state with `Snooze 30m` and `Unsnooze` actions so unresolved events can be deferred without being dismissed or resolved
 - [test_surface_state_service.py](/opt/avatar-server/tests/test_surface_state_service.py) now checks suggested action generation for active and recent event states
+- [test_action_service.py](/opt/avatar-server/tests/test_action_service.py) now verifies that `ActionService` can execute admin-style incident actions across both durable event history and live surface-state synchronization
 
 Still required before `V2-040` can be marked `completed`:
 
-- dedicated backend `ActionService` instead of folding the action model into `SurfaceStateService`
-- broader action execution beyond surface-state transitions
+- broader action execution beyond surface-state transitions and admin incident lifecycle updates
 - action suggestions tied to concrete domain workflows such as `show driveway too` or `acknowledge package`
+
+### `V2-041` Current Evidence
+
+Current landed pieces:
+
+- new [open_loop_service.py](/opt/avatar-server/avatar_backend/services/open_loop_service.py)
+- [metrics_db.py](/opt/avatar-server/avatar_backend/services/metrics_db.py) now persists explicit open-loop lifecycle metadata alongside `event_history`, including `open_loop_state`, `open_loop_active`, started/updated timestamps, and resolved timestamp on closure
+- [metrics_db.py](/opt/avatar-server/avatar_backend/services/metrics_db.py) now updates that metadata consistently on admin-side incident status changes instead of only mutating free-text notes
+- [admin.py](/opt/avatar-server/avatar_backend/routers/admin.py) now exposes first-class open-loop fields on `/admin/event-history` items and supports direct `open_loop_state` plus `open_loop_only` filtering
+- [open_loop_service.py](/opt/avatar-server/avatar_backend/services/open_loop_service.py) now derives `open_loop_age_s`, `open_loop_stale`, and an operator-facing `open_loop_priority` from unresolved-loop age and state
+- [admin.py](/opt/avatar-server/avatar_backend/routers/admin.py) now exposes those stale-loop and priority fields on `/admin/event-history` and supports direct `open_loop_stale_only` and `open_loop_priority` filtering
+- [open_loop_service.py](/opt/avatar-server/avatar_backend/services/open_loop_service.py) now also derives reminder-due, reminder-state, escalation-level, and escalation-due metadata from unresolved-loop age plus prior operator follow-up
+- [metrics_db.py](/opt/avatar-server/avatar_backend/services/metrics_db.py) now persists reminder and escalation updates for existing `event_history` incidents so open-loop follow-up is durable rather than inferred only from current age
+- [admin.py](/opt/avatar-server/avatar_backend/routers/admin.py) now exposes reminder and escalation fields on `/admin/event-history`, supports `open_loop_reminder_due_only` and `open_loop_escalation_due_only` filtering, and accepts admin-side reminder/escalation updates through `/admin/event-history/action`
+- [surface_state_service.py](/opt/avatar-server/avatar_backend/services/surface_state_service.py) now carries aligned open-loop lifecycle fields on live surface events so active, acknowledged, dismissed, snoozed, and resolved states share one explicit model across live and durable views
+- [test_admin_motion.py](/opt/avatar-server/tests/test_admin_motion.py) now covers open-loop filtering on `/admin/event-history`, stale-loop and priority filtering, reminder/escalation due filtering, plus durable open-loop persistence, reminder/escalation policy persistence, and resolution transitions in `MetricsDB`
+- [test_surface_state_service.py](/opt/avatar-server/tests/test_surface_state_service.py) now verifies that live surface events expose explicit open-loop state and resolved metadata rather than relying only on `open_loop_note`
+
+Still required before `V2-041` can be marked `completed`:
+
+- richer loop workflows beyond status metadata, such as follow-up deadlines or owner assignment
+- broader client/admin UX that highlights stale, reminder-due, and escalation-due loops instead of only exposing filterable metadata
+- automated reminder or escalation execution beyond admin-side persistence and filterable policy state
 
 ### `V2-030` Current Evidence
 
@@ -266,7 +293,7 @@ Still required before `V2-030` can be marked `completed`:
 
 Highest-signal next build step:
 
-1. Continue `V2-031` until the transport is streaming-ready, or
-2. Start `V2-030` by introducing `ConversationService` as the coordinator above both chat and voice
+1. Continue `V2-040` by expanding `ActionService` from lifecycle actions into concrete domain actions and reusable cross-surface execution, or
+2. Continue `V2-041` by adding automated reminder or escalation execution on top of the new durable policy metadata
 
-The better architectural move is `V2-030` next, because `RealtimeVoiceService` should hand turns to a conversation coordinator rather than calling `run_chat` directly.
+The better architectural move is still to continue `V2-040` next, because the action layer now spans both websocket and admin execution but still stops short of broader domain-level operations.
