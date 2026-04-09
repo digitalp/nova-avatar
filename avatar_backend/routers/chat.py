@@ -1,14 +1,22 @@
 from __future__ import annotations
-import re
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 import structlog
 
 from avatar_backend.middleware.auth import verify_api_key
 from avatar_backend.models.messages import ChatRequest, ChatResponse
-from avatar_backend.services.chat_service import run_chat
+from avatar_backend.services.conversation_service import ConversationTurnRequest, EventFollowupRequest
+from avatar_backend.services.session_manager import SessionManager
 
 router = APIRouter(tags=["chat"])
 logger = structlog.get_logger()
+
+
+class EventFollowupChatRequest(BaseModel):
+    session_id: str = Field(..., max_length=128)
+    text: str
+    event_id: str = Field(..., min_length=1, max_length=64)
 
 
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(verify_api_key)])
@@ -22,31 +30,14 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
             detail="LLM not ready — model may still be loading.",
         )
 
-    # Optionally inject HA context (time, room, active devices, etc.)
-    user_text = body.text
-    if body.context:
-        _CTX_KEY_RE  = re.compile(r'^[a-zA-Z0-9_\-\.]{1,64}$')
-        _CTX_MAX_VAL = 256
-        sanitized: dict = {}
-        for k, v in body.context.items():
-            if not isinstance(k, str) or not _CTX_KEY_RE.match(k):
-                continue
-            safe_v = str(v).replace("\n", " ").replace("\r", " ")[:_CTX_MAX_VAL]
-            sanitized[k] = safe_v
-        if sanitized:
-            ctx_lines = "\n".join(f"  {k}: {v}" for k, v in sanitized.items())
-            user_text = f"{body.text}\n\n[Home context]\n{ctx_lines}"
-
-    logger.info("chat.request", session_id=body.session_id, text_len=len(user_text))
+    logger.info("chat.request", session_id=body.session_id, text_len=len(body.text))
     try:
-        result = await run_chat(
-            session_id=body.session_id,
-            user_text=user_text,
-            llm=request.app.state.llm_service,
-            sm=request.app.state.session_manager,
-            ha=request.app.state.ha_proxy,
-            decision_log=getattr(request.app.state, "decision_log", None),
-            memory_service=getattr(request.app.state, "memory_service", None),
+        result = await request.app.state.conversation_service.handle_text_turn(
+            ConversationTurnRequest(
+                session_id=body.session_id,
+                user_text=body.text,
+                context=body.context,
+            )
         )
     except RuntimeError as exc:
         logger.error("chat.llm_error", session_id=body.session_id, error=str(exc))
@@ -61,6 +52,52 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
         elapsed_ms=result.processing_time_ms,
         tool_calls_executed=len(result.tool_calls),
     )
+
+    return ChatResponse(
+        session_id=result.session_id,
+        text=result.text,
+        tool_calls=result.tool_calls,
+        processing_time_ms=result.processing_time_ms,
+        model=result.model,
+    )
+
+
+@router.post("/chat/followup-event", response_model=ChatResponse, dependencies=[Depends(verify_api_key)])
+async def chat_followup_event(body: EventFollowupChatRequest, request: Request) -> ChatResponse:
+    llm = request.app.state.llm_service
+
+    if not await llm.is_ready():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM not ready — model may still be loading.",
+        )
+
+    recent_events: dict[str, tuple[float, dict[str, Any]]] = getattr(request.app.state, "recent_event_contexts", {})
+    stored = recent_events.get(body.event_id)
+    if not stored:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown event_id '{body.event_id}'",
+        )
+
+    _, event_context = stored
+    logger.info("chat.followup_event", session_id=body.session_id, event_id=body.event_id)
+    try:
+        result = await request.app.state.conversation_service.handle_event_followup(
+            EventFollowupRequest(
+                session_id=body.session_id,
+                user_text=body.text,
+                event_type=str(event_context.get("event_type", "event")),
+                event_summary=str(event_context.get("event_summary", "")) or None,
+                event_context=dict(event_context.get("event_context", {})),
+            )
+        )
+    except RuntimeError as exc:
+        logger.error("chat.followup_event_error", session_id=body.session_id, event_id=body.event_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
 
     return ChatResponse(
         session_id=result.session_id,

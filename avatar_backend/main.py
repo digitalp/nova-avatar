@@ -18,26 +18,32 @@ from avatar_backend.services.cost_log import CostLog
 from avatar_backend.services.decision_log import DecisionLog
 from avatar_backend.services.log_store import LogStore
 from avatar_backend.services.session_manager import SessionManager
+from avatar_backend.services.conversation_service import ConversationService
 from avatar_backend.services.persistent_memory import PersistentMemoryService
 from avatar_backend.services.speaker_service import SpeakerService
 from avatar_backend.services.stt_service import STTService
 from avatar_backend.services.tts_service import create_tts_service
 from avatar_backend.services.ws_manager import ConnectionManager
+from avatar_backend.services.realtime_voice_service import RealtimeVoiceService
+from avatar_backend.services.surface_state_service import SurfaceStateService
+from avatar_backend.services.event_service import EventService
 from avatar_backend.services.proactive_service import ProactiveService
 from avatar_backend.services.sensor_watch_service import SensorWatchService
 from avatar_backend.services.metrics_db import MetricsDB
+from avatar_backend.services.motion_clip_service import MotionClipService
 from avatar_backend.services.system_metrics import SystemMetrics
 from avatar_backend.services.user_service import UserService
+from avatar_backend.runtime_paths import config_dir, install_dir, logs_dir, static_dir
 from avatar_backend.routers import health, chat
 from avatar_backend.routers import voice, avatar_ws, announce
 from avatar_backend.routers import admin
 from avatar_backend.routers.announce import AnnounceRequest, announce_handler
 
-_INSTALL_DIR = Path("/opt/avatar-server")
-_CONFIG_DIR  = _INSTALL_DIR / "config"
+_INSTALL_DIR = install_dir()
+_CONFIG_DIR  = config_dir()
 
 
-_LOG_FILE = _INSTALL_DIR / "logs" / "avatar-backend.log"
+_LOG_FILE = logs_dir() / "avatar-backend.log"
 _LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB per file
 _LOG_BACKUP_COUNT = 2
 
@@ -127,10 +133,32 @@ async def lifespan(app: FastAPI):
     )
 
     app.state.audio_cache = {}  # token → (wav_bytes, expiry) for one-shot audio serving
+    app.state.recent_event_contexts = {}
     app.state.stt_service = STTService(model_name=settings.whisper_model)
     app.state.tts_service = create_tts_service(settings)
     logger.info("tts_service.configured", provider=settings.tts_provider)
     app.state.ws_manager  = ConnectionManager()
+    app.state.conversation_service = ConversationService(app)
+    app.state.realtime_voice_service = RealtimeVoiceService()
+    app.state.surface_state_service = SurfaceStateService()
+    app.state.event_service = EventService()
+    app.state.metrics_db = MetricsDB()
+    imported_memories = app.state.metrics_db.import_memories_from(settings.shared_memory_db_path)
+    app.state.memory_service = PersistentMemoryService(app.state.metrics_db)
+    if imported_memories:
+        logger.info(
+            "persistent_memory.imported",
+            source_db=settings.shared_memory_db_path,
+            count=imported_memories,
+        )
+    app.state.motion_clip_service = MotionClipService(
+        db=app.state.metrics_db,
+        ha_proxy=app.state.ha_proxy,
+        llm_service=app.state.llm_service,
+        clip_duration_s=settings.motion_clip_duration_s,
+        max_search_candidates=settings.motion_clip_search_candidates,
+        max_search_results=settings.motion_clip_search_results,
+    )
 
     app.state.speaker_service = SpeakerService(
         ha_url=settings.ha_url,
@@ -170,8 +198,10 @@ async def lifespan(app: FastAPI):
         ha_token=settings.ha_token,
         ha_proxy=app.state.ha_proxy,
         llm_service=app.state.llm_service,
+        motion_clip_service=app.state.motion_clip_service,
         announce_fn=_proactive_announce,
         system_prompt=system_prompt,
+        event_service=app.state.event_service,
     )
     app.state.proactive_service = proactive
     await proactive.start()
@@ -194,9 +224,7 @@ async def lifespan(app: FastAPI):
     app.state.decision_log = decision_log
 
     # Persistent metrics DB (LLM costs + system samples)
-    metrics_db = MetricsDB()
-    app.state.metrics_db = metrics_db
-    app.state.memory_service = PersistentMemoryService(metrics_db)
+    metrics_db = app.state.metrics_db
 
     # System metrics poller — CPU/RAM/disk/GPU every 5 s
     sys_metrics = SystemMetrics(db=metrics_db, interval=5)
@@ -219,6 +247,9 @@ async def lifespan(app: FastAPI):
     proactive = getattr(app.state, 'proactive_service', None)
     if proactive:
         proactive.set_decision_log(decision_log)
+    sensor_watch = getattr(app.state, 'sensor_watch', None)
+    if sensor_watch:
+        sensor_watch.set_decision_log(decision_log)
 
     logger.info("avatar_backend.ready")
     yield
@@ -258,7 +289,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router)
 
     # Serve 3D avatar page and static assets
-    _static_dir = _INSTALL_DIR / "static"
+    _static_dir = static_dir()
     if _static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 

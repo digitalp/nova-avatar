@@ -19,17 +19,23 @@ Flow:
 from __future__ import annotations
 import asyncio
 import time
+from typing import Any
 from typing import Literal
 
 _AUDIO_CACHE_TTL = 60  # seconds before an unplayed cache entry expires
 
+import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from starlette.background import BackgroundTask
+from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import uuid
 
 from avatar_backend.middleware.auth import verify_api_key
+from avatar_backend.services.home_runtime import load_home_runtime_config
+from avatar_backend.services.event_service import publish_visual_event
 from avatar_backend.services.speaker_service import SpeakerService
 from avatar_backend.services.tts_service import TTSService
 from avatar_backend.services.ws_manager import ConnectionManager
@@ -37,6 +43,8 @@ from avatar_backend.services.ws_manager import ConnectionManager
 _LOGGER = structlog.get_logger()
 
 router = APIRouter()
+_STREAM_TIMEOUT = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
+_MOTION_ANNOUNCE_COOLDOWN_S = 600  # 10 minutes per camera for direct /announce/motion calls
 
 
 class AnnounceRequest(BaseModel):
@@ -69,22 +77,32 @@ async def announce_handler(body: AnnounceRequest, request: Request):
     tts:    TTSService        = request.app.state.tts_service
     speaker: SpeakerService   = getattr(request.app.state, "speaker_service", None)
     ws_mgr:  ConnectionManager = request.app.state.ws_manager
+    surface_state = getattr(request.app.state, "surface_state_service", None)
 
     text = body.message.strip()
     _LOGGER.info("announce.received", chars=len(text), priority=body.priority)
 
     # 1. Show alert or speaking state on avatar card
     initial_state = "alert" if body.priority == "alert" else "speaking"
-    await ws_mgr.broadcast_json({"type": "avatar_state", "state": initial_state})
+    if surface_state is not None:
+        await surface_state.set_avatar_state(ws_mgr, initial_state)
+    else:
+        await ws_mgr.broadcast_json({"type": "avatar_state", "state": initial_state})
 
     # 2. Synthesise speech with word timings
     try:
         wav_bytes, word_timings = await tts.synthesise_with_timing(text)
     except Exception as exc:
         _LOGGER.error("announce.tts_error", exc=str(exc))
-        await ws_mgr.broadcast_json({"type": "avatar_state", "state": "error"})
+        if surface_state is not None:
+            await surface_state.set_avatar_state(ws_mgr, "error")
+        else:
+            await ws_mgr.broadcast_json({"type": "avatar_state", "state": "error"})
         await asyncio.sleep(1)
-        await ws_mgr.broadcast_json({"type": "avatar_state", "state": "idle"})
+        if surface_state is not None:
+            await surface_state.set_avatar_state(ws_mgr, "idle")
+        else:
+            await ws_mgr.broadcast_json({"type": "avatar_state", "state": "idle"})
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"TTS synthesis failed: {exc}",
@@ -92,7 +110,10 @@ async def announce_handler(body: AnnounceRequest, request: Request):
 
     # 3. Transition to speaking state (in case we were in alert)
     if body.priority == "alert":
-        await ws_mgr.broadcast_json({"type": "avatar_state", "state": "speaking"})
+        if surface_state is not None:
+            await surface_state.set_avatar_state(ws_mgr, "speaking")
+        else:
+            await ws_mgr.broadcast_json({"type": "avatar_state", "state": "speaking"})
 
     # 4. Start HA speaker first, then delay browser audio so lip-sync aligns
     from avatar_backend.config import get_settings as _get_settings
@@ -140,7 +161,10 @@ async def announce_handler(body: AnnounceRequest, request: Request):
             _LOGGER.warning("announce.speaker_error", exc=str(exc))
 
     # 6. Return to idle
-    await ws_mgr.broadcast_json({"type": "avatar_state", "state": "idle"})
+    if surface_state is not None:
+        await surface_state.set_avatar_state(ws_mgr, "idle")
+    else:
+        await ws_mgr.broadcast_json({"type": "avatar_state", "state": "idle"})
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     _LOGGER.info("announce.done",
@@ -156,11 +180,11 @@ async def announce_handler(body: AnnounceRequest, request: Request):
 
 
 
-_DEFAULT_DOORBELL_CAMERA = "camera.reolink_video_doorbell_poe_fluent"
+_LEGACY_DEFAULT_DOORBELL_CAMERA = "camera.reolink_video_doorbell_poe_fluent"
 
 
 class DoorbellAnnounceRequest(BaseModel):
-    camera_entity_id: str = _DEFAULT_DOORBELL_CAMERA
+    camera_entity_id: str | None = None
 
 
 class DoorbellAnnounceResponse(BaseModel):
@@ -169,6 +193,88 @@ class DoorbellAnnounceResponse(BaseModel):
     camera_used: str
     wav_bytes:   int = 0
     elapsed_ms:  int = 0
+
+
+class VisualEventRequest(BaseModel):
+    event: str = Field(..., min_length=1, max_length=64)
+    title: str | None = Field(default=None, max_length=120)
+    message: str | None = Field(default=None, max_length=300)
+    camera_entity_id: str | None = None
+    image_url: str | None = None
+    image_urls: list[str] = Field(default_factory=list)
+    image_urls_csv: str | None = None
+    event_context: dict[str, Any] | None = None
+    expires_in_ms: int = Field(default=30000, ge=1000, le=120000)
+
+
+class VisualEventResponse(BaseModel):
+    status: str
+    event: str
+    event_id: str
+    delivered: bool = True
+
+
+async def _broadcast_visual_event(
+    request: Request,
+    ws_mgr: ConnectionManager,
+    *,
+    event: str,
+    title: str | None = None,
+    message: str | None = None,
+    camera_entity_id: str | None = None,
+    image_url: str | None = None,
+    image_urls: list[str] | None = None,
+    event_context: dict[str, Any] | None = None,
+    expires_in_ms: int = 30000,
+) -> str:
+    event_id = uuid.uuid4().hex
+    event_service = getattr(request.app.state, "event_service", None)
+    surface_state = getattr(request.app.state, "surface_state_service", None)
+    await publish_visual_event(
+        app=request.app,
+        ws_mgr=ws_mgr,
+        event_service=event_service,
+        surface_state=surface_state,
+        event_id=event_id,
+        event_type=event,
+        title=title,
+        message=message,
+        camera_entity_id=camera_entity_id,
+        image_url=image_url,
+        image_urls=image_urls,
+        event_context=event_context,
+        expires_in_ms=expires_in_ms,
+    )
+    return event_id
+
+
+def _parse_image_urls_csv(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+@router.post(
+    "/announce/visual",
+    response_model=VisualEventResponse,
+    dependencies=[Depends(verify_api_key)],
+    summary="Send a visual-only event card to connected avatar clients",
+)
+async def visual_event_handler(body: VisualEventRequest, request: Request):
+    ws_mgr: ConnectionManager = request.app.state.ws_manager
+    event_id = await _broadcast_visual_event(
+        request,
+        ws_mgr,
+        event=body.event,
+        title=body.title,
+        message=body.message,
+        camera_entity_id=body.camera_entity_id,
+        image_url=body.image_url,
+        image_urls=body.image_urls + _parse_image_urls_csv(body.image_urls_csv),
+        event_context=body.event_context,
+        expires_in_ms=body.expires_in_ms,
+    )
+    return VisualEventResponse(status="ok", event=body.event, event_id=event_id)
 
 
 @router.post(
@@ -189,22 +295,39 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
     t0 = time.monotonic()
     ha  = request.app.state.ha_proxy
     llm = request.app.state.llm_service
+    ws_mgr: ConnectionManager = request.app.state.ws_manager
+    runtime = load_home_runtime_config()
+    camera_entity_id = (
+        body.camera_entity_id
+        or runtime.default_doorbell_camera
+        or _LEGACY_DEFAULT_DOORBELL_CAMERA
+    )
 
-    _LOGGER.info("doorbell.triggered", camera=body.camera_entity_id)
+    _LOGGER.info("doorbell.triggered", camera=camera_entity_id)
+    await _broadcast_visual_event(
+        request,
+        ws_mgr,
+        event="doorbell",
+        title="Doorbell",
+        message="Front door live view",
+        camera_entity_id=camera_entity_id,
+        event_context={"camera_entity_id": camera_entity_id, "source": "doorbell"},
+        expires_in_ms=45000,
+    )
 
     # 1. Fetch camera snapshot
     from avatar_backend.services.llm_service import _DOORBELL_IMAGE_PROMPT
-    image_bytes = await ha.fetch_camera_image(body.camera_entity_id)
+    image_bytes = await ha.fetch_camera_image(camera_entity_id)
 
     if image_bytes:
         try:
             description = await llm.describe_image(image_bytes, prompt=_DOORBELL_IMAGE_PROMPT)
             if description.strip().startswith("NO_PERSON"):
-                _LOGGER.info("doorbell.no_person_visible", camera=body.camera_entity_id)
+                _LOGGER.info("doorbell.no_person_visible", camera=camera_entity_id)
                 return DoorbellAnnounceResponse(
                     status="ok",
                     message="no_person_visible",
-                    camera_used=body.camera_entity_id,
+                    camera_used=camera_entity_id,
                     wav_bytes=0,
                     elapsed_ms=int((time.monotonic() - t0) * 1000),
                 )
@@ -214,7 +337,7 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
             _LOGGER.warning("doorbell.describe_failed", exc=str(exc))
             message = "Someone is at the door."
     else:
-        _LOGGER.warning("doorbell.camera_unavailable", camera=body.camera_entity_id)
+        _LOGGER.warning("doorbell.camera_unavailable", camera=camera_entity_id)
         message = "Someone is at the door."
 
     # 2. Announce via the standard announce flow
@@ -229,9 +352,47 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
     return DoorbellAnnounceResponse(
         status="ok",
         message=message,
-        camera_used=body.camera_entity_id,
+        camera_used=camera_entity_id,
         wav_bytes=announce_resp.wav_bytes,
         elapsed_ms=elapsed_ms,
+    )
+
+
+async def _close_stream(response: httpx.Response, client: httpx.AsyncClient) -> None:
+    await response.aclose()
+    await client.aclose()
+
+
+@router.get(
+    "/camera/stream",
+    dependencies=[Depends(verify_api_key)],
+    include_in_schema=False,
+    summary="Proxy a Home Assistant camera stream for authenticated avatar clients",
+)
+async def camera_stream_proxy(
+    request: Request,
+    entity_id: str = Query(..., min_length=1, description="HA camera entity ID"),
+):
+    ha = request.app.state.ha_proxy
+    resolved_entity_id = ha.resolve_camera_entity(entity_id)
+    stream_url = f"{ha.ha_url}/api/camera_proxy_stream/{resolved_entity_id}"
+
+    client = httpx.AsyncClient(timeout=_STREAM_TIMEOUT)
+    upstream_request = client.build_request("GET", stream_url, headers=ha.auth_headers)
+    upstream_response = await client.send(upstream_request, stream=True)
+
+    if upstream_response.status_code != 200:
+        await _close_stream(upstream_response, client)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Camera stream unavailable for '{resolved_entity_id}'",
+        )
+
+    media_type = upstream_response.headers.get("content-type", "multipart/x-mixed-replace")
+    return StreamingResponse(
+        upstream_response.aiter_raw(),
+        media_type=media_type,
+        background=BackgroundTask(_close_stream, upstream_response, client),
     )
 
 
@@ -244,6 +405,7 @@ class MotionAnnounceResponse(BaseModel):
     status:      str
     message:     str
     camera_used: str
+    archived:    bool = False
     wav_bytes:   int = 0
     elapsed_ms:  int = 0
 
@@ -259,7 +421,7 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
     Called when motion is detected on an outdoor camera. Nova:
       1. Captures a snapshot from the specified camera
       2. Describes what it sees using vision AI
-      3. Announces the result on all speakers with priority="alert"
+      3. Archives a short clip and description for later AI search in admin
 
     camera_entity_id: HA camera entity ID (or use _OUTDOOR_CAMERAS aliases)
     location: human-readable label used in the fallback message (e.g. "the garden")
@@ -270,8 +432,31 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
     ha  = request.app.state.ha_proxy
     llm = request.app.state.llm_service
 
-    camera_id = body.camera_entity_id
+    camera_id = ha.resolve_camera_entity(body.camera_entity_id)
     location  = body.location.strip() or "outdoors"
+    cooldowns: dict[str, float] = getattr(request.app.state, "motion_announce_cooldowns", None)
+    if cooldowns is None:
+        cooldowns = {}
+        request.app.state.motion_announce_cooldowns = cooldowns
+
+    now_m = time.monotonic()
+    since_last = now_m - cooldowns.get(camera_id, 0.0)
+    if since_last < _MOTION_ANNOUNCE_COOLDOWN_S:
+        _LOGGER.info(
+            "motion.cooldown",
+            camera=camera_id,
+            location=location,
+            seconds_remaining=int(_MOTION_ANNOUNCE_COOLDOWN_S - since_last),
+        )
+        return MotionAnnounceResponse(
+            status="ok",
+            message="motion_cooldown",
+            camera_used=camera_id,
+            archived=False,
+            wav_bytes=0,
+            elapsed_ms=int((time.monotonic() - t0) * 1000),
+        )
+    cooldowns[camera_id] = now_m
 
     _LOGGER.info("motion.triggered", camera=camera_id, location=location)
 
@@ -279,6 +464,8 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
     from avatar_backend.services.llm_service import _MOTION_IMAGE_PROMPT
     image_bytes = await ha.fetch_camera_image(camera_id)
     system_prompt: str = getattr(request.app.state, "system_prompt", "")
+    motion_clip_service = request.app.state.motion_clip_service
+    event_service = getattr(request.app.state, "event_service", None)
 
     if image_bytes:
         try:
@@ -289,13 +476,7 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
             )
             if description.strip().startswith("NO_MOTION"):
                 _LOGGER.info("motion.suppressed", camera=camera_id, reason="no_concern")
-                return MotionAnnounceResponse(
-                    status="ok",
-                    message="no_motion_concern",
-                    camera_used=camera_id,
-                    wav_bytes=0,
-                    elapsed_ms=int((time.monotonic() - t0) * 1000),
-                )
+                description = "No meaningful motion visible."
             message = f"Motion detected {location}. {description}"
             _LOGGER.info("motion.described", chars=len(description))
         except Exception as exc:
@@ -305,20 +486,40 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
         _LOGGER.warning("motion.camera_unavailable", camera=camera_id)
         message = f"Motion detected {location}."
 
-    # 2. Announce via the standard announce flow
-    announce_resp = await announce_handler(
-        AnnounceRequest(message=message, priority="alert"),
-        request,
+    extra = {"source": "announce_motion"}
+    if event_service is not None:
+        canonical_event = event_service.build_event(
+            event_id=f"announce-motion-{uuid.uuid4().hex}",
+            event_type="motion_detected",
+            title=f"Motion at {location}",
+            message=message,
+            camera_entity_id=camera_id,
+            event_context={
+                "source": "announce_motion",
+                "location": location,
+                "trigger_entity_id": body.camera_entity_id,
+            },
+            expires_in_ms=30000,
+        )
+        extra["canonical_event"] = event_service.to_dict(canonical_event)
+
+    motion_clip_service.schedule_capture(
+        camera_entity_id=camera_id,
+        trigger_entity_id=body.camera_entity_id,
+        location=location,
+        description=message,
+        extra=extra,
     )
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
-    _LOGGER.info("motion.done", elapsed_ms=elapsed_ms, wav_bytes=announce_resp.wav_bytes)
+    _LOGGER.info("motion.archived", elapsed_ms=elapsed_ms, camera=camera_id)
 
     return MotionAnnounceResponse(
         status="ok",
         message=message,
         camera_used=camera_id,
-        wav_bytes=announce_resp.wav_bytes,
+        archived=True,
+        wav_bytes=0,
         elapsed_ms=elapsed_ms,
     )
 

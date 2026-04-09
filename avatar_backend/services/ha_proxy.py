@@ -8,6 +8,7 @@ import structlog
 from avatar_backend.models.acl import ACLManager
 from avatar_backend.models.messages import ToolCall
 from avatar_backend.models.tool_result import ToolResult
+from avatar_backend.services.home_runtime import load_home_runtime_config
 
 logger = structlog.get_logger()
 
@@ -21,6 +22,24 @@ _MAX_SD_KEYS     = 10
 _MAX_STR_LEN     = 512
 # entity_id is always set explicitly by call_service — block LLM from overriding it
 _FORBIDDEN_KEYS  = frozenset({"entity_id"})
+_LEGACY_CAMERA_ALIASES: dict[str, str] = {
+    "camera.doorbell": "camera.reolink_video_doorbell_poe_fluent",
+    "camera.front_door": "camera.reolink_video_doorbell_poe_fluent",
+    "camera.front_door_camera": "camera.reolink_video_doorbell_poe_fluent",
+    "camera.reolink_doorbell": "camera.reolink_video_doorbell_poe_fluent",
+    "camera.doorbell_camera": "camera.reolink_video_doorbell_poe_fluent",
+    "camera.outdoor": "camera.rlc_410w_fluent",
+    "camera.outdoor_1": "camera.rlc_410w_fluent",
+    "camera.outdoor1": "camera.rlc_410w_fluent",
+    "camera.outdoor_camera": "camera.rlc_410w_fluent",
+    "camera.outside": "camera.rlc_410w_fluent",
+    "camera.outdoor_2": "camera.rlc_1224a_fluent",
+    "camera.outdoor2": "camera.rlc_1224a_fluent",
+    "camera.floodlight": "camera.rlc_1224a_fluent",
+    "camera.floodlight_camera": "camera.rlc_1224a_fluent",
+    "camera.living_room": "camera.reolink_living_room_profile000_mainstream",
+    "camera.living_room_camera": "camera.reolink_living_room_profile000_mainstream",
+}
 
 
 def _validate_service_data(data: dict) -> dict[str, Any]:
@@ -68,8 +87,23 @@ class HAProxy:
             "Content-Type": "application/json",
         }
         self._acl = acl
+        runtime = load_home_runtime_config()
+        self._camera_aliases = dict(_LEGACY_CAMERA_ALIASES)
+        self._camera_aliases.update(runtime.camera_aliases)
 
     # ── Public interface ──────────────────────────────────────────────────
+
+    def resolve_camera_entity(self, entity_id: str) -> str:
+        """Return the runtime/legacy-resolved Home Assistant camera entity ID."""
+        return self._camera_aliases.get(entity_id, entity_id)
+
+    @property
+    def ha_url(self) -> str:
+        return self._ha_url
+
+    @property
+    def auth_headers(self) -> dict[str, str]:
+        return {"Authorization": self._headers["Authorization"]}
 
     async def execute_tool_call(self, tool_call: ToolCall) -> ToolResult:
         """Entry point called by the chat router for each tool call."""
@@ -361,29 +395,9 @@ class HAProxy:
             ha_status_code=resp.status_code,
         )
 
-    # Map common LLM-guessed camera aliases to real HA entity IDs
-    _CAMERA_ALIASES: dict[str, str] = {
-        "camera.doorbell":            "camera.reolink_video_doorbell_poe_fluent",
-        "camera.front_door":          "camera.reolink_video_doorbell_poe_fluent",
-        "camera.front_door_camera":   "camera.reolink_video_doorbell_poe_fluent",
-        "camera.reolink_doorbell":    "camera.reolink_video_doorbell_poe_fluent",
-        "camera.doorbell_camera":     "camera.reolink_video_doorbell_poe_fluent",
-        "camera.outdoor":             "camera.rlc_410w_fluent",
-        "camera.outdoor_1":           "camera.rlc_410w_fluent",
-        "camera.outdoor1":            "camera.rlc_410w_fluent",
-        "camera.outdoor_camera":      "camera.rlc_410w_fluent",
-        "camera.outside":             "camera.rlc_410w_fluent",
-        "camera.outdoor_2":           "camera.rlc_1224a_fluent",
-        "camera.outdoor2":            "camera.rlc_1224a_fluent",
-        "camera.floodlight":          "camera.rlc_1224a_fluent",
-        "camera.floodlight_camera":   "camera.rlc_1224a_fluent",
-        "camera.living_room":         "camera.reolink_living_room_profile000_mainstream",
-        "camera.living_room_camera":  "camera.reolink_living_room_profile000_mainstream",
-    }
-
     async def fetch_camera_image(self, entity_id: str) -> bytes | None:
         """Fetch a camera snapshot from HA. Returns raw image bytes or None on failure."""
-        entity_id = self._CAMERA_ALIASES.get(entity_id, entity_id)
+        entity_id = self.resolve_camera_entity(entity_id)
         # ACL gate — treat camera reads as domain=camera, service=get_image
         if self._acl is not None and not self._acl.is_allowed("camera", "get_image", entity_id):
             reason = self._acl.deny_reason("camera", "get_image", entity_id)

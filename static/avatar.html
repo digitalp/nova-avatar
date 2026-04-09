@@ -130,6 +130,304 @@
       text-align: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 5;
     }
     #subtitle.on { opacity: 1; }
+    #event-popup {
+      position: absolute; top: 104px; right: 18px; z-index: 8;
+      width: min(31vw, 360px);
+      background: rgba(7, 12, 22, 0.88);
+      border: 1px solid rgba(103,232,249,.24);
+      border-radius: 18px;
+      box-shadow: 0 18px 44px rgba(0,0,0,.38);
+      backdrop-filter: blur(14px);
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(14px) scale(.98);
+      transition: opacity .22s ease, transform .22s ease;
+      pointer-events: none;
+    }
+    #event-popup.on {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    #event-popup-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      background: linear-gradient(135deg, rgba(239,68,68,.22), rgba(8,145,178,.14));
+    }
+    #event-popup-title {
+      flex: 1;
+      font-size: .86rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #e2e8f0;
+    }
+    #event-popup-close {
+      border: 0; background: transparent; color: #cbd5e1; cursor: pointer;
+      font-size: 1.15rem; line-height: 1; padding: 0 2px;
+    }
+    #event-popup-msg {
+      padding: 10px 12px 0;
+      color: #cbd5e1;
+      font-size: .84rem;
+    }
+    #event-popup-note {
+      display: none;
+      padding: 8px 12px 0;
+      color: rgba(191,219,254,.84);
+      font-size: .73rem;
+      letter-spacing: .03em;
+    }
+    #event-popup-note.on {
+      display: block;
+    }
+    #event-popup-actions {
+      display: none;
+      padding: 10px 12px 0;
+    }
+    #event-popup-actions.on {
+      display: grid;
+      gap: 8px;
+    }
+    .event-action-btn,
+    .event-confirm-btn,
+    .event-confirm-cancel {
+      width: 100%;
+      border: 1px solid rgba(103,232,249,.24);
+      background: linear-gradient(135deg, rgba(8,145,178,.18), rgba(14,116,144,.28));
+      color: #e0f2fe;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: .82rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .event-action-btn.warn,
+    .event-confirm-btn.warn {
+      border-color: rgba(250,204,21,.26);
+      background: linear-gradient(135deg, rgba(161,98,7,.18), rgba(120,53,15,.28));
+      color: #fef3c7;
+    }
+    .event-action-btn.success,
+    .event-confirm-btn.success {
+      border-color: rgba(74,222,128,.24);
+      background: linear-gradient(135deg, rgba(21,128,61,.18), rgba(20,83,45,.28));
+      color: #dcfce7;
+    }
+    .event-action-btn.quiet,
+    .event-confirm-cancel {
+      border-color: rgba(148,163,184,.2);
+      background: rgba(15,23,42,.58);
+      color: #cbd5e1;
+    }
+    .event-action-btn:disabled,
+    .event-confirm-btn:disabled,
+    .event-confirm-cancel:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+    .event-popup-confirm {
+      display: grid;
+      gap: 8px;
+      border: 1px solid rgba(250,204,21,.16);
+      background: rgba(15,23,42,.45);
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+    .event-popup-confirm-text {
+      color: #e2e8f0;
+      font-size: .78rem;
+      line-height: 1.45;
+    }
+    .event-popup-confirm-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    #event-popup-feed {
+      display: none;
+      width: calc(100% - 24px);
+      margin: 10px 12px 12px;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      border-radius: 12px;
+      background: rgba(15,23,42,.8);
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    #event-popup-gallery {
+      display: none;
+      grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+      gap: 10px;
+      padding: 10px 12px 12px;
+    }
+    .event-popup-art {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 110px;
+      padding: 10px;
+      border-radius: 12px;
+      background: radial-gradient(circle at top, rgba(30,41,59,.72), rgba(15,23,42,.92));
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .event-popup-art img {
+      width: 100%;
+      max-height: 112px;
+      object-fit: contain;
+      filter: drop-shadow(0 14px 18px rgba(0,0,0,.34));
+    }
+    #event-recent {
+      position: absolute; top: 438px; right: 18px; z-index: 7;
+      width: min(31vw, 360px);
+      display: none;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(7, 12, 22, 0.72);
+      border: 1px solid rgba(148,163,184,.16);
+      box-shadow: 0 16px 34px rgba(0,0,0,.28);
+      backdrop-filter: blur(14px);
+    }
+    #event-recent.on { display: grid; }
+    #event-recent-title {
+      font-size: .72rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: rgba(226,232,240,.72);
+    }
+    #event-recent-list { display: grid; gap: 8px; }
+    .event-recent-item {
+      display: grid;
+      gap: 6px;
+    }
+    .event-recent-btn {
+      display: grid;
+      gap: 3px;
+      width: 100%;
+      text-align: left;
+      cursor: pointer;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(148,163,184,.18);
+      background: rgba(15,23,42,.84);
+      color: #e5eef7;
+    }
+    .event-recent-btn:hover {
+      border-color: rgba(96,165,250,.44);
+      background: rgba(20,31,52,.92);
+    }
+    .event-recent-btn.active {
+      border-color: rgba(56,189,248,.64);
+      box-shadow: inset 0 0 0 1px rgba(56,189,248,.18);
+    }
+    .event-recent-name {
+      font-size: .82rem;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .event-recent-msg {
+      font-size: .73rem;
+      color: rgba(226,232,240,.72);
+      line-height: 1.25;
+    }
+    .event-recent-note {
+      font-size: .68rem;
+      color: rgba(191,219,254,.82);
+      line-height: 1.2;
+    }
+    .event-recent-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .event-recent-time {
+      font-size: .68rem;
+      color: rgba(191,219,254,.72);
+      letter-spacing: .03em;
+    }
+    .event-recent-status {
+      justify-self: start;
+      margin-top: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #dbeafe;
+      background: rgba(37,99,235,.22);
+      border: 1px solid rgba(96,165,250,.28);
+    }
+    .event-recent-status.dismissed {
+      color: #d1d5db;
+      background: rgba(75,85,99,.24);
+      border-color: rgba(156,163,175,.22);
+    }
+    .event-recent-status.acknowledged {
+      color: #fef3c7;
+      background: rgba(161,98,7,.22);
+      border-color: rgba(245,158,11,.28);
+    }
+    .event-recent-status.snoozed {
+      color: #fde68a;
+      background: rgba(146,64,14,.22);
+      border-color: rgba(251,191,36,.28);
+    }
+    .event-recent-status.resolved {
+      color: #dcfce7;
+      background: rgba(21,128,61,.22);
+      border-color: rgba(74,222,128,.28);
+    }
+    .event-recent-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .event-recent-action {
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,.18);
+      background: rgba(15,23,42,.84);
+      color: rgba(226,232,240,.86);
+      font-size: .67rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+    }
+    .event-recent-action:hover {
+      border-color: rgba(96,165,250,.44);
+      background: rgba(20,31,52,.92);
+    }
+    .event-recent-action.warn {
+      border-color: rgba(245,158,11,.28);
+      color: #fef3c7;
+    }
+    .event-recent-action.success {
+      border-color: rgba(74,222,128,.28);
+      color: #dcfce7;
+    }
+    .event-recent-confirm {
+      display: grid;
+      gap: 6px;
+      margin-top: 6px;
+      padding: 10px;
+      border-radius: 12px;
+      background: rgba(15,23,42,.58);
+      border: 1px solid rgba(250,204,21,.16);
+    }
+    .event-recent-confirm-text {
+      color: #e2e8f0;
+      font-size: .74rem;
+      line-height: 1.45;
+    }
+    .event-recent-confirm-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
 
     /* ── Bottom bar ── */
     #bottom-bar {
@@ -166,6 +464,10 @@
       #btn-mic       { padding: 10px 18px; font-size: 0.84rem; }
       #status-text   { font-size: 0.75rem; }
       #subtitle      { font-size: 0.82rem; max-width: 92%; padding: 7px 12px; }
+      #event-popup   { top: 96px; right: 12px; width: min(48vw, 220px); border-radius: 14px; }
+      #event-recent  { top: 334px; right: 12px; width: min(48vw, 220px); border-radius: 14px; }
+      #event-popup-title { font-size: .76rem; }
+      #event-popup-msg { font-size: .76rem; }
       #name-badge    { font-size: 0.78rem; padding: 3px 12px; }
       #bottom-bar    { gap: 8px; padding: 8px 12px; }
     }
@@ -200,6 +502,21 @@
     <div id="loading-text">Loading Nova…</div>
   </div>
   <div id="subtitle"></div>
+  <div id="event-popup">
+    <div id="event-popup-head">
+      <div id="event-popup-title">Doorbell</div>
+      <button id="event-popup-close" aria-label="Close popup">&times;</button>
+    </div>
+    <div id="event-popup-msg">Front door live view</div>
+    <div id="event-popup-note"></div>
+    <div id="event-popup-actions"></div>
+    <img id="event-popup-feed" alt="Live camera feed">
+    <div id="event-popup-gallery"></div>
+  </div>
+  <div id="event-recent">
+    <div id="event-recent-title">Recent Events</div>
+    <div id="event-recent-list"></div>
+  </div>
 </div>
 
 <div id="bottom-bar">
@@ -254,6 +571,9 @@ const VAD_THRESHOLD  = 0.030;  // RMS energy — above = speech (raised from 0.0
 const VAD_SILENCE_MS = 1800;   // stop after this much post-speech silence
 const VAD_MIN_MS     = 400;    // don't send clips shorter than this
 const VAD_MAX_MS     = 14000;  // hard cap
+const WAKE_VAD_MIN_ROLLING_CHUNKS = 4;   // ~800 ms before asking server to check wake word
+const WAKE_VAD_SPEECH_DEBOUNCE = 5;      // ~400 ms sustained energy before wake check
+const WAKE_VAD_FALSE_CHECK_COOLDOWN_MS = 800;
 
 // ── DOM ──────────────────────────────────────────────────────────────────────
 const $gate      = document.getElementById('start-gate');
@@ -269,15 +589,34 @@ const $ew        = document.getElementById('energy-wrap');
 const $ef        = document.getElementById('energy-fill');
 const $flash     = document.getElementById('wake-flash');
 const $sub       = document.getElementById('subtitle');
+const $eventPopup = document.getElementById('event-popup');
+const $eventPopupTitle = document.getElementById('event-popup-title');
+const $eventPopupMsg = document.getElementById('event-popup-msg');
+const $eventPopupNote = document.getElementById('event-popup-note');
+const $eventPopupActions = document.getElementById('event-popup-actions');
+const $eventPopupFeed = document.getElementById('event-popup-feed');
+const $eventPopupGallery = document.getElementById('event-popup-gallery');
+const $eventPopupClose = document.getElementById('event-popup-close');
+const $eventRecent = document.getElementById('event-recent');
+const $eventRecentList = document.getElementById('event-recent-list');
 
 // ── State ────────────────────────────────────────────────────────────────────
 let head              = null;
 let ws                = null;
 let audioCtx          = null;
 let wsReady           = false;
+let currentPlaybackSource = null;
 let pendingWordTimings = null;  // word timings arriving just before audio
+let pendingWordTimingsTurnId = null;
+let pendingAudioTurnId = null;
+let currentPlaybackTurnId = null;
+let activeEventId = null;
+let latestSurfaceState = null;
+let pendingSurfaceConfirmation = null;
+let pendingTurnContext = null;
 let reconnectDelay = 1000;
 let isBusy         = false;    // Nova is thinking/speaking
+let visualEventTimer = null;
 
 // Recording state
 let recording      = false;
@@ -503,11 +842,31 @@ async function initHead() {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 async function connectWs() {
+  if (!API_KEY) {
+    setStatus('Avatar link is missing api_key', '');
+    return;
+  }
+
   let wsUrl = WS_BASE;
   try {
-    const r = await fetch(`${SERVER}/ws/token`, { method: 'POST', headers: { 'X-API-Key': API_KEY } });
-    if (r.ok) { const d = await r.json(); wsUrl += `&token=${encodeURIComponent(d.token)}`; }
-  } catch (_) {}
+    const r = await fetch(`${SERVER}/ws/token`, {
+      method: 'POST',
+      headers: { 'X-API-Key': API_KEY },
+    });
+    if (!r.ok) {
+      setStatus(r.status === 401 ? 'Avatar auth failed' : 'Avatar token request failed', '');
+      return;
+    }
+    const d = await r.json();
+    if (!d?.token) {
+      setStatus('Avatar token response was invalid', '');
+      return;
+    }
+    wsUrl += `&token=${encodeURIComponent(d.token)}`;
+  } catch (_) {
+    setStatus('Avatar backend unreachable', '');
+    return;
+  }
   ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
 
@@ -522,24 +881,42 @@ async function connectWs() {
     try {
       const msg = JSON.parse(evt.data);
       if (msg.type === 'state' || msg.type === 'avatar_state') handleState(msg.state);
+      if (msg.type === 'surface_state') applySurfaceState(msg);
+      if (msg.type === 'turn_interrupted') handleTurnInterrupted(msg);
+      if (msg.type === 'turn_context_ack') {
+        if (msg.event_id) activeEventId = msg.event_id;
+        pendingTurnContext = null;
+      }
       if (msg.type === 'transcript')  showSub('You: ' + msg.text);
       if (msg.type === 'response') {
         showSub('Nova: ' + msg.text);
         lastResponseWasQuestion = /[\u003f]\s*$/.test((msg.text || '').trim());
       }
-      if (msg.type === 'word_timings') pendingWordTimings = msg.word_timings;
+      if (msg.type === 'audio_start') pendingAudioTurnId = msg.turn_id ?? null;
+      if (msg.type === 'word_timings') {
+        pendingWordTimings = msg.word_timings;
+        pendingWordTimingsTurnId = msg.turn_id ?? null;
+      }
       if (msg.type === 'announce') {
         showSub('Nova: ' + msg.text);
-        if (msg.word_timings) pendingWordTimings = msg.word_timings;
+        if (msg.word_timings) {
+          pendingWordTimings = msg.word_timings;
+          pendingWordTimingsTurnId = null;
+        }
         // Announcements are system-initiated — don't auto-mic on them
         lastResponseWasQuestion = false;
       }
+      if (msg.type === 'visual_event') showVisualEvent(msg);
     } catch (_) {}
   };
 
-  ws.onclose = () => {
+  ws.onclose = (evt) => {
     wsReady = false; $btnMic.disabled = true;
     stopWakeWord(); stopRecording(false);
+    if (evt && evt.code === 1008) {
+      setStatus('Avatar auth failed', '');
+      return;
+    }
     setStatus('Reconnecting…', '');
     setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
   };
@@ -574,6 +951,36 @@ function handleState(state) {
   } else if (state === 'listening') {
     setStatus('Listening…', 'dot-recding');
   }
+}
+
+function stopActiveSpeechPlayback() {
+  pendingWordTimings = null;
+  pendingWordTimingsTurnId = null;
+  pendingAudioTurnId = null;
+  currentPlaybackTurnId = null;
+  if (currentPlaybackSource) {
+    try { currentPlaybackSource.stop(); } catch (_) {}
+    try { currentPlaybackSource.disconnect(); } catch (_) {}
+    currentPlaybackSource = null;
+  }
+  if (head) {
+    try {
+      const stopFn = head.stopSpeaking || head.stopAudio || head.stop;
+      if (typeof stopFn === 'function') stopFn.call(head);
+    } catch (_) {}
+  }
+}
+
+function handleTurnInterrupted(msg) {
+  if (msg?.interrupted_turn_id != null && currentPlaybackTurnId != null && msg.interrupted_turn_id !== currentPlaybackTurnId) {
+    pendingWordTimings = null;
+    if (pendingWordTimingsTurnId === msg.interrupted_turn_id) pendingWordTimingsTurnId = null;
+    if (pendingAudioTurnId === msg.interrupted_turn_id) pendingAudioTurnId = null;
+    return;
+  }
+  stopActiveSpeechPlayback();
+  isBusy = false;
+  handleState('idle');
 }
 
 // ── Wake word ─────────────────────────────────────────────────────────────────
@@ -687,7 +1094,6 @@ async function startWakeWordVAD() {
   let headerChunk = null;        // First MediaRecorder chunk carries WebM headers
   let hasSpeech = false;
   let speechEnergyCount = 0;    // Require consecutive energy samples before flagging speech
-  const SPEECH_DEBOUNCE = 3;    // ~240 ms of sustained energy before trigger
   let wakeVadMr = null;
 
   // Energy sampler — debounced to avoid single-spike false triggers
@@ -698,7 +1104,7 @@ async function startWakeWordVAD() {
     for (let i = 0; i < wakeBuf.length; i++) s += wakeBuf[i] * wakeBuf[i];
     if (Math.sqrt(s / wakeBuf.length) > VAD_THRESHOLD) {
       speechEnergyCount++;
-      if (speechEnergyCount >= SPEECH_DEBOUNCE) hasSpeech = true;
+      if (speechEnergyCount >= WAKE_VAD_SPEECH_DEBOUNCE) hasSpeech = true;
     } else {
       speechEnergyCount = 0;
     }
@@ -719,7 +1125,7 @@ async function startWakeWordVAD() {
     // Only fire a check when energy was detected, we have enough audio,
     // and no check is already in-flight.
     if (!hasSpeech || wakeVadChecking || wakeVadCooldown || recording || isBusy) return;
-    if (rollingChunks.length < 3) return;   // < 600 ms — too short
+    if (rollingChunks.length < WAKE_VAD_MIN_ROLLING_CHUNKS) return;
 
     hasSpeech = false;
     speechEnergyCount = 0;
@@ -752,7 +1158,7 @@ async function startWakeWordVAD() {
     if (wakeVadActive) {
       setStatus('Say "Nova" to talk', 'dot-waking');
       wakeVadCooldown = true;
-      setTimeout(() => { wakeVadCooldown = false; }, 1500);
+      setTimeout(() => { wakeVadCooldown = false; }, WAKE_VAD_FALSE_CHECK_COOLDOWN_MS);
     }
     wakeVadChecking = false;
   };
@@ -897,6 +1303,10 @@ async function sendAudio() {
   const blob   = new Blob(mediaChunks, { type: mediaRec?.mimeType || 'audio/webm' });
   const buffer = await blob.arrayBuffer();
   console.log('[Nova] Sending', buffer.byteLength, 'bytes, type:', blob.type);
+  if (ws?.readyState === WebSocket.OPEN) {
+    const turnContext = pendingTurnContext || (activeEventId ? { event_id: activeEventId } : null);
+    if (turnContext) ws.send(JSON.stringify({ type: 'turn_context', ...turnContext }));
+  }
   ws.send(buffer);
   setStatus('Processing…', 'dot-online');
   // Wake word resumes when server sends idle state
@@ -908,20 +1318,39 @@ async function playWav(wavBuffer) {
     if (!audioCtx) audioCtx = new AudioContext();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
     const ab = await audioCtx.decodeAudioData(wavBuffer.slice(0));
+    if (currentPlaybackSource) {
+      try { currentPlaybackSource.stop(); } catch (_) {}
+      try { currentPlaybackSource.disconnect(); } catch (_) {}
+      currentPlaybackSource = null;
+    }
+    currentPlaybackTurnId = pendingAudioTurnId;
     if (head) {
       // Consume pending word timings — converts server format to TalkingHead format
       // matching the TalkMateAI approach: words / wtimes / wdurations arrays
       const speakOpts = { audio: ab };
-      if (pendingWordTimings && pendingWordTimings.length) {
+      if (pendingWordTimings && pendingWordTimings.length &&
+          (pendingWordTimingsTurnId === null || pendingWordTimingsTurnId === currentPlaybackTurnId)) {
         speakOpts.words      = pendingWordTimings.map(t => t.word);
         speakOpts.wtimes     = pendingWordTimings.map(t => t.start_ms);
         speakOpts.wdurations = pendingWordTimings.map(t => t.end_ms - t.start_ms);
       }
       pendingWordTimings = null;
+      pendingWordTimingsTurnId = null;
+      pendingAudioTurnId = null;
       head.speakAudio(speakOpts);
     } else {
       const src = audioCtx.createBufferSource();
+      currentPlaybackSource = src;
+      src.onended = () => {
+        if (currentPlaybackSource === src) {
+          currentPlaybackSource = null;
+          currentPlaybackTurnId = null;
+        }
+      };
       src.buffer = ab; src.connect(audioCtx.destination); src.start();
+      pendingWordTimings = null;
+      pendingWordTimingsTurnId = null;
+      pendingAudioTurnId = null;
     }
   } catch (e) { console.error('[Nova] WAV playback:', e); }
 }
@@ -933,10 +1362,400 @@ function showSub(text) {
   clearTimeout(subTimer);
   subTimer = setTimeout(() => $sub.classList.remove('on'), 6000);
 }
+function hideVisualEvent() {
+  clearTimeout(visualEventTimer);
+  visualEventTimer = null;
+  activeEventId = null;
+  clearPendingSurfaceAction();
+  $eventPopupActions.classList.remove('on');
+  $eventPopupActions.replaceChildren();
+  $eventPopup.classList.remove('on');
+  $eventPopupFeed.removeAttribute('src');
+  $eventPopupGallery.replaceChildren();
+  $eventPopupGallery.style.display = 'none';
+  renderRecentEvents(latestSurfaceState?.recent_events || []);
+}
+function sendSurfaceAction(action, extra = {}) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'surface_action', action, ...extra }));
+}
+function buildCameraStreamUrl(entityId) {
+  const q = new URLSearchParams({ entity_id: entityId });
+  if (API_KEY) q.set('api_key', API_KEY);
+  return `${SERVER}/camera/stream?${q.toString()}`;
+}
+function buildAssetUrl(url) {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${SERVER}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+function renderVisualGallery(imageUrls, title) {
+  $eventPopupGallery.replaceChildren();
+  for (const imageUrl of imageUrls) {
+    const frame = document.createElement('div');
+    frame.className = 'event-popup-art';
+    const img = document.createElement('img');
+    img.loading = 'eager';
+    img.alt = title;
+    img.src = buildAssetUrl(imageUrl);
+    frame.appendChild(img);
+    $eventPopupGallery.appendChild(frame);
+  }
+  $eventPopupGallery.style.display = imageUrls.length ? 'grid' : 'none';
+}
+function applySurfaceState(snapshot) {
+  if (!snapshot) return;
+  latestSurfaceState = snapshot;
+  if (pendingSurfaceConfirmation && !hasPendingActionInSnapshot(snapshot)) {
+    clearPendingSurfaceAction();
+  }
+  if (snapshot.avatar_state) handleState(snapshot.avatar_state);
+  renderRecentEvents(snapshot.recent_events || []);
+  if (snapshot.active_event) {
+    showVisualEvent(snapshot.active_event);
+  } else {
+    hideVisualEvent();
+  }
+}
+function eventStatusPriority(status) {
+  return {
+    active: 0,
+    acknowledged: 1,
+    snoozed: 2,
+    dismissed: 3,
+    resolved: 4,
+  }[status || 'active'] ?? 5;
+}
+function formatRelativeEventTime(ts) {
+  const stamp = Number(ts || 0);
+  if (!stamp) return '';
+  const ageSeconds = Math.max(0, Math.floor(Date.now() / 1000 - stamp));
+  if (ageSeconds < 10) return 'just now';
+  if (ageSeconds < 60) return `${ageSeconds}s ago`;
+  const ageMinutes = Math.floor(ageSeconds / 60);
+  if (ageMinutes < 60) return `${ageMinutes}m ago`;
+  const ageHours = Math.floor(ageMinutes / 60);
+  if (ageHours < 24) return `${ageHours}h ago`;
+  const ageDays = Math.floor(ageHours / 24);
+  return `${ageDays}d ago`;
+}
+function getSuggestedActions(event, isActive) {
+  if (Array.isArray(event?.suggested_actions) && event.suggested_actions.length) {
+    return event.suggested_actions;
+  }
+  if (!event?.event_id) return [];
+  if (isActive) {
+    const actions = [{ action: 'ask_about_event', label: 'Ask about this', tone: 'info', requires_confirmation: false }];
+    if (event.status !== 'acknowledged' && event.status !== 'resolved') {
+      actions.push({ action: 'acknowledge_active_event', label: 'Acknowledge', tone: 'warn', requires_confirmation: true, confirm_text: 'Acknowledge this event?' });
+    }
+    if (event.status !== 'snoozed') {
+      actions.push({ action: 'snooze_active_event', label: 'Snooze 30m', tone: 'quiet', requires_confirmation: true, confirm_text: 'Snooze this event for 30 minutes?' });
+    }
+    if (event.status !== 'dismissed') {
+      actions.push({ action: 'dismiss_active_event', label: 'Dismiss', tone: 'quiet', requires_confirmation: true, confirm_text: 'Hide this event for now?' });
+    }
+    if (event.status !== 'resolved') {
+      actions.push({ action: 'resolve_active_event', label: 'Resolve', tone: 'success', requires_confirmation: true, confirm_text: 'Mark this event as resolved?' });
+    }
+    return actions;
+  }
+  if (event.status === 'dismissed' || event.status === 'resolved' || event.status === 'snoozed') {
+    return [{ action: 'activate_recent_event', label: event.status === 'snoozed' ? 'Unsnooze' : 'Reopen', tone: 'info', requires_confirmation: false }];
+  }
+  const actions = [];
+  if (event.status !== 'acknowledged') {
+    actions.push({ action: 'acknowledge_recent_event', label: 'Acknowledge', tone: 'warn', requires_confirmation: true, confirm_text: 'Acknowledge this event?' });
+  }
+  if (event.status !== 'snoozed') {
+    actions.push({ action: 'snooze_recent_event', label: 'Snooze 30m', tone: 'quiet', requires_confirmation: true, confirm_text: 'Snooze this event for 30 minutes?' });
+  }
+  if (event.status !== 'dismissed') {
+    actions.push({ action: 'dismiss_recent_event', label: 'Dismiss', tone: 'quiet', requires_confirmation: true, confirm_text: 'Hide this event for now?' });
+  }
+  if (event.status !== 'resolved') {
+    actions.push({ action: 'resolve_recent_event', label: 'Resolve', tone: 'success', requires_confirmation: true, confirm_text: 'Mark this event as resolved?' });
+  }
+  return actions;
+}
+function actionToneClass(action) {
+  const tone = action?.tone || 'info';
+  return tone === 'info' ? '' : tone;
+}
+function isPendingSurfaceAction(scope, eventId, action) {
+  return Boolean(
+    pendingSurfaceConfirmation &&
+    pendingSurfaceConfirmation.scope === scope &&
+    pendingSurfaceConfirmation.eventId === (eventId || null) &&
+    pendingSurfaceConfirmation.action === action
+  );
+}
+function clearPendingSurfaceAction() {
+  pendingSurfaceConfirmation = null;
+}
+function hasPendingActionInSnapshot(snapshot) {
+  if (!pendingSurfaceConfirmation || !snapshot) return false;
+  const eventId = pendingSurfaceConfirmation.eventId;
+  const match = (snapshot.active_event && snapshot.active_event.event_id === eventId)
+    ? { event: snapshot.active_event, isActive: true }
+    : ((snapshot.recent_events || [])
+        .find((item) => item.event_id === eventId)
+        ? {
+            event: (snapshot.recent_events || []).find((item) => item.event_id === eventId),
+            isActive: false,
+          }
+        : null);
+  if (!match?.event) return false;
+  return getSuggestedActions(match.event, match.isActive).some((item) => item.action === pendingSurfaceConfirmation.action);
+}
+async function triggerAskAboutEvent() {
+  if (recording || !wsReady) return;
+  holdMode = false;
+  stopWakeWord();
+  showSub('Ask your question about this event.');
+  setStatus('Listening…', 'dot-recding');
+  await startRecording();
+}
+function requestSurfaceAction(actionDef, scope, eventId = null) {
+  if (!actionDef?.action) return;
+  if (actionDef.action === 'ask_about_event') {
+    clearPendingSurfaceAction();
+    pendingTurnContext = activeEventId ? {
+      event_id: activeEventId,
+      followup_prompt: actionDef.followup_prompt || '',
+    } : null;
+    triggerAskAboutEvent();
+    return;
+  }
+  if (actionDef.requires_confirmation && !isPendingSurfaceAction(scope, eventId, actionDef.action)) {
+    pendingSurfaceConfirmation = {
+      scope,
+      eventId,
+      action: actionDef.action,
+      confirmText: actionDef.confirm_text || 'Apply this change?',
+      tone: actionDef.tone || 'info',
+    };
+    if (latestSurfaceState) applySurfaceState(latestSurfaceState);
+    return;
+  }
+  clearPendingSurfaceAction();
+  const extra = eventId ? { event_id: eventId } : {};
+  for (const key of ['target_camera_entity_id', 'target_event', 'target_title', 'target_message']) {
+    if (actionDef[key]) extra[key] = actionDef[key];
+  }
+  sendSurfaceAction(actionDef.action, extra);
+}
+function cancelSurfaceActionConfirmation() {
+  clearPendingSurfaceAction();
+  if (latestSurfaceState) applySurfaceState(latestSurfaceState);
+}
+function renderPopupActions(event) {
+  const actions = getSuggestedActions(event, true);
+  $eventPopupActions.replaceChildren();
+  if (!event?.event_id || !actions.length) {
+    $eventPopupActions.classList.remove('on');
+    return;
+  }
+  const pending = actions.find((item) => isPendingSurfaceAction('active', event.event_id, item.action));
+  if (pending) {
+    const wrap = document.createElement('div');
+    wrap.className = 'event-popup-confirm';
+    const text = document.createElement('div');
+    text.className = 'event-popup-confirm-text';
+    text.textContent = pendingSurfaceConfirmation?.confirmText || pending.confirm_text || 'Apply this change?';
+    const row = document.createElement('div');
+    row.className = 'event-popup-confirm-actions';
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = `event-confirm-btn ${actionToneClass(pending)}`.trim();
+    confirmBtn.textContent = `Confirm ${pending.label}`;
+    confirmBtn.addEventListener('click', () => requestSurfaceAction({ ...pending, requires_confirmation: false }, 'active', event.event_id));
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'event-confirm-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cancelSurfaceActionConfirmation);
+    row.appendChild(confirmBtn);
+    row.appendChild(cancelBtn);
+    wrap.appendChild(text);
+    wrap.appendChild(row);
+    $eventPopupActions.appendChild(wrap);
+    $eventPopupActions.classList.add('on');
+    return;
+  }
+  for (const action of actions) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `event-action-btn ${actionToneClass(action)}`.trim();
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => requestSurfaceAction(action, 'active', event.event_id));
+    $eventPopupActions.appendChild(btn);
+  }
+  $eventPopupActions.classList.add('on');
+}
+function renderRecentEvents(events) {
+  const list = Array.isArray(events)
+    ? [...events]
+        .sort((a, b) => {
+          const statusDelta = eventStatusPriority(a.status) - eventStatusPriority(b.status);
+          if (statusDelta !== 0) return statusDelta;
+          return Number(b.ts || 0) - Number(a.ts || 0);
+        })
+        .slice(0, 5)
+    : [];
+  $eventRecentList.replaceChildren();
+  if (!list.length) {
+    $eventRecent.classList.remove('on');
+    return;
+  }
+  for (const event of list) {
+    const item = document.createElement('div');
+    item.className = 'event-recent-item';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'event-recent-btn';
+    if (activeEventId && event.event_id === activeEventId) btn.classList.add('active');
+
+    const name = document.createElement('div');
+    name.className = 'event-recent-name';
+    name.textContent = event.title || event.event || 'Recent event';
+
+    const msg = document.createElement('div');
+    msg.className = 'event-recent-msg';
+    msg.textContent = event.message || (event.camera_entity_id ? 'Live camera event' : 'Tap to reopen');
+
+    const note = document.createElement('div');
+    note.className = 'event-recent-note';
+    note.textContent = event.open_loop_note || '';
+
+    const meta = document.createElement('div');
+    meta.className = 'event-recent-meta';
+
+    const status = document.createElement('div');
+    status.className = 'event-recent-status';
+    if (event.status === 'dismissed') status.classList.add('dismissed');
+    if (event.status === 'acknowledged') status.classList.add('acknowledged');
+    if (event.status === 'snoozed') status.classList.add('snoozed');
+    if (event.status === 'resolved') status.classList.add('resolved');
+    status.textContent = event.status === 'dismissed'
+      ? 'Dismissed'
+      : (event.status === 'acknowledged' ? 'Acknowledged' : (event.status === 'snoozed' ? 'Snoozed' : (event.status === 'resolved' ? 'Resolved' : 'Active')));
+
+    const when = document.createElement('div');
+    when.className = 'event-recent-time';
+    when.textContent = formatRelativeEventTime(event.ts);
+
+    btn.appendChild(name);
+    btn.appendChild(msg);
+    if (note.textContent) btn.appendChild(note);
+    meta.appendChild(status);
+    if (when.textContent) meta.appendChild(when);
+    btn.appendChild(meta);
+    btn.addEventListener('click', () => {
+      if (event.event_id) sendSurfaceAction('activate_recent_event', { event_id: event.event_id });
+      else showVisualEvent(event);
+    });
+    item.appendChild(btn);
+
+    if (event.event_id) {
+      const actions = document.createElement('div');
+      actions.className = 'event-recent-actions';
+      for (const action of getSuggestedActions(event, false)) {
+        const actionBtn = document.createElement('button');
+        actionBtn.type = 'button';
+        actionBtn.className = `event-recent-action ${actionToneClass(action)}`.trim();
+        actionBtn.textContent = action.label;
+        actionBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          requestSurfaceAction(action, 'recent', event.event_id);
+        });
+        actions.appendChild(actionBtn);
+      }
+      item.appendChild(actions);
+
+      const pending = getSuggestedActions(event, false)
+        .find((action) => isPendingSurfaceAction('recent', event.event_id, action.action));
+      if (pending) {
+        const confirm = document.createElement('div');
+        confirm.className = 'event-recent-confirm';
+        const text = document.createElement('div');
+        text.className = 'event-recent-confirm-text';
+        text.textContent = pendingSurfaceConfirmation?.confirmText || pending.confirm_text || 'Apply this change?';
+        const row = document.createElement('div');
+        row.className = 'event-recent-confirm-actions';
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = `event-confirm-btn ${actionToneClass(pending)}`.trim();
+        confirmBtn.textContent = `Confirm ${pending.label}`;
+        confirmBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          requestSurfaceAction({ ...pending, requires_confirmation: false }, 'recent', event.event_id);
+        });
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'event-confirm-cancel';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          cancelSurfaceActionConfirmation();
+        });
+        row.appendChild(confirmBtn);
+        row.appendChild(cancelBtn);
+        confirm.appendChild(text);
+        confirm.appendChild(row);
+        item.appendChild(confirm);
+      }
+    }
+
+    $eventRecentList.appendChild(item);
+  }
+  $eventRecent.classList.add('on');
+}
+function showVisualEvent(msg) {
+  if (!msg || !msg.event) return;
+  activeEventId = msg.event_id || null;
+  const title = msg.title || msg.event;
+  const imageUrls = [];
+  if (msg.image_url) imageUrls.push(msg.image_url);
+  if (Array.isArray(msg.image_urls)) imageUrls.push(...msg.image_urls);
+  $eventPopupTitle.textContent = title;
+  $eventPopupMsg.textContent = msg.message || '';
+  $eventPopupNote.textContent = msg.open_loop_note || '';
+  $eventPopupNote.classList.toggle('on', Boolean($eventPopupNote.textContent));
+  if (msg.camera_entity_id) {
+    $eventPopupFeed.src = buildCameraStreamUrl(msg.camera_entity_id);
+    $eventPopupFeed.style.display = 'block';
+    $eventPopupGallery.replaceChildren();
+    $eventPopupGallery.style.display = 'none';
+  } else if (imageUrls.length) {
+    $eventPopupFeed.removeAttribute('src');
+    $eventPopupFeed.style.display = 'none';
+    renderVisualGallery(imageUrls, title);
+  } else {
+    $eventPopupFeed.removeAttribute('src');
+    $eventPopupFeed.style.display = 'none';
+    $eventPopupGallery.replaceChildren();
+    $eventPopupGallery.style.display = 'none';
+  }
+  renderPopupActions(msg);
+  $eventPopup.classList.add('on');
+  renderRecentEvents(latestSurfaceState?.recent_events || (msg ? [msg] : []));
+  clearTimeout(visualEventTimer);
+  visualEventTimer = setTimeout(hideVisualEvent, Math.max(5000, msg.expires_in_ms || 30000));
+}
 function setStatus(text, dotClass) {
   $statusTxt.textContent = text;
   $dot.className = dotClass || '';
 }
+$eventPopupClose.addEventListener('click', () => {
+  if (activeEventId) sendSurfaceAction('dismiss_active_event');
+  else hideVisualEvent();
+});
+$eventPopupFeed.addEventListener('error', () => {
+  $eventPopupMsg.textContent = 'Live view unavailable right now.';
+  $eventPopupFeed.style.display = 'none';
+});
 
 // ── Hold-to-talk button ───────────────────────────────────────────────────────
 $btnMic.addEventListener('mousedown',  (e) => { e.preventDefault(); holdMode = true; stopWakeWord(); if (!recording) startRecording(); });

@@ -16,10 +16,10 @@ Status legend:
 | `Milestone 1` | Shared event model | `38%` | A canonical event normalizer now exists, multiple producers publish through it, visual-event publication plus recent-event context registration are centralized in the canonical layer, and direct motion archives now persist canonical event metadata, but there is still no broad event bus, persistent event store, or full cross-service adoption. |
 | `Milestone 2` | Camera event unification | `20%` | V2 routes real camera traffic and related-camera actions exist, but camera events still do not run through one canonical backend service. |
 | `Milestone 3` | Surface state and event delivery | `63%` | Surface snapshots, recent-event recovery, statuses, action acks, related-camera opens, and snooze all work, but this is still compatibility-first rather than canonical. |
-| `Milestone 4` | Conversation and realtime voice | `53%` | Conversation and realtime voice foundations are real and event-linked, but transport streaming and deeper conversation-state architecture are still missing. |
+| `Milestone 4` | Conversation and realtime voice | `56%` | Conversation and realtime voice foundations are real and event-linked, and the websocket voice path now supports optional streamed input alongside the legacy blob-per-turn flow, but streaming output and deeper conversation-state architecture are still missing. |
 | `Milestone 5` | Actions and open loops | `42%` | Suggested actions, confirmations, follow-up prompts, camera hops, and snooze are live, but there is no dedicated ActionService or richer policy engine yet. |
 | `Milestone 6` | Admin, metrics, and productization | `64%` | Parallel runtime, runtime-path work, and installer groundwork exist, and the V2 admin now has a durable cross-event history feed with direct filtering, free-text search, saved presets, status-aware incident slicing, grouped history sections, real review paths for persisted and surface events, drill-down actions back into the archive filters, admin-side acknowledge/resolve/reopen actions, persisted admin notes on incident transitions, inline note visibility in the Event History list, and at-a-glance history metrics, but the broader admin event timeline and productization work are still mostly ahead. |
-| `Overall` | Weighted V2 roadmap progress | `65%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
+| `Overall` | Weighted V2 roadmap progress | `66%` | Strong foundation and interaction model, with major architecture and productization milestones still incomplete. |
 
 ## Milestone Status
 
@@ -49,7 +49,7 @@ Status legend:
 | Ticket | Status | Notes |
 | --- | --- | --- |
 | `V2-030` | `in_progress` | `ConversationService` now exists as a compatibility-first coordinator, chat and voice are wired through it, it has a structured context builder plus an event-follow-up entrypoint, visual events persist `event_id` context for `/chat/followup-event`, the avatar voice websocket can carry active `event_id` context into the next spoken turn, and the avatar popup now exposes an explicit “Ask about this” follow-up action. Deeper conversation state and broader UI integration are still incomplete. |
-| `V2-031` | `in_progress` | `RealtimeVoiceService` exists and V2 now supports per-session turn state, interruption, `turn_started`, `turn_finished`, `turn_interrupted`, `audio_start`, and turn-aware client playback handling. Remaining work: streaming transport, deeper conversation integration, and provider-native realtime adapters. |
+| `V2-031` | `in_progress` | `RealtimeVoiceService` exists and V2 now supports per-session turn state, interruption, `turn_started`, `turn_finished`, `turn_interrupted`, `audio_start`, turn-aware client playback handling, and optional streamed audio input buffering with explicit start/commit/cancel frames. Remaining work: streaming output, deeper conversation integration, and provider-native realtime adapters. |
 
 ### Milestone 5: Actions and Open Loops
 
@@ -147,13 +147,15 @@ Current landed pieces:
 - explicit lifecycle events via `turn_started` and `turn_finished`
 - explicit turn correlation via `turn_id`
 - explicit audio boundary via `audio_start`
+- optional streamed audio input via `input_audio_start`, `input_audio_commit`, and `input_audio_cancel`, while keeping the legacy one-blob turn path working
+- websocket capability advertisement via `voice_capabilities`, so newer clients can detect streamed-input support before switching protocols
 - [avatar.html](/opt/avatar-server/static/avatar.html) consumes interruption and turn-aware playback metadata
-- [test_realtime_voice_service.py](/opt/avatar-server/tests/test_realtime_voice_service.py) covers happy-path interruption behavior and turn metadata
+- [test_realtime_voice_service.py](/opt/avatar-server/tests/test_realtime_voice_service.py) covers happy-path interruption behavior, turn metadata, and streamed-input commit/cancel behavior
 
 Still required before `V2-031` can be marked `completed`:
 
-- streaming input/output instead of one audio blob per turn
-- clean integration with a higher-level `ConversationService`
+- streaming output instead of one WAV blob per turn
+- deeper conversation-state integration beyond the current compatibility coordinator handoff
 - provider-adapter layer for future native realtime backends
 - stronger end-to-end validation beyond syntax checks
 

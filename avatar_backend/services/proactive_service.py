@@ -27,13 +27,14 @@ from typing import Awaitable, Callable
 import structlog
 import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException
+from avatar_backend.services.home_runtime import load_home_runtime_config
 
 _LOGGER = structlog.get_logger()
 
 # Motion sensor → camera mapping.
 # When a motion sensor fires, Nova fetches the associated camera and describes what it sees.
 # Duplicate sensors for the same camera share the same camera cooldown.
-_MOTION_CAMERA_MAP: dict[str, str] = {
+_LEGACY_MOTION_CAMERA_MAP: dict[str, str] = {
     # Driveway camera — both general motion and AI-person triggers
     "binary_sensor.rlc_1224a_motion": "camera.rlc_1224a_fluent",
     "binary_sensor.rlc_1224a_person": "camera.rlc_1224a_fluent",
@@ -49,7 +50,7 @@ _MOTION_DEVICE_CLASSES = {"motion", "occupancy", "presence", "moving"}
 # Cameras that bypass the global motion-announce cooldown.
 # Used for high-priority cameras (e.g. driveway delivery detection) that should
 # always announce regardless of how recently another motion event fired.
-_BYPASS_GLOBAL_MOTION_CAMERAS: set[str] = {"camera.rlc_1224a_fluent"}
+_LEGACY_BYPASS_GLOBAL_MOTION_CAMERAS: set[str] = {"camera.rlc_1224a_fluent"}
 
 # Per-camera vision prompts — override _DEFAULT_IMAGE_PROMPT for specific cameras.
 _DRIVEWAY_IMAGE_PROMPT = (
@@ -68,7 +69,7 @@ _DRIVEWAY_IMAGE_PROMPT = (
     "Only include the DELIVERY line if you are confident a delivery is taking place."
 )
 
-_CAMERA_VISION_PROMPTS: dict[str, str] = {
+_LEGACY_CAMERA_VISION_PROMPTS: dict[str, str] = {
     "camera.rlc_1224a_fluent": _DRIVEWAY_IMAGE_PROMPT,
 }
 
@@ -76,7 +77,7 @@ _CAMERA_VISION_PROMPTS: dict[str, str] = {
 # too noisy to be useful in batch triage.
 # Reolink AI detection sensors have no device_class so they bypass the
 # _MOTION_DEVICE_CLASSES filter; list them explicitly here instead.
-_EXCLUDE_ENTITIES: set[str] = {
+_LEGACY_EXCLUDE_ENTITIES: set[str] = {
     # Doorbell AI detections — handled by /announce/doorbell automation
     "binary_sensor.reolink_video_doorbell_poe_person",
     "binary_sensor.reolink_video_doorbell_poe_vehicle",
@@ -112,7 +113,7 @@ _WATCH_DOMAINS = {
 _CLIMATE_ANNOUNCE_STATES = {"heat", "cool", "heat_cool", "auto", "dry", "fan_only", "off"}
 
 # ── Weather monitoring ────────────────────────────────────────────────────────
-_WEATHER_ENTITY = "weather.met_office_ince_in_makerfield"
+_LEGACY_WEATHER_ENTITY = "weather.met_office_ince_in_makerfield"
 
 # Weather conditions that are significant enough to warrant an announcement
 # when they start or end.
@@ -152,6 +153,10 @@ _BATCH_WINDOW_S = 60
 # Max changes passed to LLM per batch
 _MAX_CHANGES = 20
 
+_HOUSE_NEEDS_ATTENTION_ENTITY = "binary_sensor.house_needs_attention"
+_HOUSE_ATTENTION_SUMMARY_ENTITY = "sensor.house_attention_summary"
+_HOUSE_ATTENTION_NORMAL_STATES = {"", "unknown", "unavailable", "home looks normal"}
+
 
 class ProactiveService:
     """
@@ -165,15 +170,29 @@ class ProactiveService:
         ha_token: str,
         ha_proxy,
         llm_service,
+        motion_clip_service,
         announce_fn: Callable[[str, str], Awaitable[None]],
         system_prompt: str,
+        event_service=None,
     ) -> None:
         self._ha_url = ha_url.rstrip("/")
         self._ha_token = ha_token
         self._ha = ha_proxy
         self._llm = llm_service
+        self._motion_clip_service = motion_clip_service
         self._announce = announce_fn
         self._system_prompt = system_prompt
+        self._event_service = event_service
+        runtime = load_home_runtime_config()
+        self._motion_camera_map = dict(_LEGACY_MOTION_CAMERA_MAP)
+        self._motion_camera_map.update(runtime.motion_camera_map)
+        self._bypass_global_motion_cameras = set(_LEGACY_BYPASS_GLOBAL_MOTION_CAMERAS)
+        self._bypass_global_motion_cameras.update(runtime.bypass_global_motion_cameras)
+        self._camera_vision_prompts = dict(_LEGACY_CAMERA_VISION_PROMPTS)
+        self._camera_vision_prompts.update(runtime.camera_vision_prompts)
+        self._exclude_entities = set(_LEGACY_EXCLUDE_ENTITIES)
+        self._exclude_entities.update(runtime.exclude_entities)
+        self._weather_entity = runtime.weather_entity or _LEGACY_WEATHER_ENTITY
         self._cooldowns: dict[str, float] = {}
         self._queue_seen: dict[str, float] = {}   # queue-time dedup cooldown
         self._camera_cooldowns: dict[str, float] = {}
@@ -189,6 +208,24 @@ class ProactiveService:
 
     def set_decision_log(self, log) -> None:
         self._decision_log = log
+
+    def _active_llm_fields(self) -> dict[str, str]:
+        provider = getattr(self._llm, "provider_name", "unknown")
+        model = getattr(self._llm, "model_name", "unknown")
+        return {
+            "llm_provider": provider,
+            "llm_model": model,
+            "llm_tag": f"{provider}:{model}",
+        }
+
+    def _gemini_llm_fields(self) -> dict[str, str]:
+        provider = getattr(self._llm, "gemini_vision_provider_name", "google")
+        model = getattr(self._llm, "gemini_vision_effective_model_name", "gemini")
+        return {
+            "llm_provider": provider,
+            "llm_model": model,
+            "llm_tag": f"{provider}:{model}",
+        }
 
     def update_system_prompt(self, prompt: str) -> None:
         """Called by sync-prompt to keep the proactive context current."""
@@ -310,7 +347,7 @@ class ProactiveService:
             return
 
         # Explicitly excluded entities — handled by dedicated automations or irrelevant
-        if entity_id in _EXCLUDE_ENTITIES:
+        if entity_id in self._exclude_entities:
             _LOGGER.debug("proactive.entity_excluded", entity_id=entity_id)
             return
 
@@ -319,8 +356,8 @@ class ProactiveService:
         if domain == "binary_sensor":
             device_class = new_state.get("attributes", {}).get("device_class", "")
             if device_class in _MOTION_DEVICE_CLASSES:
-                if entity_id in _MOTION_CAMERA_MAP and new_val == "on":
-                    camera_id = _MOTION_CAMERA_MAP[entity_id]
+                if entity_id in self._motion_camera_map and new_val == "on":
+                    camera_id = self._motion_camera_map[entity_id]
                     if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) >= _CAMERA_COOLDOWN_S:
                         self._camera_cooldowns[camera_id] = time.monotonic()
                         friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
@@ -334,11 +371,11 @@ class ProactiveService:
                             self._decision_log.record("motion_cooldown", entity=entity_id, camera=camera_id)
                 else:
                     _LOGGER.debug("proactive.motion_no_camera", entity_id=entity_id,
-                                  hint="add to _MOTION_CAMERA_MAP to enable vision description")
+                                  hint="add to motion_camera_map in config/home_runtime.json to enable vision description")
                 return  # always return — never queue motion sensors for batch triage
 
         # Weather entity — handled by dedicated weather monitor, not batch triage
-        if entity_id == _WEATHER_ENTITY:
+        if entity_id == self._weather_entity:
             if new_val != old_val:
                 asyncio.create_task(
                     self._handle_weather_change(old_val, new_val, new_state),
@@ -398,7 +435,7 @@ class ProactiveService:
 
     async def _handle_motion_event(self, entity_id: str, friendly: str, camera_id: str) -> None:
         """Fetch a camera snapshot, describe it with vision, and announce."""
-        bypass_global = camera_id in _BYPASS_GLOBAL_MOTION_CAMERAS
+        bypass_global = camera_id in self._bypass_global_motion_cameras
 
         # Global motion rate limit — skipped for bypass cameras (e.g. driveway)
         if not bypass_global:
@@ -411,7 +448,12 @@ class ProactiveService:
         _LOGGER.info("proactive.motion_triggered", entity_id=entity_id, camera=camera_id,
                      bypass_global=bypass_global)
         if self._decision_log:
-            self._decision_log.record("motion_triggered", entity=entity_id, camera=camera_id)
+            self._decision_log.record(
+                "motion_triggered",
+                entity=entity_id,
+                camera=camera_id,
+                **self._gemini_llm_fields(),
+            )
 
         try:
             image_bytes = await self._ha.fetch_camera_image(camera_id)
@@ -421,11 +463,11 @@ class ProactiveService:
 
         is_delivery = False
         delivery_company = ""
-        priority = "normal"
         message = f"Motion detected by {friendly}."
+        description = ""
 
         if image_bytes:
-            vision_prompt = _CAMERA_VISION_PROMPTS.get(camera_id)
+            vision_prompt = self._camera_vision_prompts.get(camera_id)
             try:
                 raw_desc = await self._llm.describe_image_with_gemini(
                     image_bytes,
@@ -437,12 +479,16 @@ class ProactiveService:
                 raw_desc = ""
 
             if raw_desc and raw_desc.strip().startswith("NO_MOTION"):
+                description = "No meaningful motion visible."
                 _LOGGER.info("proactive.motion_suppressed", camera=camera_id, reason="owner_car_or_no_cause")
                 if self._decision_log:
-                    self._decision_log.record("motion_suppressed", camera=camera_id, reason="NO_MOTION")
-                return
-
-            if raw_desc:
+                    self._decision_log.record(
+                        "motion_suppressed",
+                        camera=camera_id,
+                        reason="NO_MOTION",
+                        **self._gemini_llm_fields(),
+                    )
+            elif raw_desc:
                 # Parse delivery detection line  (format: "DELIVERY: <company>")
                 scene_lines, delivery_line = [], ""
                 for line in raw_desc.splitlines():
@@ -451,39 +497,72 @@ class ProactiveService:
                     else:
                         scene_lines.append(line)
                 scene = " ".join(scene_lines).strip()
+                description = scene or raw_desc.strip()
 
                 if delivery_line:
                     is_delivery = True
                     delivery_company = delivery_line.split(":", 1)[1].strip()
-                    priority = "alert"
                     company_label = delivery_company if delivery_company.lower() != "unknown" else "a courier"
-                    message = (
-                        f"Delivery alert! There's {company_label} delivery at the driveway. {scene}"
-                    )
+                    message = f"Delivery alert! There's {company_label} delivery at the driveway. {scene}"
                     _LOGGER.info("proactive.delivery_detected", camera=camera_id,
                                  company=delivery_company)
                     if self._decision_log:
-                        self._decision_log.record("delivery_detected", camera=camera_id,
-                                                  company=delivery_company, scene=scene[:200])
+                        self._decision_log.record(
+                            "delivery_detected",
+                            camera=camera_id,
+                            company=delivery_company,
+                            scene=scene[:200],
+                            **self._gemini_llm_fields(),
+                        )
                 else:
                     message = f"Motion on the driveway. {scene}"
 
                 _LOGGER.info("proactive.motion_described", camera=camera_id,
                              chars=len(raw_desc), delivery=is_delivery)
+        if not description:
+            description = message
+
+        if self._event_service is not None:
+            canonical_event = self._event_service.build_event(
+                event_id=f"proactive-{int(time.time() * 1000)}-{camera_id}",
+                event_type="delivery_detected" if is_delivery else "motion_detected",
+                title=f"Delivery at {friendly}" if is_delivery else f"Motion at {friendly}",
+                message=description,
+                camera_entity_id=camera_id,
+                event_context={
+                    "trigger_entity_id": entity_id,
+                    "location": friendly,
+                    "delivery": is_delivery,
+                    "delivery_company": delivery_company,
+                    "source": "proactive_motion",
+                },
+            )
+            description = canonical_event.message or description
+            extra = {
+                "delivery": is_delivery,
+                "delivery_company": delivery_company,
+                "canonical_event": self._event_service.to_dict(canonical_event),
+            }
+        else:
+            extra = {"delivery": is_delivery, "delivery_company": delivery_company}
+
+        self._motion_clip_service.schedule_capture(
+            camera_entity_id=camera_id,
+            trigger_entity_id=entity_id,
+            location=friendly,
+            description=description,
+            extra=extra,
+        )
 
         self._last_motion_announce_time = time.monotonic()
         if self._decision_log:
             self._decision_log.record(
-                "motion_announce",
+                "motion_clip_archived",
                 camera=camera_id,
-                priority=priority,
-                message=message[:300],
+                message=description[:300],
                 delivery=is_delivery,
+                **self._gemini_llm_fields(),
             )
-        try:
-            await self._announce(message, priority)
-        except Exception as exc:
-            _LOGGER.warning("proactive.motion_announce_failed", exc=str(exc))
 
         # For deliveries, also push to phones (user may be away from home)
         if is_delivery:
@@ -546,6 +625,14 @@ class ProactiveService:
                 self._last_weather_announce_time = time.monotonic()
                 self._last_weather_condition = new_condition
                 await self._announce(message, "normal")
+                if self._decision_log:
+                    self._decision_log.record(
+                        "weather_announce",
+                        old=old_condition,
+                        new=new_condition,
+                        message=message[:300],
+                        **self._active_llm_fields(),
+                    )
                 _LOGGER.info("proactive.weather_announced", old=old_condition, new=new_condition)
         except Exception as exc:
             _LOGGER.warning("proactive.weather_announce_failed", exc=str(exc))
@@ -579,7 +666,7 @@ class ProactiveService:
             "Content-Type": "application/json",
         }
         url = f"{self._ha_url}/api/services/weather/get_forecasts?return_response"
-        payload = {"entity_id": _WEATHER_ENTITY, "type": "daily"}
+        payload = {"entity_id": self._weather_entity, "type": "daily"}
 
         try:
             async with _httpx.AsyncClient(timeout=15) as client:
@@ -590,7 +677,7 @@ class ProactiveService:
             _LOGGER.warning("proactive.forecast_fetch_failed", exc=str(exc))
             return
 
-        forecasts = data.get("service_response", {}).get(_WEATHER_ENTITY, {}).get("forecast", [])
+        forecasts = data.get("service_response", {}).get(self._weather_entity, {}).get("forecast", [])
         if not forecasts:
             _LOGGER.warning("proactive.forecast_empty")
             return
@@ -626,6 +713,12 @@ class ProactiveService:
             message = message.strip()
             if message:
                 await self._announce(message, "normal")
+                if self._decision_log:
+                    self._decision_log.record(
+                        "forecast_announce",
+                        message=message[:300],
+                        **self._active_llm_fields(),
+                    )
                 _LOGGER.info("proactive.forecast_announced", chars=len(message))
         except Exception as exc:
             _LOGGER.warning("proactive.forecast_llm_failed", exc=str(exc))
@@ -683,10 +776,10 @@ class ProactiveService:
             return
         changes = resolved_changes
 
-        lines = "\n".join(
-            f"- {c['friendly']} ({c['entity_id']}): {c['old']} → {c['new']}"
-            for c in changes
-        )
+        rendered_lines: list[str] = []
+        for c in changes:
+            rendered_lines.append(await self._render_change_for_triage(c))
+        lines = "\n".join(rendered_lines)
         entity_ids = [c["entity_id"] for c in changes]
         _LOGGER.info("proactive.triaging", n_changes=len(changes), entities=entity_ids)
 
@@ -748,6 +841,7 @@ class ProactiveService:
                     "triage_silence",
                     entities=[c["entity_id"] for c in changes],
                     reason="LLM: no announcement needed",
+                    **self._active_llm_fields(),
                 )
             return
 
@@ -759,6 +853,8 @@ class ProactiveService:
         if not message:
             return
 
+        message = await self._augment_announcement_message(changes, message)
+
         _LOGGER.info("proactive.announcing", chars=len(message), priority=priority)
         if self._decision_log:
             self._decision_log.record(
@@ -766,6 +862,7 @@ class ProactiveService:
                 entities=[c["entity_id"] for c in changes],
                 priority=priority,
                 message=message,
+                **self._active_llm_fields(),
             )
 
         now = time.monotonic()
@@ -774,6 +871,47 @@ class ProactiveService:
             self._cooldowns[c["entity_id"]] = now
 
         await self._announce(message, priority)
+
+    async def _render_change_for_triage(self, change: dict) -> str:
+        entity_id = change["entity_id"]
+        friendly = change["friendly"]
+        old_val = change["old"]
+        new_val = change["new"]
+
+        if entity_id == _HOUSE_NEEDS_ATTENTION_ENTITY:
+            summary = await self._get_house_attention_summary()
+            if summary:
+                return (
+                    f"- {friendly} ({entity_id}): {old_val} → {new_val}"
+                    f" | concrete issue: {summary}"
+                )
+
+        return f"- {friendly} ({entity_id}): {old_val} → {new_val}"
+
+    async def _get_house_attention_summary(self) -> str | None:
+        summary_state = await self._ha.get_entity_state(_HOUSE_ATTENTION_SUMMARY_ENTITY)
+        summary = str((summary_state or {}).get("state", "")).strip()
+        if summary.lower() in _HOUSE_ATTENTION_NORMAL_STATES:
+            return None
+        return summary
+
+    async def _augment_announcement_message(self, changes: list[dict], message: str) -> str:
+        if not any(change.get("entity_id") == _HOUSE_NEEDS_ATTENTION_ENTITY for change in changes):
+            return message
+
+        summary = await self._get_house_attention_summary()
+        if not summary:
+            return message
+
+        lowered_message = message.lower()
+        lowered_summary = summary.lower()
+        if lowered_summary in lowered_message:
+            return message
+
+        base = message.rstrip()
+        if base and base[-1] not in ".!?":
+            base += "."
+        return f"{base} The issue is {summary}."
 
 
     # ── Autonomous Heating Control ────────────────────────────────────────────
@@ -821,7 +959,12 @@ class ProactiveService:
         _MAX_ROUNDS = 6
         _LOGGER.info("heating.eval_start")
         if self._decision_log:
-            self._decision_log.record("heating_eval_start", season=season, time=now_str)
+            self._decision_log.record(
+                "heating_eval_start",
+                season=season,
+                time=now_str,
+                **self._active_llm_fields(),
+            )
 
         all_tool_calls: list[str] = []
 
@@ -837,6 +980,7 @@ class ProactiveService:
                             "heating_action",
                             message=text.strip()[:300],
                             tool_calls=all_tool_calls,
+                            **self._active_llm_fields(),
                         )
                     await self._announce(text.strip(), "normal")
                 else:
@@ -846,6 +990,7 @@ class ProactiveService:
                             "heating_eval_silent",
                             reason=text.strip()[:200] if text else "no change needed",
                             tool_calls=all_tool_calls,
+                            **self._active_llm_fields(),
                         )
                 break
 
@@ -876,6 +1021,7 @@ class ProactiveService:
                         args={k: str(v)[:80] for k, v in tc.arguments.items()},
                         success=result.success,
                         result=(result.message or "")[:200],
+                        **self._active_llm_fields(),
                     )
                 messages.append({
                     "role":         "tool",

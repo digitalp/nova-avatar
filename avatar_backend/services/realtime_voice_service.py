@@ -1,0 +1,507 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from contextlib import suppress
+from dataclasses import dataclass, field
+from typing import Any
+
+import structlog
+from fastapi import WebSocket
+
+from avatar_backend.services.speaker_service import SpeakerService
+from avatar_backend.services.stt_service import STTService
+from avatar_backend.services.tts_service import TTSService
+from avatar_backend.services.ws_manager import ConnectionManager
+from avatar_backend.services.conversation_service import EventFollowupRequest
+
+_LOGGER = structlog.get_logger()
+
+IDLE = "idle"
+LISTENING = "listening"
+THINKING = "thinking"
+SPEAKING = "speaking"
+ERROR = "error"
+
+LLM_TIMEOUT_MSG = "I'm having trouble thinking right now. Please try again in a moment."
+LLM_OFFLINE_MSG = "I can't reach my brain right now. Please check that Ollama is running."
+
+
+@dataclass
+class VoiceTurnContext:
+    ws: WebSocket
+    ws_mgr: ConnectionManager
+    session_id: str
+    stt: STTService
+    tts: TTSService
+    speaker: SpeakerService | None
+    app: Any
+
+
+@dataclass
+class VoiceSessionState:
+    current_turn_id: int = 0
+    current_task: asyncio.Task[None] | None = None
+    pending_event_id: str | None = None
+    pending_followup_prompt: str | None = None
+    input_stream_open: bool = False
+    input_audio_chunks: list[bytes] = field(default_factory=list)
+    input_audio_bytes: int = 0
+    state: str = IDLE
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+class RealtimeVoiceService:
+    """Compatibility-first voice turn orchestrator for the websocket voice path.
+
+    This service preserves the existing request/response websocket contract while
+    extracting orchestration out of the router so future interruption-aware and
+    streaming behavior can be introduced behind a stable interface.
+    """
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, VoiceSessionState] = {}
+        self._sessions_lock = asyncio.Lock()
+
+    async def connect_session(self, session_key: str) -> None:
+        await self._get_or_create_session(session_key)
+
+    async def disconnect_session(self, session_key: str) -> None:
+        async with self._sessions_lock:
+            session = self._sessions.pop(session_key, None)
+        if session and session.current_task:
+            await self._cancel_turn_task(session.current_task)
+
+    async def start_audio_turn(
+        self,
+        session_key: str,
+        ctx: VoiceTurnContext,
+        audio_bytes: bytes,
+    ) -> None:
+        session = await self._get_or_create_session(session_key)
+        async with session.lock:
+            if session.current_task:
+                await self._send_turn_interrupted(ctx.ws, session.current_turn_id)
+                await self._cancel_turn_task(session.current_task)
+            session.current_turn_id += 1
+            turn_id = session.current_turn_id
+            event_id = session.pending_event_id
+            followup_prompt = session.pending_followup_prompt
+            session.pending_event_id = None
+            session.pending_followup_prompt = None
+            await self._send_json(ctx.ws, {"type": "turn_started"}, turn_id=turn_id)
+            session.current_task = asyncio.create_task(
+                self.process_audio(
+                    ctx,
+                    audio_bytes,
+                    session_key=session_key,
+                    turn_id=turn_id,
+                    event_id=event_id,
+                    followup_prompt=followup_prompt,
+                )
+            )
+
+    async def handle_text_frame(self, ws: WebSocket, session_key: str, raw_text: str) -> bool:
+        try:
+            data = json.loads(raw_text)
+        except Exception:
+            return False
+
+        if data.get("type") == "ping":
+            await ws.send_text(json.dumps({"type": "pong"}))
+            return True
+
+        if data.get("type") == "turn_context":
+            event_id = str(data.get("event_id") or "").strip()
+            followup_prompt = str(data.get("followup_prompt") or "").strip()
+            session = await self._get_or_create_session(session_key)
+            session.pending_event_id = event_id or None
+            session.pending_followup_prompt = followup_prompt or None
+            await self._send_json(ws, {
+                "type": "turn_context_ack",
+                "event_id": session.pending_event_id,
+                "followup_prompt": session.pending_followup_prompt,
+            })
+            return True
+
+        if data.get("type") == "input_audio_start":
+            session = await self._get_or_create_session(session_key)
+            async with session.lock:
+                session.input_stream_open = True
+                session.input_audio_chunks = []
+                session.input_audio_bytes = 0
+            await self._send_json(ws, {"type": "input_audio_start_ack"})
+            return True
+
+        if data.get("type") == "input_audio_commit":
+            session = await self._get_or_create_session(session_key)
+            async with session.lock:
+                if not session.input_stream_open:
+                    await self._send_json(ws, {
+                        "type": "error",
+                        "detail": "No input audio stream is active.",
+                    })
+                    return True
+                audio_bytes = b"".join(session.input_audio_chunks)
+                buffered_bytes = session.input_audio_bytes
+                session.input_stream_open = False
+                session.input_audio_chunks = []
+                session.input_audio_bytes = 0
+            await self._send_json(ws, {
+                "type": "input_audio_commit_ack",
+                "byte_length": buffered_bytes,
+            })
+            ctx = self._extract_turn_context(ws)
+            if ctx is None:
+                await self._send_json(ws, {
+                    "type": "error",
+                    "detail": "Voice session context is unavailable.",
+                })
+                return True
+            await self.start_audio_turn(session_key, ctx, audio_bytes)
+            return True
+
+        if data.get("type") == "input_audio_cancel":
+            session = await self._get_or_create_session(session_key)
+            async with session.lock:
+                had_stream = session.input_stream_open
+                session.input_stream_open = False
+                session.input_audio_chunks = []
+                session.input_audio_bytes = 0
+            await self._send_json(ws, {
+                "type": "input_audio_cancel_ack",
+                "active": had_stream,
+            })
+            return True
+
+        return False
+
+    async def send_pong_if_needed(self, ws: WebSocket, raw_text: str) -> bool:
+        """Backward-compatible keepalive helper for older websocket routers."""
+        return await self.handle_text_frame(ws, "legacy_voice_socket", raw_text)
+
+    async def handle_binary_frame(
+        self,
+        session_key: str,
+        ctx: VoiceTurnContext,
+        audio_bytes: bytes,
+    ) -> None:
+        session = await self._get_or_create_session(session_key)
+        async with session.lock:
+            if session.input_stream_open:
+                session.input_audio_chunks.append(audio_bytes)
+                session.input_audio_bytes += len(audio_bytes)
+                return
+        await self.start_audio_turn(session_key, ctx, audio_bytes)
+
+    async def process_audio(
+        self,
+        ctx: VoiceTurnContext,
+        audio_bytes: bytes,
+        *,
+        session_key: str | None = None,
+        turn_id: int | None = None,
+        event_id: str | None = None,
+        followup_prompt: str | None = None,
+    ) -> None:
+        speaker_task: asyncio.Task[None] | None = None
+        finish_reason = "completed"
+        finish_sent = False
+        try:
+            try:
+                await self._send_state(ctx.ws, ctx.ws_mgr, LISTENING, session_key=session_key)
+                transcript = await ctx.stt.transcribe(audio_bytes)
+            except Exception as exc:
+                _LOGGER.error("voice_ws.stt_error", exc=str(exc))
+                await self._send_json(ctx.ws, {"type": "error", "detail": f"STT failed: {exc}"}, turn_id=turn_id)
+                await self._send_state(ctx.ws, ctx.ws_mgr, ERROR, session_key=session_key)
+                await asyncio.sleep(1)
+                await self._send_state(ctx.ws, ctx.ws_mgr, IDLE, session_key=session_key, turn_id=turn_id)
+                finish_reason = "stt_error"
+                await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+                finish_sent = True
+                return
+
+            if not transcript:
+                _LOGGER.info("voice_ws.empty_transcript")
+                await self._send_state(ctx.ws, ctx.ws_mgr, IDLE, session_key=session_key, turn_id=turn_id)
+                finish_reason = "empty_transcript"
+                await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+                finish_sent = True
+                return
+
+            if session_key and not await self._is_current_turn(session_key, turn_id):
+                finish_reason = "superseded"
+                await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+                finish_sent = True
+                return
+
+            await self._send_json(ctx.ws, {"type": "transcript", "text": transcript}, turn_id=turn_id)
+            _LOGGER.info("voice_ws.transcript", chars=len(transcript), text=transcript[:80])
+
+            await self._send_state(ctx.ws, ctx.ws_mgr, THINKING, session_key=session_key, turn_id=turn_id)
+            fallback_text = None
+            result = None
+
+            try:
+                if event_id:
+                    recent_events: dict[str, tuple[float, dict[str, Any]]] = getattr(
+                        ctx.app.state, "recent_event_contexts", {}
+                    )
+                    stored = recent_events.get(event_id)
+                    if stored:
+                        _, event_context = stored
+                        result = await ctx.app.state.conversation_service.handle_event_followup(
+                            EventFollowupRequest(
+                                session_id=ctx.session_id,
+                                user_text=transcript,
+                                event_type=str(event_context.get("event_type", "event")),
+                                event_summary=str(event_context.get("event_summary", "")) or None,
+                                event_context=dict(event_context.get("event_context", {})),
+                                followup_prompt=followup_prompt,
+                            )
+                        )
+                    else:
+                        result = await ctx.app.state.conversation_service.handle_voice_turn(
+                            session_id=ctx.session_id,
+                            user_text=transcript,
+                        )
+                else:
+                    result = await ctx.app.state.conversation_service.handle_voice_turn(
+                        session_id=ctx.session_id,
+                        user_text=transcript,
+                    )
+            except RuntimeError as exc:
+                err = str(exc)
+                _LOGGER.error("voice_ws.llm_error", exc=err)
+                if "timed out" in err.lower():
+                    fallback_text = LLM_TIMEOUT_MSG
+                elif "400" in err and "bad request" in err.lower():
+                    _LOGGER.warning("voice_ws.clearing_corrupt_session", session_id=ctx.session_id)
+                    await ctx.app.state.session_manager.clear(ctx.session_id)
+                    try:
+                        if event_id:
+                            recent_events: dict[str, tuple[float, dict[str, Any]]] = getattr(
+                                ctx.app.state, "recent_event_contexts", {}
+                            )
+                            stored = recent_events.get(event_id)
+                            if stored:
+                                _, event_context = stored
+                                result = await ctx.app.state.conversation_service.handle_event_followup(
+                                    EventFollowupRequest(
+                                        session_id=ctx.session_id,
+                                        user_text=transcript,
+                                        event_type=str(event_context.get("event_type", "event")),
+                                        event_summary=str(event_context.get("event_summary", "")) or None,
+                                        event_context=dict(event_context.get("event_context", {})),
+                                        followup_prompt=followup_prompt,
+                                    )
+                                )
+                            else:
+                                result = await ctx.app.state.conversation_service.handle_voice_turn(
+                                    session_id=ctx.session_id,
+                                    user_text=transcript,
+                                )
+                        else:
+                            result = await ctx.app.state.conversation_service.handle_voice_turn(
+                                session_id=ctx.session_id,
+                                user_text=transcript,
+                            )
+                    except Exception as retry_exc:
+                        _LOGGER.error("voice_ws.llm_retry_failed", exc=str(retry_exc))
+                        fallback_text = LLM_OFFLINE_MSG
+                else:
+                    fallback_text = LLM_OFFLINE_MSG
+            except Exception as exc:
+                _LOGGER.error("voice_ws.llm_error", exc=str(exc))
+                fallback_text = LLM_OFFLINE_MSG
+
+            reply_text = fallback_text if fallback_text else (result.text if result else "")
+            if session_key and not await self._is_current_turn(session_key, turn_id):
+                finish_reason = "superseded"
+                await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+                finish_sent = True
+                return
+
+            if result and not fallback_text:
+                await self._send_json(ctx.ws, {
+                    "type": "response",
+                    "text": reply_text,
+                    "session_id": result.session_id,
+                    "tool_calls": [tc.model_dump() for tc in result.tool_calls],
+                    "processing_ms": result.processing_time_ms,
+                }, turn_id=turn_id)
+
+            if reply_text:
+                await self._send_state(ctx.ws, ctx.ws_mgr, SPEAKING, session_key=session_key, turn_id=turn_id)
+                try:
+                    from avatar_backend.config import get_settings as _get_settings
+                    offset_s = _get_settings().speaker_audio_offset_ms / 1000.0
+
+                    wav_bytes, word_timings = await ctx.tts.synthesise_with_timing(reply_text)
+                    if session_key and not await self._is_current_turn(session_key, turn_id):
+                        finish_reason = "superseded"
+                        await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+                        finish_sent = True
+                        return
+
+                    if ctx.speaker and ctx.speaker.is_configured:
+                        speaker_task = asyncio.create_task(ctx.speaker.speak(reply_text))
+
+                    if offset_s > 0 and speaker_task is not None:
+                        await asyncio.sleep(offset_s)
+
+                    await self._send_json(ctx.ws, {
+                        "type": "audio_start",
+                        "byte_length": len(wav_bytes),
+                    }, turn_id=turn_id)
+                    await self._send_json(ctx.ws, {
+                        "type": "word_timings",
+                        "word_timings": word_timings,
+                    }, turn_id=turn_id)
+                    await self._send_wav(ctx.ws, wav_bytes)
+
+                    if speaker_task is not None:
+                        await speaker_task
+                except Exception as exc:
+                    _LOGGER.error("voice_ws.tts_error", exc=str(exc))
+                    await self._send_json(ctx.ws, {"type": "error", "detail": f"TTS failed: {exc}"}, turn_id=turn_id)
+                    finish_reason = "tts_error"
+
+            await self._send_state(ctx.ws, ctx.ws_mgr, IDLE, session_key=session_key, turn_id=turn_id)
+            await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+            finish_sent = True
+            return
+        except asyncio.CancelledError:
+            if speaker_task is not None:
+                speaker_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await speaker_task
+            finish_reason = "interrupted"
+            raise
+        finally:
+            if not finish_sent and finish_reason == "interrupted":
+                await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+
+    async def send_initial_state(self, ws: WebSocket, ws_mgr: ConnectionManager) -> None:
+        await self._send_state(ws, ws_mgr, IDLE)
+        await self._send_json(ws, {
+            "type": "voice_capabilities",
+            "input_streaming": True,
+            "turn_context": True,
+        })
+
+    async def _send_wav(self, ws: WebSocket, wav_bytes: bytes) -> None:
+        try:
+            await ws.send_bytes(wav_bytes)
+        except Exception as exc:
+            _LOGGER.warning("voice_ws.send_wav_error", exc=str(exc))
+
+    async def _send_state(
+        self,
+        ws: WebSocket,
+        ws_mgr: ConnectionManager,
+        state: str,
+        *,
+        session_key: str | None = None,
+        turn_id: int | None = None,
+    ) -> None:
+        if session_key and turn_id is not None and not await self._is_current_turn(session_key, turn_id):
+            return
+        if session_key:
+            session = await self._get_or_create_session(session_key)
+            session.state = state
+        payload = {"type": "state", "state": state}
+        if turn_id is not None:
+            payload["turn_id"] = turn_id
+        try:
+            await ws.send_text(json.dumps(payload))
+        except Exception:
+            pass
+        surface_state = getattr(ws.app.state, "surface_state_service", None)
+        if surface_state is not None:
+            await surface_state.set_avatar_state(ws_mgr, state)
+        else:
+            await ws_mgr.broadcast_json({"type": "avatar_state", "state": state})
+
+    async def _get_or_create_session(self, session_key: str) -> VoiceSessionState:
+        async with self._sessions_lock:
+            session = self._sessions.get(session_key)
+            if session is None:
+                session = VoiceSessionState()
+                self._sessions[session_key] = session
+            return session
+
+    async def _is_current_turn(self, session_key: str, turn_id: int | None) -> bool:
+        if turn_id is None:
+            return True
+        session = await self._get_or_create_session(session_key)
+        return session.current_turn_id == turn_id
+
+    async def _clear_completed_task(self, session_key: str, turn_id: int | None) -> None:
+        if turn_id is None:
+            return
+        session = await self._get_or_create_session(session_key)
+        if session.current_turn_id == turn_id and session.current_task and session.current_task.done():
+            session.current_task = None
+
+    async def _finish_turn(
+        self,
+        ws: WebSocket,
+        session_key: str | None,
+        turn_id: int | None,
+        reason: str,
+    ) -> None:
+        if turn_id is None:
+            return
+        await self._send_json(ws, {
+            "type": "turn_finished",
+            "reason": reason,
+        }, turn_id=turn_id)
+        if session_key:
+            await self._clear_completed_task(session_key, turn_id)
+
+    async def _cancel_turn_task(self, task: asyncio.Task[None]) -> None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    async def _send_turn_interrupted(self, ws: WebSocket, interrupted_turn_id: int) -> None:
+        await self._send_json(ws, {
+            "type": "turn_interrupted",
+            "interrupted_turn_id": interrupted_turn_id,
+        })
+
+    async def _send_json(
+        self,
+        ws: WebSocket,
+        payload: dict[str, Any],
+        *,
+        turn_id: int | None = None,
+    ) -> None:
+        if turn_id is not None:
+            payload = {**payload, "turn_id": turn_id}
+        try:
+            await ws.send_text(json.dumps(payload))
+        except Exception:
+            pass
+
+    def _extract_turn_context(self, ws: WebSocket) -> VoiceTurnContext | None:
+        app = getattr(ws, "app", None)
+        if app is None:
+            return None
+        state = getattr(app, "state", None)
+        if state is None:
+            return None
+        try:
+            return VoiceTurnContext(
+                ws=ws,
+                ws_mgr=state.ws_manager,
+                session_id=getattr(ws, "_nova_session_id"),
+                stt=state.stt_service,
+                tts=state.tts_service,
+                speaker=getattr(state, "speaker_service", None),
+                app=app,
+            )
+        except AttributeError:
+            return None

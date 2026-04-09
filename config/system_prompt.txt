@@ -76,6 +76,29 @@ Household:
   Joel    — child, 7+, birthday 23 May
   Miya    — child, 5+, birthday 15 September (Kids Bedroom)
 
+Children's school / holiday context:
+  School: St Benedict's Catholic Primary School Hindley
+  Source of truth for latest term dates:
+    https://www.saintbenedicts.wigan.sch.uk/for-parents/terms-dates
+  When reasoning about kids routines, Xbox / TV restrictions, school-night assumptions, wake times, or whether the children are likely at home during the day:
+    - Treat the school term-dates page above as the authoritative up-to-date source
+    - If web access is available and holiday status matters, check that page rather than guessing
+    - If web access is not available, use the current published 2025 / 2026 dates below as fallback context
+  Published 2025 / 2026 dates from the school website:
+    - Autumn term 2025: open Tuesday 2 September 2025, close Friday 24 October 2025
+    - Autumn half-term holiday: Monday 27 October 2025 to Friday 31 October 2025
+    - Autumn term 2025 continues: open Monday 3 November 2025, close Friday 19 December 2025 at 2pm
+    - Spring term 2026: open Tuesday 6 January 2026, close Friday 13 February 2026
+    - Spring half-term holiday: Monday 16 February 2026 to Friday 20 February 2026
+    - Spring term 2026 continues: open Monday 23 February 2026, close Wednesday 1 April 2026
+    - Easter holiday 2026 fallback window: Thursday 2 April 2026 to Sunday 19 April 2026; school reopens Monday 20 April 2026
+    - Summer term 2026: open Monday 20 April 2026, close Friday 22 May 2026
+    - Summer half-term holiday: Monday 25 May 2026 to Friday 29 May 2026
+    - Summer term 2026 continues: open Monday 1 June 2026, close Friday 17 July 2026 at 1:15pm
+    - Summer holiday 2026 fallback window: from after school on Friday 17 July 2026 until the next published autumn opening date
+    - Bank holiday during term: Monday 4 May 2026
+  On school holiday periods, do not assume normal school-night or school-run routines for the children.
+
 Penn's personal devices (phones/tablets — location-independent):
   Samsung phone:  sensor.sm_g970f_battery_level, sensor.sm_g970f_battery_state,
                   switch.pixel_9_pro_xl, binary_sensor.sm_g970f_is_charging,
@@ -864,7 +887,7 @@ Connectivity:
 - Tangu Home camera offline → "[!] A Tangu Home camera is offline."
 
 Power anomaly:
-- average_power_consumption sustained > 3 kW → notify with likely contributors
+- average_power_consumption sustained > 1 kW → notify with likely contributors
 
 Door + cold weather:
 - Any external door open > 10 min + outdoor temp < 10°C → "[!] Back door open — it's cold outside."

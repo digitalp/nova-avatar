@@ -3,15 +3,16 @@ Phase 6 — /announce endpoint tests.
 
 All HA speaker calls and TTS synthesis are mocked.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from avatar_backend.middleware.auth import verify_api_key
 from avatar_backend.routers.announce import router as announce_router
+from avatar_backend.services.event_service import EventService
 from avatar_backend.services.speaker_service import SpeakerService
+from avatar_backend.services.surface_state_service import SurfaceStateService
 from avatar_backend.services.tts_service import TTSService
 from avatar_backend.services.ws_manager import ConnectionManager
 
@@ -29,6 +30,7 @@ def _make_app(tts_wav=b"RIFF" + b"\x00" * 36, speaker_ok=True):
     app.dependency_overrides[verify_api_key] = _noop_auth
 
     tts_mock = MagicMock(spec=TTSService)
+    tts_mock.synthesise_with_timing = AsyncMock(return_value=(tts_wav, []))
     tts_mock.synthesise = AsyncMock(return_value=tts_wav)
 
     speaker_mock = MagicMock(spec=SpeakerService)
@@ -40,10 +42,24 @@ def _make_app(tts_wav=b"RIFF" + b"\x00" * 36, speaker_ok=True):
 
     ws_mock = MagicMock(spec=ConnectionManager)
     ws_mock.broadcast_json = AsyncMock()
+    ws_mock.broadcast_to_voice_json = AsyncMock()
+    ws_mock.broadcast_to_voice_bytes = AsyncMock()
 
     app.state.tts_service     = tts_mock
     app.state.speaker_service = speaker_mock
     app.state.ws_manager      = ws_mock
+    app.state.audio_cache     = {}
+    app.state.ha_proxy        = MagicMock()
+    app.state.ha_proxy.fetch_camera_image = AsyncMock(return_value=b"fake-image")
+    app.state.llm_service     = MagicMock()
+    app.state.llm_service.describe_image = AsyncMock(return_value="A visitor is standing at the front door.")
+    app.state.llm_service.describe_image_with_gemini = AsyncMock(return_value="A person is moving near the entrance.")
+    app.state.motion_clip_service = MagicMock()
+    app.state.motion_clip_service.schedule_capture = MagicMock()
+    app.state.motion_announce_cooldowns = {}
+    app.state.recent_event_contexts = {}
+    app.state.surface_state_service = SurfaceStateService()
+    app.state.event_service = EventService()
 
     return app, tts_mock, speaker_mock, ws_mock
 
@@ -93,7 +109,7 @@ def test_announce_calls_tts_synthesise():
     client = TestClient(app)
     client.post("/announce", json={"message": "Dinner is ready"},
                 headers={"X-API-Key": API_KEY})
-    tts_mock.synthesise.assert_called_once_with("Dinner is ready")
+    tts_mock.synthesise_with_timing.assert_called_once_with("Dinner is ready")
 
 
 def test_announce_calls_speaker_speak():
@@ -102,6 +118,191 @@ def test_announce_calls_speaker_speak():
     client.post("/announce", json={"message": "Lights off in 5 minutes"},
                 headers={"X-API-Key": API_KEY})
     speaker_mock.speak.assert_called_once_with("Lights off in 5 minutes")
+
+
+def test_announce_broadcasts_voice_payload_and_audio():
+    app, _, _, ws_mock = _make_app()
+    client = TestClient(app)
+    client.post("/announce", json={"message": "Hello there"},
+                headers={"X-API-Key": API_KEY})
+
+    ws_mock.broadcast_to_voice_json.assert_called_once()
+    payload = ws_mock.broadcast_to_voice_json.call_args[0][0]
+    assert payload["type"] == "announce"
+    assert payload["text"] == "Hello there"
+    ws_mock.broadcast_to_voice_bytes.assert_called_once()
+
+
+def test_doorbell_announce_emits_visual_event_before_speaking():
+    app, _, _, ws_mock = _make_app()
+    client = TestClient(app)
+    resp = client.post("/announce/doorbell", json={}, headers={"X-API-Key": API_KEY})
+
+    assert resp.status_code == 200
+    voice_calls = [c[0][0] for c in ws_mock.broadcast_to_voice_json.call_args_list]
+    assert voice_calls[0]["type"] == "visual_event"
+    assert voice_calls[0]["event"] == "doorbell"
+    assert voice_calls[0]["camera_entity_id"] == "camera.reolink_video_doorbell_poe_fluent"
+    assert any(call.get("type") == "announce" for call in voice_calls)
+
+
+def test_visual_event_endpoint_broadcasts_static_images():
+    app, _, _, ws_mock = _make_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/announce/visual",
+        json={
+            "event": "bins",
+            "title": "Bin Collection Today",
+            "message": "Put out the blue and green bins.",
+            "image_urls": [
+                "/static/bin-icons/blue-bin.svg",
+                "/static/bin-icons/green-bin.svg",
+            ],
+            "expires_in_ms": 45000,
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["event"] == "bins"
+    assert resp.json()["event_id"]
+    ws_mock.broadcast_to_voice_json.assert_called_once()
+    payload = ws_mock.broadcast_to_voice_json.call_args[0][0]
+    assert payload["type"] == "visual_event"
+    assert payload["event_id"] == resp.json()["event_id"]
+    assert payload["event"] == "bins"
+    assert payload["image_urls"] == [
+        "/static/bin-icons/blue-bin.svg",
+        "/static/bin-icons/green-bin.svg",
+    ]
+
+
+def test_visual_event_endpoint_stores_followup_context():
+    app, _, _, _ = _make_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/announce/visual",
+        json={
+            "event": "parcel_delivery",
+            "title": "Parcel Delivered",
+            "message": "Package left near the front door.",
+            "camera_entity_id": "camera.front_door",
+            "event_context": {"camera_entity_id": "camera.front_door", "source": "parcel"},
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+
+    assert resp.status_code == 200
+    event_id = resp.json()["event_id"]
+    _, stored = app.state.recent_event_contexts[event_id]
+    assert stored["event_type"] == "parcel_delivery"
+    assert stored["event_summary"] == "Package left near the front door."
+    assert stored["event_context"]["camera_entity_id"] == "camera.front_door"
+
+
+def test_visual_event_endpoint_accepts_csv_image_urls():
+    app, _, _, ws_mock = _make_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/announce/visual",
+        json={
+            "event": "bins",
+            "message": "Put out the brown bin.",
+            "image_urls_csv": "/static/bin-icons/brown-bin.svg,/static/bin-icons/black-bin.svg",
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+
+    assert resp.status_code == 200
+    payload = ws_mock.broadcast_to_voice_json.call_args[0][0]
+    assert payload["image_urls"] == [
+        "/static/bin-icons/brown-bin.svg",
+        "/static/bin-icons/black-bin.svg",
+    ]
+
+
+def test_motion_announce_applies_per_camera_cooldown():
+    app, _, _, ws_mock = _make_app()
+    client = TestClient(app)
+
+    first = client.post(
+        "/announce/motion",
+        json={
+            "camera_entity_id": "camera.reolink_profile000_mainstream",
+            "location": "outside the front of the house",
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+    second = client.post(
+        "/announce/motion",
+        json={
+            "camera_entity_id": "camera.reolink_profile000_mainstream",
+            "location": "outside the front of the house",
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["message"].startswith("Motion detected")
+    assert second.json()["message"] == "motion_cooldown"
+
+    voice_calls = [c[0][0] for c in ws_mock.broadcast_to_voice_json.call_args_list]
+    announce_calls = [call for call in voice_calls if call.get("type") == "announce"]
+    assert len(announce_calls) == 1
+
+
+def test_motion_announce_cooldown_is_per_camera():
+    app, _, _, ws_mock = _make_app()
+    client = TestClient(app)
+
+    outdoor = client.post(
+        "/announce/motion",
+        json={
+            "camera_entity_id": "camera.reolink_profile000_mainstream",
+            "location": "outside the front of the house",
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+    driveway = client.post(
+        "/announce/motion",
+        json={
+            "camera_entity_id": "camera.rlc_1224a_fluent",
+            "location": "on the driveway",
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+
+    assert outdoor.status_code == 200
+    assert driveway.status_code == 200
+    assert driveway.json()["message"].startswith("Motion detected")
+
+    voice_calls = [c[0][0] for c in ws_mock.broadcast_to_voice_json.call_args_list]
+    announce_calls = [call for call in voice_calls if call.get("type") == "announce"]
+    assert len(announce_calls) == 2
+
+
+def test_motion_announce_persists_canonical_event_metadata():
+    app, _, _, _ = _make_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/announce/motion",
+        json={
+            "camera_entity_id": "camera.reolink_profile000_mainstream",
+            "location": "outside the front of the house",
+        },
+        headers={"X-API-Key": API_KEY},
+    )
+
+    assert resp.status_code == 200
+    app.state.motion_clip_service.schedule_capture.assert_called_once()
+    extra = app.state.motion_clip_service.schedule_capture.call_args.kwargs["extra"]
+    canonical = extra["canonical_event"]
+    assert canonical["event_type"] == "motion_detected"
+    assert canonical["camera_entity_id"] == "camera.reolink_profile000_mainstream"
+    assert canonical["event_context"]["source"] == "announce_motion"
 
 
 # ── State broadcasts ──────────────────────────────────────────────────────────
@@ -173,7 +374,7 @@ def test_announce_default_priority_is_normal():
 
 def test_announce_tts_failure_returns_503():
     app, tts_mock, *_ = _make_app()
-    tts_mock.synthesise = AsyncMock(side_effect=RuntimeError("piper crashed"))
+    tts_mock.synthesise_with_timing = AsyncMock(side_effect=RuntimeError("piper crashed"))
     client = TestClient(app)
     resp = client.post("/announce", json={"message": "Will fail"},
                        headers={"X-API-Key": API_KEY})
@@ -182,7 +383,7 @@ def test_announce_tts_failure_returns_503():
 
 def test_announce_tts_failure_broadcasts_error_then_idle():
     app, tts_mock, _, ws_mock = _make_app()
-    tts_mock.synthesise = AsyncMock(side_effect=RuntimeError("piper crashed"))
+    tts_mock.synthesise_with_timing = AsyncMock(side_effect=RuntimeError("piper crashed"))
     client = TestClient(app)
     client.post("/announce", json={"message": "Will fail"},
                 headers={"X-API-Key": API_KEY})

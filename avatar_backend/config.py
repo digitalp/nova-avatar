@@ -1,10 +1,14 @@
+import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="/opt/avatar-server/.env",
+        env_file=os.environ.get(
+            "NOVA_ENV_FILE",
+            os.environ.get("NOVA_APP_ROOT", "/opt/avatar-server") + "/.env",
+        ),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -69,6 +73,12 @@ class Settings(BaseSettings):
     # so the avatar lip-sync roughly aligns with what you hear from the room.
     # Start with 1500 and tune up/down until they feel in sync. Default 0 = no delay.
     speaker_audio_offset_ms: int = 0
+
+    # Motion clip archive/search
+    motion_clip_duration_s: int = 8
+    motion_clip_search_candidates: int = 120
+    motion_clip_search_results: int = 24
+    shared_memory_db_path: str = ""
 
     @property
     def cors_origins_list(self) -> list[str]:

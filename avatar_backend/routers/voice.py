@@ -26,7 +26,6 @@ Usage notes:
     players (Echo, Sonos, etc.) concurrently with sending WAV to the WS client.
 """
 from __future__ import annotations
-import asyncio
 import json
 
 import structlog
@@ -34,7 +33,10 @@ from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisc
 from fastapi.responses import JSONResponse
 
 from avatar_backend.middleware.auth import verify_api_key, verify_api_key_ws, issue_ws_token
-from avatar_backend.services.chat_service import run_chat
+from avatar_backend.services.realtime_voice_service import (
+    RealtimeVoiceService,
+    VoiceTurnContext,
+)
 from avatar_backend.services.speaker_service import SpeakerService
 from avatar_backend.services.stt_service import STTService
 from avatar_backend.services.tts_service import TTSService
@@ -55,17 +57,6 @@ async def get_ws_token() -> dict:
     return {"token": issue_ws_token(), "ttl_seconds": 30}
 
 
-_IDLE      = "idle"
-_LISTENING = "listening"
-_THINKING  = "thinking"
-_SPEAKING  = "speaking"
-_ERROR     = "error"
-
-# Spoken when the LLM times out — synthesised and returned as audio
-_LLM_TIMEOUT_MSG  = "I'm having trouble thinking right now. Please try again in a moment."
-_LLM_OFFLINE_MSG  = "I can't reach my brain right now. Please check that Ollama is running."
-
-
 @router.websocket("/ws/voice")
 async def voice_websocket(
     ws: WebSocket,
@@ -78,34 +69,38 @@ async def voice_websocket(
     tts: TTSService            = app.state.tts_service
     ws_mgr: ConnectionManager  = app.state.ws_manager
     speaker: SpeakerService    = getattr(app.state, "speaker_service", None)
+    voice_service: RealtimeVoiceService = getattr(app.state, "realtime_voice_service", None) or RealtimeVoiceService()
 
     await ws.accept()
+    setattr(ws, "_nova_session_id", session_id)
     await ws_mgr.connect_voice(ws)
-    await _send_state(ws, ws_mgr, _IDLE)
+    session_key = f"{session_id}:{id(ws)}"
+    await voice_service.connect_session(session_key)
+    await voice_service.send_initial_state(ws, ws_mgr)
 
     try:
         while True:
             msg = await ws.receive()
 
             if msg["type"] == "websocket.receive" and msg.get("text"):
-                try:
-                    data = json.loads(msg["text"])
-                    if data.get("type") == "ping":
-                        await ws.send_text(json.dumps({"type": "pong"}))
-                except Exception:
-                    pass
+                handled = await voice_service.handle_text_frame(ws, session_key, msg["text"])
+                if handled:
+                    continue
                 continue
 
             if msg["type"] == "websocket.receive" and msg.get("bytes"):
-                await _process_audio(
-                    ws=ws,
-                    ws_mgr=ws_mgr,
-                    audio_bytes=msg["bytes"],
-                    session_id=session_id,
-                    stt=stt,
-                    tts=tts,
-                    speaker=speaker,
-                    app=app,
+                await voice_service.handle_binary_frame(
+                    session_key,
+                    VoiceTurnContext(
+                        ws=ws,
+                        ws_mgr=ws_mgr,
+                        session_id=session_id,
+                        stt=stt,
+                        tts=tts,
+                        speaker=speaker,
+                        app=app,
+                    ),
+                    msg["bytes"],
                 )
                 continue
 
@@ -121,147 +116,9 @@ async def voice_websocket(
         except Exception:
             pass
     finally:
+        await voice_service.disconnect_session(session_key)
         await ws_mgr.disconnect_voice(ws)
-        await _broadcast_state(ws_mgr, _IDLE)
-
-
-async def _process_audio(
-    *,
-    ws: WebSocket,
-    ws_mgr: ConnectionManager,
-    audio_bytes: bytes,
-    session_id: str,
-    stt: STTService,
-    tts: TTSService,
-    speaker: SpeakerService | None,
-    app,
-) -> None:
-    # 1. STT
-    await _send_state(ws, ws_mgr, _LISTENING)
-    try:
-        transcript = await stt.transcribe(audio_bytes)
-    except Exception as exc:
-        _LOGGER.error("voice_ws.stt_error", exc=str(exc))
-        await ws.send_text(json.dumps({"type": "error", "detail": f"STT failed: {exc}"}))
-        await _send_state(ws, ws_mgr, _ERROR)
-        await asyncio.sleep(1)
-        await _send_state(ws, ws_mgr, _IDLE)
-        return
-
-    if not transcript:
-        _LOGGER.info("voice_ws.empty_transcript")
-        await _send_state(ws, ws_mgr, _IDLE)
-        return
-
-    await ws.send_text(json.dumps({"type": "transcript", "text": transcript}))
-    _LOGGER.info("voice_ws.transcript", chars=len(transcript), text=transcript[:80])
-
-    # 2. LLM chat — with graceful timeout/offline fallback
-    await _send_state(ws, ws_mgr, _THINKING)
-    fallback_text = None
-    result = None
-
-    try:
-        result = await run_chat(
-            session_id=session_id,
-            user_text=transcript,
-            llm=app.state.llm_service,
-            sm=app.state.session_manager,
-            ha=app.state.ha_proxy,
-            decision_log=getattr(app.state, "decision_log", None),
-            memory_service=getattr(app.state, "memory_service", None),
-        )
-    except RuntimeError as exc:
-        err = str(exc)
-        _LOGGER.error("voice_ws.llm_error", exc=err)
-        if "timed out" in err.lower():
-            fallback_text = _LLM_TIMEOUT_MSG
-        elif "HTTP 400" in err:
-            # Corrupt conversation history (e.g. orphaned tool call after session
-            # reconnect). Clear the session and retry once with a clean slate.
-            _LOGGER.warning("voice_ws.clearing_corrupt_session", session_id=session_id)
-            await app.state.session_manager.clear(session_id)
-            try:
-                result = await run_chat(
-                    session_id=session_id,
-                    user_text=transcript,
-                    llm=app.state.llm_service,
-                    sm=app.state.session_manager,
-                    ha=app.state.ha_proxy,
-                    decision_log=getattr(app.state, "decision_log", None),
-                    memory_service=getattr(app.state, "memory_service", None),
-                )
-            except Exception as retry_exc:
-                _LOGGER.error("voice_ws.llm_retry_failed", exc=str(retry_exc))
-                fallback_text = _LLM_OFFLINE_MSG
-        else:
-            fallback_text = _LLM_OFFLINE_MSG
-    except Exception as exc:
-        _LOGGER.error("voice_ws.llm_error", exc=str(exc))
-        fallback_text = _LLM_OFFLINE_MSG
-
-    reply_text = fallback_text if fallback_text else (result.text if result else "")
-
-    if result and not fallback_text:
-        await ws.send_text(json.dumps({
-            "type":          "response",
-            "text":          reply_text,
-            "session_id":    result.session_id,
-            "tool_calls":    [tc.model_dump() for tc in result.tool_calls],
-            "processing_ms": result.processing_time_ms,
-        }))
-
-    # 3. TTS + speaker broadcast
-    if reply_text:
-        await _send_state(ws, ws_mgr, _SPEAKING)
-        try:
-            from avatar_backend.config import get_settings as _get_settings
-            offset_s = _get_settings().speaker_audio_offset_ms / 1000.0
-
-            wav_bytes, word_timings = await tts.synthesise_with_timing(reply_text)
-
-            # Start speaker first so it has a head start before browser audio
-            speaker_task = None
-            if speaker and speaker.is_configured:
-                speaker_task = asyncio.create_task(speaker.speak(reply_text))
-
-            if offset_s > 0 and speaker_task is not None:
-                await asyncio.sleep(offset_s)
-
-            # Send word timings then audio to the browser client
-            await ws.send_text(json.dumps({
-                "type":         "word_timings",
-                "word_timings": word_timings,
-            }))
-            await _send_wav(ws, wav_bytes)
-
-            if speaker_task is not None:
-                await speaker_task
-        except Exception as exc:
-            _LOGGER.error("voice_ws.tts_error", exc=str(exc))
-            await ws.send_text(json.dumps({"type": "error", "detail": f"TTS failed: {exc}"}))
-
-    await _send_state(ws, ws_mgr, _IDLE)
-
-
-async def _send_wav(ws: WebSocket, wav_bytes: bytes) -> None:
-    try:
-        await ws.send_bytes(wav_bytes)
-    except Exception as exc:
-        _LOGGER.warning("voice_ws.send_wav_error", exc=str(exc))
-
-
-async def _send_state(ws: WebSocket, ws_mgr: ConnectionManager, state: str) -> None:
-    payload = {"type": "state", "state": state}
-    try:
-        await ws.send_text(json.dumps(payload))
-    except Exception:
-        pass
-    await _broadcast_state(ws_mgr, state)
-
-
-async def _broadcast_state(ws_mgr: ConnectionManager, state: str) -> None:
-    await ws_mgr.broadcast_json({"type": "avatar_state", "state": state})
+        await ws_mgr.broadcast_json({"type": "avatar_state", "state": "idle"})
 
 
 # ── Wake word check (fallback for browsers without SpeechRecognition) ─────────

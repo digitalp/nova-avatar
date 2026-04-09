@@ -5,6 +5,7 @@ Tables:
   llm_invocations  — one row per LLM call (immutable)
   system_samples   — one row per metrics poll (CPU/RAM/disk/GPU) — kept 7 days
   long_term_memories — stable household memories Nova can reuse across restarts
+  motion_clips     — archived motion-triggered video clips + AI descriptions
 """
 from __future__ import annotations
 import hashlib
@@ -84,6 +85,38 @@ CREATE TABLE IF NOT EXISTS long_term_memories (
 CREATE INDEX IF NOT EXISTS idx_mem_updated   ON long_term_memories(updated_ts);
 CREATE INDEX IF NOT EXISTS idx_mem_category  ON long_term_memories(category);
 CREATE INDEX IF NOT EXISTS idx_mem_referenced ON long_term_memories(last_referenced_ts);
+
+CREATE TABLE IF NOT EXISTS motion_clips (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                TEXT NOT NULL,
+    camera_entity_id  TEXT NOT NULL,
+    trigger_entity_id TEXT NOT NULL DEFAULT '',
+    location          TEXT NOT NULL DEFAULT '',
+    description       TEXT NOT NULL DEFAULT '',
+    video_relpath     TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'ready',
+    duration_s        INTEGER NOT NULL DEFAULT 0,
+    llm_provider      TEXT NOT NULL DEFAULT '',
+    llm_model         TEXT NOT NULL DEFAULT '',
+    extra_json        TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_motion_ts ON motion_clips(ts);
+CREATE INDEX IF NOT EXISTS idx_motion_camera_ts ON motion_clips(camera_entity_id, ts);
+
+CREATE TABLE IF NOT EXISTS event_history (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                TEXT NOT NULL,
+    event_id          TEXT NOT NULL DEFAULT '',
+    event_type        TEXT NOT NULL DEFAULT '',
+    title             TEXT NOT NULL DEFAULT '',
+    summary           TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'active',
+    event_source      TEXT NOT NULL DEFAULT '',
+    camera_entity_id  TEXT NOT NULL DEFAULT '',
+    data_json         TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_event_history_ts ON event_history(ts);
+CREATE INDEX IF NOT EXISTS idx_event_history_event_id ON event_history(event_id);
 """
 
 
@@ -284,6 +317,83 @@ class MetricsDB:
             out.append(entry)
         return out
 
+    # ── Event history ───────────────────────────────────────────────────────
+
+    def insert_event_history(self, entry: dict[str, Any]) -> None:
+        import json as _json
+
+        ts = entry.get("ts") or datetime.now(timezone.utc).isoformat()
+        data = dict(entry)
+        payload = data.pop("data", {})
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO event_history
+                (ts, event_id, event_type, title, summary, status, event_source, camera_entity_id, data_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts,
+                    data.get("event_id", ""),
+                    data.get("event_type", ""),
+                    data.get("title", ""),
+                    data.get("summary", ""),
+                    data.get("status", "active"),
+                    data.get("event_source", ""),
+                    data.get("camera_entity_id", ""),
+                    _json.dumps(payload or {}),
+                ),
+            )
+
+    def recent_event_history(self, n: int = 100) -> list[dict[str, Any]]:
+        import json as _json
+
+        sql = """
+        SELECT ts, event_id, event_type, title, summary, status, event_source, camera_entity_id, data_json
+        FROM event_history
+        ORDER BY id DESC
+        LIMIT ?
+        """
+        with self._conn() as conn:
+            rows = conn.execute(sql, (n,)).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            entry = dict(row)
+            entry["data"] = _json.loads(entry.pop("data_json", "{}") or "{}")
+            out.append(entry)
+        return out
+
+    def update_event_history_status(
+        self,
+        event_id: str,
+        status: str,
+        open_loop_note: str | None = None,
+        admin_note: str | None = None,
+    ) -> bool:
+        import json as _json
+
+        if not event_id:
+            return False
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, data_json FROM event_history WHERE event_id = ?",
+                (event_id,),
+            ).fetchall()
+            if not rows:
+                return False
+            for row in rows:
+                data = _json.loads(row["data_json"] or "{}")
+                if open_loop_note is not None:
+                    data["open_loop_note"] = open_loop_note
+                if admin_note is not None:
+                    data["admin_note"] = admin_note
+                    data["admin_note_ts"] = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "UPDATE event_history SET status = ?, data_json = ? WHERE id = ?",
+                    (status, _json.dumps(data), row["id"]),
+                )
+        return True
+
     # ── Server logs ──────────────────────────────────────────────────────────────────────────
 
     def insert_log(self, entry: dict) -> None:
@@ -424,3 +534,204 @@ class MetricsDB:
                 f"UPDATE long_term_memories SET last_referenced_ts = ? WHERE id IN ({placeholders})",
                 (now, *ids),
             )
+
+    def import_memories_from(self, other_db_path: str) -> int:
+        path = (other_db_path or "").strip()
+        if not path:
+            return 0
+        other_path = Path(path)
+        if not other_path.exists():
+            return 0
+        if str(other_path.resolve()) == str(Path(self._path).resolve()):
+            return 0
+
+        imported = 0
+        with self._lock:
+            src = sqlite3.connect(str(other_path), timeout=10)
+            src.row_factory = sqlite3.Row
+            try:
+                rows = src.execute(
+                    """
+                    SELECT created_ts, updated_ts, last_referenced_ts, category, summary, source,
+                           confidence, times_seen, pinned, fingerprint
+                    FROM long_term_memories
+                    ORDER BY id ASC
+                    """
+                ).fetchall()
+            finally:
+                src.close()
+
+            if not rows:
+                return 0
+
+            with self._conn() as conn:
+                for row in rows:
+                    existing = conn.execute(
+                        "SELECT * FROM long_term_memories WHERE fingerprint = ?",
+                        (row["fingerprint"],),
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            """
+                            UPDATE long_term_memories
+                            SET created_ts = MIN(created_ts, ?),
+                                updated_ts = MAX(updated_ts, ?),
+                                last_referenced_ts = CASE
+                                    WHEN last_referenced_ts IS NULL THEN ?
+                                    WHEN ? IS NULL THEN last_referenced_ts
+                                    WHEN last_referenced_ts < ? THEN ?
+                                    ELSE last_referenced_ts
+                                END,
+                                source = CASE
+                                    WHEN source = '' THEN ?
+                                    ELSE source
+                                END,
+                                confidence = MAX(confidence, ?),
+                                times_seen = MAX(times_seen, ?),
+                                pinned = CASE
+                                    WHEN pinned = 1 OR ? THEN 1
+                                    ELSE 0
+                                END
+                            WHERE fingerprint = ?
+                            """,
+                            (
+                                row["created_ts"],
+                                row["updated_ts"],
+                                row["last_referenced_ts"],
+                                row["last_referenced_ts"],
+                                row["last_referenced_ts"],
+                                row["last_referenced_ts"],
+                                row["source"],
+                                float(row["confidence"] or 0.0),
+                                int(row["times_seen"] or 1),
+                                1 if row["pinned"] else 0,
+                                row["fingerprint"],
+                            ),
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            INSERT INTO long_term_memories
+                            (created_ts, updated_ts, last_referenced_ts, category, summary, source,
+                             confidence, times_seen, pinned, fingerprint)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                row["created_ts"],
+                                row["updated_ts"],
+                                row["last_referenced_ts"],
+                                row["category"],
+                                row["summary"],
+                                row["source"],
+                                float(row["confidence"] or 0.0),
+                                int(row["times_seen"] or 1),
+                                1 if row["pinned"] else 0,
+                                row["fingerprint"],
+                            ),
+                        )
+                        imported += 1
+        return imported
+
+    # ── Motion clips ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _attach_motion_clip_event_fields(entry: dict[str, Any]) -> dict[str, Any]:
+        extra = entry.get("extra") or {}
+        canonical = extra.get("canonical_event") if isinstance(extra, dict) else None
+        if isinstance(canonical, dict):
+            entry["canonical_event_id"] = canonical.get("event_id", "")
+            entry["canonical_event_type"] = canonical.get("event_type", "")
+            entry["canonical_event"] = canonical
+        else:
+            entry["canonical_event_id"] = ""
+            entry["canonical_event_type"] = ""
+        return entry
+
+    def insert_motion_clip(self, entry: dict[str, Any]) -> int:
+        import json as _json
+
+        sql = """
+        INSERT INTO motion_clips
+        (ts, camera_entity_id, trigger_entity_id, location, description,
+         video_relpath, status, duration_s, llm_provider, llm_model, extra_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        ts = entry.get("ts") or datetime.now(timezone.utc).isoformat()
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(sql, (
+                ts,
+                entry.get("camera_entity_id", ""),
+                entry.get("trigger_entity_id", ""),
+                entry.get("location", ""),
+                entry.get("description", ""),
+                entry.get("video_relpath", ""),
+                entry.get("status", "ready"),
+                int(entry.get("duration_s", 0) or 0),
+                entry.get("llm_provider", ""),
+                entry.get("llm_model", ""),
+                _json.dumps(entry.get("extra", {}) or {}),
+            ))
+            return int(cur.lastrowid)
+
+    def recent_motion_clips(
+        self,
+        *,
+        limit: int = 100,
+        date: str | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        camera_entity_id: str | None = None,
+        canonical_event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        import json as _json
+
+        sql = """
+        SELECT id, ts, camera_entity_id, trigger_entity_id, location, description,
+               video_relpath, status, duration_s, llm_provider, llm_model, extra_json
+        FROM motion_clips
+        WHERE 1=1
+        """
+        args: list[Any] = []
+        if camera_entity_id:
+            sql += " AND camera_entity_id = ?"
+            args.append(camera_entity_id)
+        if date:
+            sql += " AND substr(ts, 1, 10) = ?"
+            args.append(date)
+        if start_time:
+            sql += " AND substr(ts, 12, 5) >= ?"
+            args.append(start_time[:5])
+        if end_time:
+            sql += " AND substr(ts, 12, 5) <= ?"
+            args.append(end_time[:5])
+        sql += " ORDER BY ts DESC LIMIT ?"
+        args.append(max(1, min(int(limit), 500)))
+
+        with self._conn() as conn:
+            rows = conn.execute(sql, tuple(args)).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            entry = dict(row)
+            entry["extra"] = _json.loads(entry.pop("extra_json", "{}") or "{}")
+            out.append(self._attach_motion_clip_event_fields(entry))
+        if canonical_event_type:
+            wanted = canonical_event_type.strip()
+            out = [entry for entry in out if str(entry.get("canonical_event_type") or "") == wanted]
+        return out
+
+    def get_motion_clip(self, clip_id: int) -> dict[str, Any] | None:
+        import json as _json
+
+        sql = """
+        SELECT id, ts, camera_entity_id, trigger_entity_id, location, description,
+               video_relpath, status, duration_s, llm_provider, llm_model, extra_json
+        FROM motion_clips
+        WHERE id = ?
+        """
+        with self._conn() as conn:
+            row = conn.execute(sql, (clip_id,)).fetchone()
+        if not row:
+            return None
+        entry = dict(row)
+        entry["extra"] = _json.loads(entry.pop("extra_json", "{}") or "{}")
+        return self._attach_motion_clip_event_fields(entry)

@@ -26,6 +26,10 @@ error()   { echo -e "${RED}✘ $*${RESET}" >&2; exit 1; }
 header()  { echo -e "\n${BOLD}━━━  $*  ━━━${RESET}\n"; }
 ask()     { echo -en "${BOLD}$*${RESET} "; }
 
+default_timezone() {
+  timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC"
+}
+
 # ── Update-only mode ──────────────────────────────────────────────────────────
 UPDATE_ONLY=false
 [[ "${1:-}" == "--update" ]] && UPDATE_ONLY=true
@@ -141,6 +145,34 @@ ask "HA Long-Lived Access Token (blank to configure later):"
 read -r INPUT_HA_TOKEN
 INPUT_HA_TOKEN="${INPUT_HA_TOKEN:-}"
 
+DEFAULT_HOME_LABEL="$(hostname)"
+DEFAULT_TIMEZONE="$(default_timezone)"
+DEFAULT_PRIMARY_USERS="${SUDO_USER:-$(whoami)}"
+
+ask "Home label or address [${DEFAULT_HOME_LABEL}]:"
+read -r INPUT_HOME_LABEL
+INPUT_HOME_LABEL="${INPUT_HOME_LABEL:-${DEFAULT_HOME_LABEL}}"
+
+ask "Timezone [${DEFAULT_TIMEZONE}]:"
+read -r INPUT_TIMEZONE
+INPUT_TIMEZONE="${INPUT_TIMEZONE:-${DEFAULT_TIMEZONE}}"
+
+ask "Primary household members (comma-separated) [${DEFAULT_PRIMARY_USERS}]:"
+read -r INPUT_PRIMARY_USERS
+INPUT_PRIMARY_USERS="${INPUT_PRIMARY_USERS:-${DEFAULT_PRIMARY_USERS}}"
+
+ask "Other household members (optional; semicolon-separated as Name:role or Name:role,details):"
+read -r INPUT_OTHER_MEMBERS
+INPUT_OTHER_MEMBERS="${INPUT_OTHER_MEMBERS:-}"
+
+ask "Vehicles (optional; semicolon-separated as Owner:colour make model):"
+read -r INPUT_VEHICLES
+INPUT_VEHICLES="${INPUT_VEHICLES:-}"
+
+ask "Other useful household notes (optional; semicolon-separated):"
+read -r INPUT_HOME_NOTES
+INPUT_HOME_NOTES="${INPUT_HOME_NOTES:-}"
+
 # LLM provider
 echo ""
 echo "  LLM providers:"
@@ -227,10 +259,12 @@ header "Writing default config files"
 # Copy template (always — useful reference even if prompt already exists)
 cp "${SCRIPT_DIR}/config/system_prompt_template.txt" "${INSTALL_DIR}/config/system_prompt_template.txt" 2>/dev/null || true
 
+GENERATE_INITIAL_PROMPT=false
 if [[ ! -f "${INSTALL_DIR}/config/system_prompt.txt" ]]; then
   cp "${SCRIPT_DIR}/config/system_prompt_template.txt" "${INSTALL_DIR}/config/system_prompt.txt" 2>/dev/null ||   echo 'You are Nova, a smart home AI. Edit config/system_prompt.txt to customise.' > "${INSTALL_DIR}/config/system_prompt.txt"
-  warn "Created system_prompt.txt from template — edit it with your home details before use"
-  info "See: ${INSTALL_DIR}/config/system_prompt_template.txt"
+  GENERATE_INITIAL_PROMPT=true
+  warn "Created system_prompt.txt from template — installer will now try to personalise it from Home Assistant and your household details"
+  info "Reference template kept at: ${INSTALL_DIR}/config/system_prompt_template.txt"
 else
   success "system_prompt.txt already exists — skipping"
 fi
@@ -328,6 +362,37 @@ if $GPU_FOUND; then
   success "CUDA libs installed"
 fi
 success "Python dependencies installed"
+
+# ── Personalise system prompt ─────────────────────────────────────────────────
+if $GENERATE_INITIAL_PROMPT; then
+  header "Generating personalised system prompt"
+  PROMPT_BOOTSTRAP_CMD=(
+    "${INSTALL_DIR}/.venv/bin/python3"
+    "${INSTALL_DIR}/scripts/bootstrap_system_prompt.py"
+    --template "${INSTALL_DIR}/config/system_prompt_template.txt"
+    --output "${INSTALL_DIR}/config/system_prompt.txt"
+    --runtime-output "${INSTALL_DIR}/config/home_runtime.json"
+    --address "${INPUT_HOME_LABEL}"
+    --timezone "${INPUT_TIMEZONE}"
+    --default-user "${SERVICE_USER}"
+    --primary-users "${INPUT_PRIMARY_USERS}"
+    --other-members "${INPUT_OTHER_MEMBERS}"
+    --vehicles "${INPUT_VEHICLES}"
+    --notes "${INPUT_HOME_NOTES}"
+  )
+
+  if [[ -n "${INPUT_HA_TOKEN}" ]]; then
+    PROMPT_BOOTSTRAP_CMD+=(--ha-url "${INPUT_HA_URL}" --ha-token "${INPUT_HA_TOKEN}")
+  else
+    warn "HA token not provided — generating prompt from installer inputs only."
+  fi
+
+  if sudo -u "${SERVICE_USER}" "${PROMPT_BOOTSTRAP_CMD[@]}"; then
+    success "Personalised system_prompt.txt generated"
+  else
+    warn "Prompt bootstrap failed — keeping the template-based system_prompt.txt so install can continue."
+  fi
+fi
 
 # ── Piper TTS binary ───────────────────────────────────────────────────────────
 header "Piper TTS binary"

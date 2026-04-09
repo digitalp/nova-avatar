@@ -12,6 +12,7 @@ viewer — read-only: dashboard, logs, sessions
 from __future__ import annotations
 import asyncio
 import subprocess
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -64,6 +65,9 @@ _CONFIG_FIELDS = {
     "SPEAKERS":             ("Speakers",                                     False),
     "TTS_ENGINE":           ("TTS Engine (Sonos)",                           False),
     "SPEAKER_AUDIO_OFFSET_MS": ("Speaker Audio Delay ms (delay browser audio to sync with room speakers, 0 = off)", False),
+    "MOTION_CLIP_DURATION_S": ("Motion Clip Duration Seconds",               False),
+    "MOTION_CLIP_SEARCH_CANDIDATES": ("Motion Search Candidate Window",      False),
+    "MOTION_CLIP_SEARCH_RESULTS": ("Motion Search Max Results",              False),
     "LOG_LEVEL":            ("Log Level",                                    False),
     "HOST":                 ("Bind Host",                                    False),
     "PORT":                 ("Bind Port",                                    False),
@@ -436,11 +440,374 @@ async def delete_memory(memory_id: int, request: Request):
     return {"deleted": memory_id}
 
 
+# ── Motion clips ─────────────────────────────────────────────────────────────
+
+class MotionClipSearchBody(BaseModel):
+    query: str = ""
+    date: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    camera_entity_id: str | None = None
+    canonical_event_type: str | None = None
+
+
+def _serialize_motion_clip(clip: dict) -> dict:
+    data = dict(clip)
+    data["video_url"] = f"/admin/motion-clips/{clip['id']}/video" if clip.get("video_relpath") else ""
+    extra = data.get("extra") or {}
+    canonical_event = data.get("canonical_event") or extra.get("canonical_event") or {}
+    data["canonical_event"] = canonical_event
+    data["canonical_event_id"] = data.get("canonical_event_id") or canonical_event.get("event_id") or ""
+    data["canonical_event_type"] = data.get("canonical_event_type") or canonical_event.get("event_type") or ""
+    data["event_source"] = (
+        canonical_event.get("event_context", {}).get("source")
+        or extra.get("source")
+        or ""
+    )
+    return data
+
+
+def _surface_event_iso_ts(value) -> str:
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+    except Exception:
+        return datetime.now(timezone.utc).isoformat()
+
+
+def _serialize_event_history_item(item: dict) -> dict:
+    return {
+        "id": item.get("id", ""),
+        "kind": item.get("kind", "event"),
+        "ts": item.get("ts", ""),
+        "title": item.get("title", ""),
+        "summary": item.get("summary", ""),
+        "status": item.get("status", ""),
+        "event_id": item.get("event_id", ""),
+        "event_type": item.get("event_type", ""),
+        "event_source": item.get("event_source", ""),
+        "camera_entity_id": item.get("camera_entity_id", ""),
+        "clip_id": item.get("clip_id"),
+        "video_url": item.get("video_url", ""),
+        "open_loop_note": item.get("open_loop_note", ""),
+        "data": item.get("data") or {},
+    }
+
+
+def _motion_clip_is_playable(request: Request, clip: dict) -> bool:
+    svc = request.app.state.motion_clip_service
+    path = svc.clip_path_for(clip)
+    if not path or not path.exists():
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "/usr/bin/ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        return float((result.stdout or "0").strip() or "0") > 0.5
+    except Exception:
+        return False
+
+
+@router.get("/motion-clips")
+async def list_motion_clips(
+    request: Request,
+    limit: int = 60,
+    date: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    camera_entity_id: str | None = None,
+    canonical_event_type: str | None = None,
+):
+    _require_session(request, min_role="viewer")
+    db = request.app.state.metrics_db
+    clips = db.recent_motion_clips(
+        limit=max(1, min(limit, 200)),
+        date=date,
+        start_time=start_time,
+        end_time=end_time,
+        camera_entity_id=camera_entity_id,
+        canonical_event_type=canonical_event_type,
+    )
+    clips = [clip for clip in clips if _motion_clip_is_playable(request, clip)]
+    return {"clips": [_serialize_motion_clip(clip) for clip in clips]}
+
+
+@router.post("/motion-clips/search")
+async def search_motion_clips(body: MotionClipSearchBody, request: Request):
+    _require_session(request, min_role="viewer")
+    svc = request.app.state.motion_clip_service
+    result = await svc.search(
+        query=body.query or "",
+        date=body.date,
+        start_time=body.start_time,
+        end_time=body.end_time,
+        camera_entity_id=body.camera_entity_id,
+        canonical_event_type=body.canonical_event_type,
+    )
+    clips = [clip for clip in result.get("clips", []) if _motion_clip_is_playable(request, clip)]
+    return {
+        "mode": result.get("mode", "recent"),
+        "clips": [_serialize_motion_clip(clip) for clip in clips],
+    }
+
+
+@router.get("/motion-clips/{clip_id}/video", include_in_schema=False)
+async def serve_motion_clip_video(clip_id: int, request: Request):
+    _require_session(request, min_role="viewer")
+    db = request.app.state.metrics_db
+    svc = request.app.state.motion_clip_service
+    clip = db.get_motion_clip(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Motion clip not found")
+    if not _motion_clip_is_playable(request, clip):
+        raise HTTPException(status_code=404, detail="Motion clip is not playable")
+    path = svc.clip_path_for(clip)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Motion clip file unavailable")
+    return FileResponse(str(path), media_type="video/mp4", filename=path.name)
+
+
+@router.get("/event-history")
+async def get_event_history(
+    request: Request,
+    limit: int = 20,
+    query: str | None = None,
+    kind: str | None = None,
+    event_type: str | None = None,
+    event_source: str | None = None,
+    status: str | None = None,
+    window: str | None = None,
+    before_ts: str | None = None,
+):
+    _require_session(request, min_role="viewer")
+    db = request.app.state.metrics_db
+    surface_state = getattr(request.app.state, "surface_state_service", None)
+
+    rows: list[dict] = []
+
+    if db is not None:
+        persisted_events = db.recent_event_history(max(1, min(limit * 3, 120)))
+        for event in persisted_events:
+            rows.append(
+                _serialize_event_history_item(
+                    {
+                        "id": f"persisted:{event.get('event_id') or event.get('ts')}",
+                        "kind": "persisted_event",
+                        "ts": event.get("ts", ""),
+                        "title": event.get("title", ""),
+                        "summary": event.get("summary", ""),
+                        "status": event.get("status", ""),
+                        "event_id": event.get("event_id", ""),
+                        "event_type": event.get("event_type", ""),
+                        "event_source": event.get("event_source", ""),
+                        "camera_entity_id": event.get("camera_entity_id", ""),
+                        "clip_id": None,
+                        "video_url": "",
+                        "open_loop_note": str((event.get("data") or {}).get("open_loop_note", "")),
+                        "data": event.get("data") or {},
+                    }
+                )
+            )
+
+    if db is not None:
+        motion_clips = db.recent_motion_clips(limit=max(1, min(limit * 3, 120)))
+        motion_clips = [clip for clip in motion_clips if _motion_clip_is_playable(request, clip)]
+        for clip in motion_clips:
+            payload = _serialize_motion_clip(clip)
+            rows.append(
+                _serialize_event_history_item(
+                    {
+                        "id": f"motion:{payload.get('id')}",
+                        "kind": "motion_clip",
+                        "ts": payload.get("ts", ""),
+                        "title": payload.get("location") or payload.get("canonical_event_type") or "Motion event",
+                        "summary": payload.get("description", ""),
+                        "status": payload.get("status", ""),
+                        "event_id": payload.get("canonical_event_id", ""),
+                        "event_type": payload.get("canonical_event_type", ""),
+                        "event_source": payload.get("event_source", ""),
+                        "camera_entity_id": payload.get("camera_entity_id", ""),
+                        "clip_id": payload.get("id"),
+                        "video_url": payload.get("video_url", ""),
+                        "open_loop_note": str(payload.get("extra", {}).get("open_loop_note", "")),
+                        "data": {
+                            "location": payload.get("location", ""),
+                            "trigger_entity_id": payload.get("trigger_entity_id", ""),
+                            "duration_s": payload.get("duration_s", 0),
+                            "canonical_event": payload.get("canonical_event") or {},
+                            "extra": payload.get("extra") or {},
+                        },
+                    }
+                )
+            )
+
+    if surface_state is not None:
+        snapshot = await surface_state.get_snapshot()
+        for event in snapshot.get("recent_events", []):
+            rows.append(
+                _serialize_event_history_item(
+                    {
+                        "id": f"surface:{event.get('event_id', '')}",
+                        "kind": "surface_event",
+                        "ts": _surface_event_iso_ts(event.get("ts")),
+                        "title": event.get("title") or event.get("event") or "Event",
+                        "summary": event.get("message", ""),
+                        "status": event.get("status", ""),
+                        "event_id": event.get("event_id", ""),
+                        "event_type": event.get("event", ""),
+                        "event_source": "surface_state",
+                        "camera_entity_id": event.get("camera_entity_id", ""),
+                        "clip_id": None,
+                        "video_url": "",
+                        "open_loop_note": event.get("open_loop_note", ""),
+                        "data": dict(event),
+                    }
+                )
+            )
+
+    rows.sort(key=lambda item: item.get("ts", ""), reverse=True)
+    query_norm = (query or "").strip().lower()
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for row in rows:
+        dedupe_key = str(row.get("event_id") or row.get("id") or "")
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        if kind and str(row.get("kind") or "") != kind:
+            continue
+        if event_type and str(row.get("event_type") or "") != event_type:
+            continue
+        if event_source and str(row.get("event_source") or "") != event_source:
+            continue
+        if status and str(row.get("status") or "") != status:
+            continue
+        if query_norm:
+            haystack = " ".join(
+                [
+                    str(row.get("title") or ""),
+                    str(row.get("summary") or ""),
+                    str(row.get("event_type") or ""),
+                    str(row.get("event_source") or ""),
+                    str(row.get("open_loop_note") or ""),
+                    str((row.get("data") or {}).get("admin_note") or ""),
+                ]
+            ).lower()
+            if query_norm not in haystack:
+                continue
+        deduped.append(row)
+        if len(deduped) >= max(1, min(limit, 100)):
+            break
+
+    if before_ts:
+        deduped = [row for row in deduped if str(row.get("ts") or "") < before_ts]
+
+    if window:
+        now = datetime.now(timezone.utc)
+        hours = {
+            "24h": 24,
+            "3d": 72,
+            "7d": 168,
+            "30d": 720,
+        }.get(window)
+        if hours:
+            cutoff = (now - timedelta(hours=hours)).isoformat()
+            deduped = [row for row in deduped if str(row.get("ts") or "") >= cutoff]
+
+    deduped = deduped[: max(1, min(limit, 100))]
+    next_before = deduped[-1]["ts"] if deduped else None
+    return {"events": deduped, "next_before_ts": next_before}
+
+
 # ── Test announce ─────────────────────────────────────────────────────────────
 
 class AnnounceBody(BaseModel):
     message:  str
     priority: str = "normal"
+
+
+class EventHistoryActionBody(BaseModel):
+    event_id: str = ""
+    status: Literal["active", "acknowledged", "resolved"]
+    title: str = ""
+    summary: str = ""
+    event_type: str = ""
+    event_source: str = ""
+    camera_entity_id: str = ""
+    open_loop_note: str | None = None
+    admin_note: str | None = None
+
+
+def _default_open_loop_note(status: str) -> str:
+    return {
+        "active": "Needs attention",
+        "acknowledged": "Seen by admin",
+        "resolved": "Closed out",
+    }.get(status, "")
+
+
+@router.post("/event-history/action")
+async def update_event_history_action(body: EventHistoryActionBody, request: Request):
+    _require_session(request, min_role="viewer")
+    db = request.app.state.metrics_db
+    ws_mgr = getattr(request.app.state, "ws_manager", None)
+    surface_state = getattr(request.app.state, "surface_state_service", None)
+
+    event_id = (body.event_id or "").strip()
+    open_loop_note = body.open_loop_note if body.open_loop_note is not None else _default_open_loop_note(body.status)
+
+    persisted = False
+    if db is not None and event_id:
+        persisted = db.update_event_history_status(event_id, body.status, open_loop_note, body.admin_note)
+        if not persisted:
+            db.insert_event_history(
+                {
+                    "event_id": event_id,
+                    "event_type": body.event_type,
+                    "title": body.title,
+                    "summary": body.summary,
+                    "status": body.status,
+                    "event_source": body.event_source,
+                    "camera_entity_id": body.camera_entity_id,
+                    "data": {
+                        "open_loop_note": open_loop_note,
+                        "admin_note": body.admin_note or "",
+                        "admin_note_ts": datetime.now(timezone.utc).isoformat() if body.admin_note else "",
+                    },
+                }
+            )
+            persisted = True
+
+    surface_updated = False
+    if surface_state is not None and ws_mgr is not None and event_id:
+        if body.status == "acknowledged":
+            surface_updated = await surface_state.acknowledge_recent_event(ws_mgr, event_id)
+        elif body.status == "resolved":
+            surface_updated = await surface_state.resolve_recent_event(ws_mgr, event_id)
+        elif body.status == "active":
+            surface_updated = await surface_state.activate_recent_event(ws_mgr, event_id)
+
+    return {
+        "ok": bool(persisted or surface_updated),
+        "event_id": event_id,
+        "status": body.status,
+        "persisted": persisted,
+        "surface_updated": surface_updated,
+    }
 
 
 @router.post("/announce/test")

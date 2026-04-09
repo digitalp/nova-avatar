@@ -1,0 +1,434 @@
+import asyncio
+import json
+from contextlib import suppress
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from avatar_backend.services.realtime_voice_service import (
+    IDLE,
+    LISTENING,
+    SPEAKING,
+    THINKING,
+    RealtimeVoiceService,
+    VoiceTurnContext,
+)
+from avatar_backend.services.ws_manager import ConnectionManager
+
+
+class FakeWebSocket:
+    def __init__(self) -> None:
+        self.text_messages: list[str] = []
+        self.binary_messages: list[bytes] = []
+
+    async def send_text(self, text: str) -> None:
+        self.text_messages.append(text)
+
+    async def send_bytes(self, data: bytes) -> None:
+        self.binary_messages.append(data)
+
+
+def _messages_of_type(ws: FakeWebSocket, message_type: str) -> list[dict]:
+    return [
+        json.loads(message)
+        for message in ws.text_messages
+        if json.loads(message).get("type") == message_type
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_pong_if_needed_handles_ping():
+    service = RealtimeVoiceService()
+    ws = FakeWebSocket()
+
+    handled = await service.send_pong_if_needed(ws, json.dumps({"type": "ping"}))
+
+    assert handled is True
+    assert json.loads(ws.text_messages[0]) == {"type": "pong"}
+
+
+@pytest.mark.asyncio
+async def test_process_audio_happy_path_emits_expected_messages():
+    service = RealtimeVoiceService()
+    ws = FakeWebSocket()
+    ws_mgr = MagicMock(spec=ConnectionManager)
+    ws_mgr.broadcast_json = AsyncMock()
+
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(return_value="turn on the kitchen light")
+
+    tts = MagicMock()
+    tts.synthesise_with_timing = AsyncMock(return_value=(b"RIFF" + b"\x00" * 40, []))
+
+    speaker = None
+
+    llm = MagicMock()
+    session_manager = MagicMock()
+    session_manager.clear = AsyncMock()
+    ha_proxy = MagicMock()
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            conversation_service=MagicMock(),
+            llm_service=llm,
+            session_manager=session_manager,
+            ha_proxy=ha_proxy,
+            decision_log=None,
+            memory_service=None,
+        )
+    )
+    ws.app = app
+
+    ctx = VoiceTurnContext(
+        ws=ws,
+        ws_mgr=ws_mgr,
+        session_id="voice_test",
+        stt=stt,
+        tts=tts,
+        speaker=speaker,
+        app=app,
+    )
+
+    fake_result = SimpleNamespace(
+        text="OK, I've turned on the kitchen light.",
+        session_id="voice_test",
+        tool_calls=[],
+        processing_time_ms=123,
+    )
+
+    app.state.conversation_service.handle_voice_turn = AsyncMock(return_value=fake_result)
+    try:
+        await service.connect_session("voice_test:socket")
+        await service.start_audio_turn("voice_test:socket", ctx, b"fake-audio")
+        await asyncio.sleep(0.05)
+    finally:
+        with suppress(Exception):
+            await service.disconnect_session("voice_test:socket")
+
+    message_types = [json.loads(m)["type"] for m in ws.text_messages]
+    assert "transcript" in message_types
+    assert "response" in message_types
+    assert "audio_start" in message_types
+    assert "word_timings" in message_types
+    assert "turn_started" in message_types
+    assert "turn_finished" in message_types
+
+    states = [json.loads(m)["state"] for m in ws.text_messages if json.loads(m).get("type") == "state"]
+    assert states[0] == LISTENING
+    assert THINKING in states
+    assert SPEAKING in states
+    assert states[-1] == IDLE
+    for message_type in ("turn_started", "transcript", "response", "audio_start", "word_timings", "turn_finished"):
+        for payload in _messages_of_type(ws, message_type):
+            assert payload["turn_id"] == 1
+    assert _messages_of_type(ws, "turn_finished")[0]["reason"] == "completed"
+    assert ws.binary_messages
+
+
+@pytest.mark.asyncio
+async def test_start_audio_turn_cancels_prior_turn_before_reply():
+    service = RealtimeVoiceService()
+    ws = FakeWebSocket()
+    ws_mgr = MagicMock(spec=ConnectionManager)
+    ws_mgr.broadcast_json = AsyncMock()
+
+    first_gate = asyncio.Event()
+    second_gate = asyncio.Event()
+    transcripts = ["first turn", "second turn"]
+
+    async def transcribe(_audio: bytes) -> str:
+        text = transcripts.pop(0)
+        gate = first_gate if text == "first turn" else second_gate
+        await gate.wait()
+        return text
+
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(side_effect=transcribe)
+
+    tts = MagicMock()
+    tts.synthesise_with_timing = AsyncMock(return_value=(b"RIFF" + b"\x00" * 40, []))
+
+    session_manager = MagicMock()
+    session_manager.clear = AsyncMock()
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            conversation_service=MagicMock(),
+            llm_service=MagicMock(),
+            session_manager=session_manager,
+            ha_proxy=MagicMock(),
+            decision_log=None,
+            memory_service=None,
+        )
+    )
+    ws.app = app
+
+    ctx = VoiceTurnContext(
+        ws=ws,
+        ws_mgr=ws_mgr,
+        session_id="voice_test",
+        stt=stt,
+        tts=tts,
+        speaker=None,
+        app=app,
+    )
+
+    fake_result = SimpleNamespace(
+        text="Handled the latest turn.",
+        session_id="voice_test",
+        tool_calls=[],
+        processing_time_ms=55,
+    )
+
+    app.state.conversation_service.handle_voice_turn = AsyncMock(return_value=fake_result)
+    try:
+        await service.connect_session("voice_test:socket")
+        await service.start_audio_turn("voice_test:socket", ctx, b"first")
+        await asyncio.sleep(0)
+        await service.start_audio_turn("voice_test:socket", ctx, b"second")
+        second_gate.set()
+        await asyncio.sleep(0.05)
+        first_gate.set()
+        await asyncio.sleep(0.05)
+    finally:
+        with suppress(Exception):
+            await service.disconnect_session("voice_test:socket")
+
+    responses = _messages_of_type(ws, "response")
+    interruptions = _messages_of_type(ws, "turn_interrupted")
+    audio_starts = _messages_of_type(ws, "audio_start")
+    turn_started = _messages_of_type(ws, "turn_started")
+    turn_finished = _messages_of_type(ws, "turn_finished")
+
+    assert len(interruptions) == 1
+    assert interruptions[0]["interrupted_turn_id"] == 1
+    assert [payload["turn_id"] for payload in turn_started] == [1, 2]
+    assert len(turn_finished) == 2
+    assert turn_finished[0]["turn_id"] == 1
+    assert turn_finished[0]["reason"] == "interrupted"
+    assert turn_finished[1]["turn_id"] == 2
+    assert turn_finished[1]["reason"] == "completed"
+    assert responses[0]["turn_id"] == 2
+    assert audio_starts[0]["turn_id"] == 2
+    assert len(responses) == 1
+    assert responses[0]["text"] == "Handled the latest turn."
+
+
+@pytest.mark.asyncio
+async def test_turn_context_routes_next_voice_turn_to_event_followup():
+    service = RealtimeVoiceService()
+    ws = FakeWebSocket()
+    ws_mgr = MagicMock(spec=ConnectionManager)
+    ws_mgr.broadcast_json = AsyncMock()
+
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(return_value="What should I do?")
+
+    tts = MagicMock()
+    tts.synthesise_with_timing = AsyncMock(return_value=(b"RIFF" + b"\x00" * 40, []))
+
+    conversation_service = MagicMock()
+    conversation_service.handle_voice_turn = AsyncMock()
+    conversation_service.handle_event_followup = AsyncMock(return_value=SimpleNamespace(
+        text="This looks like a normal delivery.",
+        session_id="voice_test",
+        tool_calls=[],
+        processing_time_ms=64,
+    ))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            conversation_service=conversation_service,
+            llm_service=MagicMock(),
+            session_manager=MagicMock(),
+            ha_proxy=MagicMock(),
+            decision_log=None,
+            memory_service=None,
+            recent_event_contexts={
+                "evt-1": (
+                    0.0,
+                    {
+                        "event_type": "parcel_delivery",
+                        "event_summary": "Package left near the front door.",
+                        "event_context": {"camera_entity_id": "camera.front_door"},
+                    },
+                )
+            },
+        )
+    )
+    ws.app = app
+
+    ctx = VoiceTurnContext(
+        ws=ws,
+        ws_mgr=ws_mgr,
+        session_id="voice_test",
+        stt=stt,
+        tts=tts,
+        speaker=None,
+        app=app,
+    )
+
+    await service.connect_session("voice_test:socket")
+    try:
+        handled = await service.handle_text_frame(
+            ws,
+            "voice_test:socket",
+            json.dumps({"type": "turn_context", "event_id": "evt-1"}),
+        )
+        assert handled is True
+
+        await service.start_audio_turn("voice_test:socket", ctx, b"fake-audio")
+        await asyncio.sleep(0.05)
+    finally:
+        with suppress(Exception):
+            await service.disconnect_session("voice_test:socket")
+
+    conversation_service.handle_event_followup.assert_awaited_once()
+    conversation_service.handle_voice_turn.assert_not_called()
+    ack = _messages_of_type(ws, "turn_context_ack")[0]
+    assert ack["event_id"] == "evt-1"
+
+
+@pytest.mark.asyncio
+async def test_streaming_input_buffers_binary_frames_until_commit():
+    service = RealtimeVoiceService()
+    ws = FakeWebSocket()
+    ws_mgr = MagicMock(spec=ConnectionManager)
+    ws_mgr.broadcast_json = AsyncMock()
+
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(return_value="streamed turn")
+
+    tts = MagicMock()
+    tts.synthesise_with_timing = AsyncMock(return_value=(b"RIFF" + b"\x00" * 40, []))
+
+    conversation_service = MagicMock()
+    conversation_service.handle_voice_turn = AsyncMock(return_value=SimpleNamespace(
+        text="Handled streamed input.",
+        session_id="voice_test",
+        tool_calls=[],
+        processing_time_ms=33,
+    ))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            conversation_service=conversation_service,
+            llm_service=MagicMock(),
+            session_manager=MagicMock(),
+            ha_proxy=MagicMock(),
+            decision_log=None,
+            memory_service=None,
+            recent_event_contexts={},
+            stt_service=stt,
+            tts_service=tts,
+            ws_manager=ws_mgr,
+            speaker_service=None,
+        )
+    )
+    ws.app = app
+    ws._nova_session_id = "voice_test"
+
+    ctx = VoiceTurnContext(
+        ws=ws,
+        ws_mgr=ws_mgr,
+        session_id="voice_test",
+        stt=stt,
+        tts=tts,
+        speaker=None,
+        app=app,
+    )
+
+    await service.connect_session("voice_test:socket")
+    try:
+        handled = await service.handle_text_frame(
+            ws,
+            "voice_test:socket",
+            json.dumps({"type": "input_audio_start"}),
+        )
+        assert handled is True
+
+        await service.handle_binary_frame("voice_test:socket", ctx, b"chunk-1")
+        await service.handle_binary_frame("voice_test:socket", ctx, b"chunk-2")
+
+        handled = await service.handle_text_frame(
+            ws,
+            "voice_test:socket",
+            json.dumps({"type": "input_audio_commit"}),
+        )
+        assert handled is True
+        await asyncio.sleep(0.05)
+    finally:
+        with suppress(Exception):
+            await service.disconnect_session("voice_test:socket")
+
+    stt.transcribe.assert_awaited_once_with(b"chunk-1chunk-2")
+    assert _messages_of_type(ws, "input_audio_start_ack")
+    commit_ack = _messages_of_type(ws, "input_audio_commit_ack")[0]
+    assert commit_ack["byte_length"] == len(b"chunk-1chunk-2")
+    assert _messages_of_type(ws, "turn_started")[0]["turn_id"] == 1
+    assert _messages_of_type(ws, "response")[0]["text"] == "Handled streamed input."
+
+
+@pytest.mark.asyncio
+async def test_streaming_input_cancel_discards_buffered_audio():
+    service = RealtimeVoiceService()
+    ws = FakeWebSocket()
+    ws_mgr = MagicMock(spec=ConnectionManager)
+    ws_mgr.broadcast_json = AsyncMock()
+
+    stt = MagicMock()
+    stt.transcribe = AsyncMock(return_value="should not run")
+
+    tts = MagicMock()
+    tts.synthesise_with_timing = AsyncMock(return_value=(b"RIFF" + b"\x00" * 40, []))
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            conversation_service=MagicMock(),
+            llm_service=MagicMock(),
+            session_manager=MagicMock(),
+            ha_proxy=MagicMock(),
+            decision_log=None,
+            memory_service=None,
+            recent_event_contexts={},
+            stt_service=stt,
+            tts_service=tts,
+            ws_manager=ws_mgr,
+            speaker_service=None,
+        )
+    )
+    ws.app = app
+    ws._nova_session_id = "voice_test"
+
+    ctx = VoiceTurnContext(
+        ws=ws,
+        ws_mgr=ws_mgr,
+        session_id="voice_test",
+        stt=stt,
+        tts=tts,
+        speaker=None,
+        app=app,
+    )
+
+    await service.connect_session("voice_test:socket")
+    try:
+        await service.handle_text_frame(
+            ws,
+            "voice_test:socket",
+            json.dumps({"type": "input_audio_start"}),
+        )
+        await service.handle_binary_frame("voice_test:socket", ctx, b"chunk-1")
+
+        handled = await service.handle_text_frame(
+            ws,
+            "voice_test:socket",
+            json.dumps({"type": "input_audio_cancel"}),
+        )
+        assert handled is True
+        await asyncio.sleep(0.01)
+    finally:
+        with suppress(Exception):
+            await service.disconnect_session("voice_test:socket")
+
+    stt.transcribe.assert_not_called()
+    cancel_ack = _messages_of_type(ws, "input_audio_cancel_ack")[0]
+    assert cancel_ack["active"] is True

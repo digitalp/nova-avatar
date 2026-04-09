@@ -730,6 +730,811 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
 .dash-sys-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 16px; }
 @media (max-width: 720px) { .dash-sys-grid { grid-template-columns: 1fr 1fr; } }
 
+/* ── Motion search / event review ───────────────────────────────────────────── */
+.motion-hero {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    radial-gradient(circle at top right, rgba(16,185,129,.10), transparent 28%),
+    radial-gradient(circle at top left, rgba(59,130,246,.12), transparent 36%),
+    linear-gradient(180deg, rgba(12,18,27,.98), rgba(7,10,17,.98));
+  box-shadow: 0 18px 44px rgba(0,0,0,.34);
+  margin-bottom: 16px;
+}
+.motion-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+  color: #b9c4d7;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.motion-eyebrow::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 10px rgba(34,197,94,.65);
+}
+.motion-hero-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr);
+  gap: 18px;
+  align-items: start;
+}
+.motion-hero-copy {
+  display: grid;
+  gap: 10px;
+}
+.motion-hero-title { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+.motion-hero-sub { font-size: 13px; color: #9db0c8; max-width: 760px; }
+.motion-kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.motion-kpi {
+  padding: 14px 15px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+}
+.motion-kpi-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #7f8ca1;
+}
+.motion-kpi-value {
+  margin-top: 8px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #f6fbff;
+  letter-spacing: -.04em;
+}
+.motion-kpi-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #9db0c8;
+}
+.motion-summary {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  background: rgba(255,255,255,.03);
+  overflow: hidden;
+}
+.motion-summary summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.motion-summary summary::-webkit-details-marker { display: none; }
+.motion-summary-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #8ea1b8;
+}
+.motion-summary-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.motion-summary-caret {
+  color: #8ea1b8;
+  font-size: 12px;
+  transition: transform .15s ease;
+}
+.motion-summary[open] .motion-summary-caret {
+  transform: rotate(180deg);
+}
+.motion-summary-body {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 0 14px 14px;
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.motion-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.motion-summary-chip.ai {
+  background: rgba(34,211,238,.10);
+  color: #b6edf7;
+  border-color: rgba(34,211,238,.18);
+}
+.motion-summary-chip.green {
+  background: rgba(16,185,129,.10);
+  color: #bff6dd;
+  border-color: rgba(16,185,129,.18);
+}
+.motion-summary-chip strong {
+  color: var(--text);
+  font-size: 13px;
+}
+.motion-searchbar {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+.motion-searchbar > .field:nth-child(1) { grid-column: span 2; }
+.motion-searchbar > .field:nth-child(2) { grid-column: span 2; }
+.motion-searchbar > .field:nth-child(3),
+.motion-searchbar > .field:nth-child(4),
+.motion-searchbar > .field:nth-child(5),
+.motion-searchbar > .field:nth-child(6) { grid-column: span 1; }
+.motion-searchbar > .btn { min-width: 0; }
+.motion-searchbar input, .motion-searchbar select {
+  width: 100%;
+}
+.motion-results-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.motion-activity {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.motion-activity-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.motion-activity-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #8ea1b8;
+}
+.motion-activity-note {
+  font-size: 11px;
+  color: #7f8ca1;
+}
+.motion-activity-bars {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px;
+}
+.motion-insights {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.motion-insights-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.motion-insight-card {
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+.motion-insight-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #8ea1b8;
+}
+.motion-insight-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.motion-insight-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.035);
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #dbe7f5;
+}
+.motion-insight-chip strong {
+  color: #7dd3fc;
+  font-weight: 700;
+}
+.motion-history {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.motion-history-list {
+  display: grid;
+  gap: 8px;
+}
+.motion-history-item {
+  display: grid;
+  gap: 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: border-color .15s, transform .15s, background .15s;
+}
+.motion-history-item:hover {
+  border-color: rgba(125,211,252,.32);
+  background: linear-gradient(180deg, rgba(36,64,94,.24), rgba(255,255,255,.02));
+  transform: translateY(-1px);
+}
+.motion-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.motion-history-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #eef6ff;
+}
+.motion-history-time {
+  font-size: 11px;
+  color: #8ea1b8;
+}
+.motion-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.motion-history-desc {
+  font-size: 12px;
+  color: #b8c4d6;
+  line-height: 1.5;
+}
+.motion-history-note-inline {
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.45;
+  padding-left: 10px;
+  border-left: 2px solid rgba(129,140,248,.35);
+}
+.motion-history-note-inline strong {
+  color: #cfd9e8;
+  font-weight: 600;
+}
+.motion-activity-slot {
+  display: grid;
+  gap: 6px;
+}
+.motion-activity-bar {
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+  overflow: hidden;
+  display: flex;
+  align-items: end;
+}
+.motion-activity-fill {
+  width: 100%;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(34,211,238,.70), rgba(59,130,246,.95));
+  min-height: 4px;
+}
+.motion-activity-label {
+  font-size: 10px;
+  color: #7f8ca1;
+  text-align: center;
+}
+.motion-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+}
+.motion-sidebar {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(15,21,31,.98), rgba(7,10,17,.98));
+  box-shadow: 0 16px 36px rgba(0,0,0,.28);
+  align-self: start;
+  position: sticky;
+  top: 24px;
+}
+.motion-side-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #7f8ca1;
+  margin-bottom: 12px;
+}
+.motion-camera-list {
+  display: grid;
+  gap: 8px;
+}
+.motion-camera-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.03);
+  color: #d7e0ec;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .15s;
+}
+.motion-camera-item:hover {
+  border-color: rgba(255,255,255,.14);
+  background: rgba(255,255,255,.05);
+  transform: translateY(-1px);
+}
+.motion-camera-item.active {
+  border-color: rgba(59,130,246,.34);
+  background: rgba(59,130,246,.12);
+}
+.motion-camera-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #eef6ff;
+  word-break: break-word;
+}
+.motion-camera-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.07);
+  color: #b8c4d6;
+  font-size: 11px;
+  font-weight: 700;
+}
+.motion-side-note {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255,255,255,.06);
+  font-size: 12px;
+  color: #91a3ba;
+  line-height: 1.5;
+}
+.motion-results-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.motion-results-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #b5c0d0;
+}
+.motion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.motion-group {
+  display: grid;
+  gap: 12px;
+}
+.motion-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+.motion-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #93a4bb;
+}
+.motion-group-count {
+  font-size: 11px;
+  color: #7f8ca1;
+}
+.motion-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.motion-card {
+  display: grid;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(15,21,31,.98), rgba(7,10,17,.98));
+  box-shadow: 0 16px 36px rgba(0,0,0,.34);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.motion-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255,255,255,.16);
+  box-shadow: 0 22px 44px rgba(0,0,0,.42);
+}
+.motion-card-media {
+  position: relative;
+  background: #05070d;
+}
+.motion-card video,
+.motion-card-fallback {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #05070d;
+}
+.motion-card-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  font-size: 12px;
+}
+.motion-card-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(3,6,12,.72), transparent 72%);
+  pointer-events: none;
+}
+.motion-card-badge,
+.motion-card-age {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(6,10,18,.78);
+  color: #f3f8ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.motion-card-badge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+.motion-card-badge.ai::before { background: #22d3ee; }
+.motion-card-badge.review::before { background: #818cf8; }
+.motion-card-body {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+.motion-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.motion-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.motion-card-time {
+  font-size: 12px;
+  color: var(--text3);
+}
+.motion-card-id {
+  font-size: 11px;
+  color: var(--text3);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.motion-card-camera {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #7f8ca1;
+}
+.motion-chip-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.motion-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border2);
+  background: rgba(129,140,248,.10);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 600;
+}
+.motion-chip.search {
+  background: rgba(34,211,238,.12);
+  color: var(--cyan);
+  border-color: rgba(34,211,238,.22);
+}
+.motion-chip.good {
+  background: rgba(16,185,129,.10);
+  color: #c7f9de;
+  border-color: rgba(16,185,129,.20);
+}
+.motion-card-desc {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.45;
+  min-height: 62px;
+}
+.motion-mark {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(34,211,238,.18);
+  color: #eefbff;
+}
+.motion-card-note {
+  font-size: 11px;
+  color: var(--text3);
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.motion-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.motion-empty {
+  padding: 26px;
+  border: 1px dashed var(--border2);
+  border-radius: var(--radius);
+  color: var(--text3);
+  text-align: center;
+}
+.motion-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  background: rgba(4,6,12,.82);
+  backdrop-filter: blur(4px);
+}
+.motion-modal.show { display: flex; }
+.motion-modal-card {
+  width: min(1220px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid var(--border2);
+  background: linear-gradient(180deg, rgba(17,24,39,.98), rgba(8,12,22,.98));
+  box-shadow: var(--shadow-lg);
+}
+.motion-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.motion-modal-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+.motion-modal-close {
+  background: transparent;
+  border: 0;
+  color: var(--text2);
+  font-size: 28px;
+  cursor: pointer;
+}
+.motion-modal-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, .85fr);
+  gap: 20px;
+  padding: 20px;
+}
+.motion-modal video {
+  width: 100%;
+  border-radius: 14px;
+  background: #05070d;
+}
+.motion-modal-fallback {
+  display: none;
+  min-height: 260px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at top right, rgba(34,211,238,.14), transparent 36%),
+    linear-gradient(160deg, rgba(129,140,248,.12), rgba(8,12,22,.92));
+  padding: 24px;
+  align-items: flex-end;
+}
+.motion-modal-fallback.show { display: flex; }
+.motion-modal-fallback-copy { max-width: 520px; }
+.motion-modal-fallback-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .9px;
+  color: var(--text3);
+  margin-bottom: 8px;
+}
+.motion-modal-fallback-title {
+  font-size: 28px;
+  line-height: 1.05;
+  letter-spacing: -.5px;
+  margin-bottom: 10px;
+}
+.motion-modal-fallback-sub {
+  color: var(--text2);
+  max-width: 52ch;
+}
+.motion-modal-stage {
+  display: grid;
+  gap: 14px;
+}
+.motion-modal-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.motion-modal-side {
+  display: grid;
+  gap: 12px;
+}
+.motion-modal-nav {
+  display: flex;
+  gap: 8px;
+}
+.motion-meta-block {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
+}
+.motion-meta-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.motion-meta-value {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.motion-meta-grid {
+  display: grid;
+  gap: 10px;
+}
+.motion-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.motion-meta-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.motion-meta-key {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #7f8ca1;
+}
+.motion-meta-row .motion-meta-value {
+  text-align: right;
+}
+@media (max-width: 1180px) {
+  .motion-searchbar {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .motion-searchbar > .field:nth-child(1),
+  .motion-searchbar > .field:nth-child(2) { grid-column: span 2; }
+  .motion-searchbar > .field:nth-child(3),
+  .motion-searchbar > .field:nth-child(4),
+  .motion-searchbar > .field:nth-child(5),
+  .motion-searchbar > .field:nth-child(6),
+  .motion-searchbar > .btn { grid-column: span 1; }
+  .motion-layout {
+    grid-template-columns: 1fr;
+  }
+  .motion-sidebar {
+    position: static;
+  }
+}
+@media (max-width: 960px) {
+  .motion-hero-top {
+    grid-template-columns: 1fr;
+  }
+  .motion-searchbar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .motion-searchbar > .field,
+  .motion-searchbar > .btn { grid-column: span 1; }
+  .motion-results-toolbar,
+  .motion-activity-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .motion-insights-grid {
+    grid-template-columns: 1fr;
+  }
+  .motion-modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .motion-searchbar {
+    grid-template-columns: 1fr;
+  }
+  .motion-activity-bars {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .motion-group-grid,
+  .motion-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 </style>
 </head>
 <body>
@@ -782,6 +1587,10 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
     <div class="nav-item" data-section="decisions" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
       AI Decisions
+    </div>
+    <div class="nav-item" data-section="motion" onclick="navigate(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 11 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M9 14h.01"/><path d="M15 14h.01"/></svg>
+      Find Anything
     </div>
     <div class="nav-item" data-section="costs" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -1154,6 +1963,248 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
       </div>
     </div>
 
+    <!-- ══════════════ FIND ANYTHING ══════════════ -->
+    <div id="section-motion" class="section">
+      <div class="page-header">
+        <div class="page-title">Find Anything</div>
+        <div class="page-sub">Nova-native motion archive with AI descriptions, playback, and natural-language search</div>
+      </div>
+
+      <div class="motion-hero">
+        <div class="motion-hero-top">
+          <div class="motion-hero-copy">
+            <div class="motion-eyebrow">AI Evidence Review</div>
+            <div class="motion-hero-title">Search motion clips like an incident console</div>
+            <div class="motion-hero-sub">
+            Nova captures short motion clips, writes an AI description for each event, and lets you investigate the archive with natural language.
+            </div>
+          </div>
+          <div class="motion-kpis">
+            <div class="motion-kpi">
+              <div class="motion-kpi-label">Indexed Events</div>
+              <div id="motion-count-hero" class="motion-kpi-value">0</div>
+              <div class="motion-kpi-sub">playable clips in archive</div>
+            </div>
+            <div class="motion-kpi">
+              <div class="motion-kpi-label">Review Mode</div>
+              <div id="motion-mode-hero" class="motion-kpi-value" style="font-size:18px;">Recent</div>
+              <div class="motion-kpi-sub">AI-ranked when a search is active</div>
+            </div>
+          </div>
+        </div>
+        <details class="motion-summary">
+          <summary>
+            <div class="motion-summary-label">Archive Details</div>
+            <div class="motion-summary-preview">
+              <div class="motion-summary-chip"><strong id="motion-count-chip">0</strong> clips</div>
+              <div class="motion-summary-chip"><strong id="motion-mode-chip">Recent</strong> mode</div>
+              <div class="motion-summary-caret">▼</div>
+            </div>
+          </summary>
+          <div class="motion-summary-body">
+            <div class="motion-summary-chip"><strong id="motion-count-chip-body">0</strong> indexed clips</div>
+            <div class="motion-summary-chip"><strong id="motion-mode-chip-body">Recent</strong> review mode</div>
+            <div class="motion-summary-chip ai"><strong>AI</strong> natural-language retrieval</div>
+            <div class="motion-summary-chip green"><strong>Local</strong> archived playback</div>
+          </div>
+        </details>
+        <div class="motion-searchbar">
+          <div class="field" style="margin:0;">
+            <label for="motion-preset">Preset</label>
+            <select id="motion-preset" onchange="setMotionPreset(this.value)">
+              <option value="">Custom search</option>
+              <option value="person at door">Person at door</option>
+              <option value="vehicle in driveway">Vehicle in driveway</option>
+              <option value="package delivery">Package delivery</option>
+              <option value="motion in garden">Motion in garden</option>
+              <option value="person near outdoor 1">Person near Outdoor 1</option>
+              <option value="person near outdoor 2">Person near Outdoor 2</option>
+              <option value="doorbell visitor">Doorbell visitor</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="motion-query">Ask Nova</label>
+            <input id="motion-query" type="text" placeholder="e.g. red car on driveway, package delivery, person at gate">
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="motion-date">Date</label>
+            <input id="motion-date" type="date">
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="motion-start">Start</label>
+            <input id="motion-start" type="time">
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="motion-end">End</label>
+            <input id="motion-end" type="time">
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="motion-camera">Camera</label>
+            <select id="motion-camera" onchange="setMotionCamera(this.value)">
+              <option value="">All Cameras</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="motion-event-type">Event Type</label>
+            <select id="motion-event-type" onchange="setMotionEventType(this.value)">
+              <option value="">All Event Types</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;">
+            <label for="motion-group-mode">Group By</label>
+            <select id="motion-group-mode" onchange="setMotionGroupMode(this.value)">
+              <option value="day">Day</option>
+              <option value="event_type">Event Type</option>
+              <option value="source">Source</option>
+              <option value="status">Status</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="searchMotionClips()">Search</button>
+          <button class="btn btn-outline" onclick="resetMotionFilters()">Reset</button>
+        </div>
+      </div>
+
+      <div class="motion-layout">
+        <div class="motion-sidebar">
+          <div class="motion-side-title">Cameras</div>
+          <div id="motion-camera-list" class="motion-camera-list">
+            <div class="motion-empty" style="padding:18px;">Loading cameras…</div>
+          </div>
+          <div class="motion-side-note">
+            Narrowing by camera updates both the visible archive and AI search scope. Use this first when you already know which entrance or zone matters.
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0;">
+          <div class="motion-results-toolbar">
+            <div>
+              <div class="card-title-lg">Motion Archive</div>
+              <div class="card-sub" id="motion-results-sub">Recent Nova-indexed motion clips</div>
+            </div>
+            <div class="motion-results-meta">
+              <div class="motion-results-badge" id="motion-results-count">0 results</div>
+              <div class="live-indicator"><span class="live-dot"></span>Nova indexed</div>
+            </div>
+          </div>
+          <div class="motion-activity">
+            <div class="motion-activity-head">
+              <div class="motion-activity-title">Activity Timeline</div>
+              <div class="motion-activity-note" id="motion-activity-note">Recent archive density</div>
+            </div>
+            <div id="motion-activity-bars" class="motion-activity-bars"></div>
+          </div>
+          <div class="motion-insights">
+            <div class="motion-activity-head">
+              <div class="motion-activity-title">Event Summary</div>
+              <div class="motion-activity-note" id="motion-insights-note">Visible archive mix</div>
+            </div>
+            <div class="motion-insights-grid">
+              <div class="motion-insight-card">
+                <div class="motion-insight-label">Event Types</div>
+                <div class="motion-insight-items" id="motion-insight-types"></div>
+              </div>
+              <div class="motion-insight-card">
+                <div class="motion-insight-label">Sources</div>
+                <div class="motion-insight-items" id="motion-insight-sources"></div>
+              </div>
+              <div class="motion-insight-card">
+                <div class="motion-insight-label">Statuses</div>
+                <div class="motion-insight-items" id="motion-insight-statuses"></div>
+              </div>
+            </div>
+          </div>
+          <div class="motion-history">
+            <div class="motion-activity-head">
+              <div class="motion-activity-title">Event History</div>
+              <div class="motion-activity-note" id="motion-history-note">Most recent visible events</div>
+            </div>
+            <div class="motion-insights-grid" style="margin-bottom:12px;">
+              <div class="motion-insight-card">
+                <div class="motion-insight-label">Status Mix</div>
+                <div class="motion-insight-items" id="motion-history-status-mix"></div>
+              </div>
+              <div class="motion-insight-card">
+                <div class="motion-insight-label">Event Types</div>
+                <div class="motion-insight-items" id="motion-history-type-mix"></div>
+              </div>
+              <div class="motion-insight-card">
+                <div class="motion-insight-label">Sources</div>
+                <div class="motion-insight-items" id="motion-history-source-mix"></div>
+              </div>
+            </div>
+            <div class="motion-searchbar" style="margin-top:0;">
+              <div class="field" style="margin:0;">
+                <label for="event-history-preset">Preset</label>
+                <select id="event-history-preset" onchange="applyEventHistoryPreset(this.value)">
+                  <option value="">Custom View</option>
+                  <option value="needs_attention">Needs Attention</option>
+                  <option value="deliveries">Deliveries</option>
+                  <option value="door_events">Door Events</option>
+                  <option value="motion_review">Motion Review</option>
+                </select>
+              </div>
+              <div class="field" style="margin:0;">
+                <label for="event-history-query">Search</label>
+                <input id="event-history-query" type="text" placeholder="Search events, notes, or sources" onkeydown="handleEventHistorySearchKey(event)">
+              </div>
+              <div class="field" style="margin:0;">
+                <label for="event-history-window">Window</label>
+                <select id="event-history-window" onchange="setEventHistoryWindow(this.value)">
+                  <option value="24h">Last 24h</option>
+                  <option value="3d">Last 3 days</option>
+                  <option value="7d">Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+              </div>
+              <div class="field" style="margin:0;">
+                <label for="event-history-kind">Kind</label>
+                <select id="event-history-kind" onchange="setEventHistoryKind(this.value)">
+                  <option value="">All Kinds</option>
+                </select>
+              </div>
+              <div class="field" style="margin:0;">
+                <label for="event-history-type">Event Type</label>
+                <select id="event-history-type" onchange="setEventHistoryEventType(this.value)">
+                  <option value="">All Event Types</option>
+                </select>
+              </div>
+              <div class="field" style="margin:0;">
+                <label for="event-history-source">Source</label>
+                <select id="event-history-source" onchange="setEventHistorySource(this.value)">
+                  <option value="">All Sources</option>
+                </select>
+              </div>
+              <div class="field" style="margin:0;">
+                <label for="event-history-status">Status</label>
+                <select id="event-history-status" onchange="setEventHistoryStatus(this.value)">
+                  <option value="">All Statuses</option>
+                </select>
+              </div>
+              <div class="field" style="margin:0;">
+                <label for="event-history-group">Group By</label>
+                <select id="event-history-group" onchange="setEventHistoryGroup(this.value)">
+                  <option value="time">Time</option>
+                  <option value="status">Status</option>
+                  <option value="event_type">Event Type</option>
+                  <option value="source">Source</option>
+                </select>
+              </div>
+              <button class="btn btn-outline" onclick="resetEventHistoryFilters()">Reset History</button>
+            </div>
+            <div id="motion-history-list" class="motion-history-list">
+              <div class="motion-empty">Loading event history…</div>
+            </div>
+            <div class="motion-results-meta" style="justify-content:flex-end;">
+              <button class="btn btn-outline btn-sm" onclick="loadOlderEventHistory()">Older</button>
+              <button class="btn btn-outline btn-sm" onclick="resetEventHistoryPaging()">Newest</button>
+            </div>
+          </div>
+          <div id="motion-grid" class="motion-grid">
+            <div class="motion-empty">Loading motion archive…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ══════════════ LLM COST ══════════════ -->
     <div id="section-costs" class="section">
       <div class="page-header">
@@ -1388,6 +2439,53 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
   </div><!-- /content -->
 </div><!-- /main -->
 
+<div id="motion-modal" class="motion-modal" onclick="closeMotionModal(event)">
+  <div class="motion-modal-card">
+    <div class="motion-modal-head">
+      <div>
+        <div id="motion-modal-title" class="motion-modal-title">Motion Clip</div>
+        <div id="motion-modal-time" class="motion-card-time"></div>
+      </div>
+      <button class="motion-modal-close" onclick="closeMotionModal(event)">&times;</button>
+    </div>
+    <div class="motion-modal-body">
+      <div class="motion-modal-stage">
+        <div class="motion-modal-strip" id="motion-modal-strip"></div>
+        <video id="motion-modal-video" controls preload="metadata"></video>
+        <div id="motion-modal-fallback" class="motion-modal-fallback">
+          <div class="motion-modal-fallback-copy">
+            <div class="motion-modal-fallback-label">Event Review</div>
+            <div id="motion-modal-fallback-title" class="motion-modal-fallback-title">Event</div>
+            <div id="motion-modal-fallback-sub" class="motion-modal-fallback-sub">No linked clip is available for this event.</div>
+          </div>
+        </div>
+      </div>
+      <div class="motion-modal-side">
+        <div class="motion-modal-nav">
+          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(-1)">Previous</button>
+          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(1)">Next</button>
+        </div>
+        <div class="motion-meta-block">
+          <div class="motion-meta-label">AI Description</div>
+          <div id="motion-modal-desc" class="motion-meta-value">—</div>
+        </div>
+        <div class="motion-meta-block">
+          <div class="motion-meta-label">Event Details</div>
+          <div id="motion-modal-meta" class="motion-meta-grid">—</div>
+        </div>
+        <div class="motion-meta-block">
+          <div class="motion-meta-label">Drill Down</div>
+          <div id="motion-modal-actions" class="motion-modal-nav"></div>
+        </div>
+        <div class="motion-meta-block">
+          <div class="motion-meta-label">Incident Note</div>
+          <textarea id="motion-modal-note" rows="3" placeholder="Add context for this status change..."></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -1396,6 +2494,32 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
 
 let _currentRole   = 'viewer';
 let _changePwTarget = null;
+let _motionClips = [];
+let _motionAllClips = [];
+let _motionSearchMode = 'recent';
+let _motionQuickQuery = '';
+let _motionActiveCamera = '';
+let _motionActiveEventType = '';
+let _motionGroupMode = 'day';
+let _motionModalIndex = -1;
+let _motionModalHistoryIndex = -1;
+let _eventHistoryItems = [];
+let _eventHistoryKind = '';
+let _eventHistoryEventType = '';
+let _eventHistorySource = '';
+let _eventHistoryStatus = '';
+let _eventHistoryWindow = '24h';
+let _eventHistoryBeforeTs = '';
+let _eventHistoryGroupMode = 'time';
+let _eventHistoryPreset = '';
+let _eventHistoryQuery = '';
+const _MOTION_CAMERA_LABELS = {
+  'camera.rlc_410w_fluent': 'Outdoor 1',
+  'camera.reolink_profile000_mainstream': 'Outdoor 1',
+  'camera.rlc_1224a_fluent': 'Outdoor 2',
+  'camera.reolink_video_doorbell_poe_fluent': 'Doorbell',
+  'camera.reolink_video_doorbell_poe_mainstream': 'Doorbell',
+};
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -1439,7 +2563,8 @@ const TITLES = {
   dashboard:'Dashboard', config:'Configuration', prompt:'System Prompt',
   acl:'ACL Rules', sessions:'Sessions', memory:'Memory',
   avatar:'Avatar', tools:'Tools', users:'Users',
-  decisions:'AI Decisions', costs:'LLM Cost', metrics:'System Metrics', pylog:'Server Logs',
+  decisions:'AI Decisions', motion:'Find Anything',
+  costs:'LLM Cost', metrics:'System Metrics', pylog:'Server Logs',
 };
 
 const SKIN_LABELS = ['Porcelain','Light','Medium','Dark','Deep'];
@@ -1600,6 +2725,7 @@ function navigate(el) {
   if (sec === 'users')     loadUsers();
   if (sec === 'metrics')   loadMetrics();
   if (sec === 'pylog')     initPylog();
+  if (sec === 'motion')    loadMotionClips();
 }
 
 function refreshSection() {
@@ -1628,6 +2754,1020 @@ async function api(method, path, body) {
   if (!r.ok) { const t = await r.text(); throw new Error(t || r.statusText); }
   return r.json();
 }
+
+// ── Motion archive / Find Anything ───────────────────────────────────────────
+
+function _motionFilters() {
+  const cameraField = document.getElementById('motion-camera');
+  const cameraValue = cameraField?.value.trim() || _motionActiveCamera || '';
+  const eventTypeField = document.getElementById('motion-event-type');
+  const eventTypeValue = eventTypeField?.value.trim() || _motionActiveEventType || '';
+  return {
+    query: document.getElementById('motion-query')?.value.trim() || '',
+    date: document.getElementById('motion-date')?.value || undefined,
+    start_time: document.getElementById('motion-start')?.value || undefined,
+    end_time: document.getElementById('motion-end')?.value || undefined,
+    camera_entity_id: cameraValue || undefined,
+    canonical_event_type: eventTypeValue || undefined,
+  };
+}
+
+function _fmtMotionTs(ts) {
+  if (!ts) return '—';
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return ts;
+  return date.toLocaleString();
+}
+
+function _motionModeLabel(mode) {
+  return mode === 'ai' ? 'AI-ranked results'
+    : mode === 'keyword' ? 'Keyword fallback results'
+    : 'Recent Nova-indexed motion clips';
+}
+
+function _motionHumanMode(mode) {
+  return mode === 'ai' ? 'AI Ranked'
+    : mode === 'keyword' ? 'Keyword'
+    : 'Recent';
+}
+
+function _motionRelative(ts) {
+  if (!ts) return 'Unknown';
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return ts;
+  const delta = Math.max(0, Date.now() - date.getTime());
+  const mins = Math.floor(delta / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function _motionGroupLabel(ts) {
+  if (!ts) return 'Unknown';
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startClip = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startToday - startClip) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+function _motionCameraLabel(cameraId) {
+  if (!cameraId) return 'Unknown Camera';
+  return _MOTION_CAMERA_LABELS[cameraId] || cameraId.replace(/^camera\./, '').replace(/_/g, ' ');
+}
+
+function _motionEventTypeLabel(eventType) {
+  if (!eventType) return 'All Event Types';
+  return String(eventType).replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function _motionSourceLabel(source) {
+  if (!source) return 'Unknown Source';
+  return String(source).replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function _motionStatusLabel(status) {
+  if (!status) return 'Unknown Status';
+  return String(status).replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function _eventHistoryKindLabel(kind) {
+  if (!kind) return 'All Kinds';
+  return String(kind).replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function _motionGroupHeading(clip) {
+  if (_motionGroupMode === 'event_type') {
+    return _motionEventTypeLabel(clip.canonical_event_type || 'uncategorized');
+  }
+  if (_motionGroupMode === 'source') {
+    return _motionSourceLabel(clip.event_source || 'unknown_source');
+  }
+  if (_motionGroupMode === 'status') {
+    return _motionStatusLabel(clip.status || 'unknown_status');
+  }
+  return _motionGroupLabel(clip.ts);
+}
+
+function _motionGroupCountLabel(clips) {
+  if (_motionGroupMode === 'event_type' || _motionGroupMode === 'source' || _motionGroupMode === 'status') {
+    const latest = clips[0]?.ts ? _motionGroupLabel(clips[0].ts) : 'Unknown';
+    return `${clips.length} event${clips.length === 1 ? '' : 's'} · latest ${latest}`;
+  }
+  return `${clips.length} event${clips.length === 1 ? '' : 's'}`;
+}
+
+function _motionHighlight(text) {
+  const raw = String(text || '');
+  const escaped = _esc(raw);
+  const query = (_motionQuickQuery || '').trim();
+  if (!query) return escaped;
+  const terms = Array.from(new Set(query.split(/\s+/).map(t => t.trim()).filter(t => t.length >= 3)));
+  if (!terms.length) return escaped;
+  let html = escaped;
+  terms.forEach(term => {
+    const safe = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    html = html.replace(new RegExp(`(${safe})`, 'gi'), '<span class="motion-mark">$1</span>');
+  });
+  return html;
+}
+
+function setMotionPreset(query) {
+  const input = document.getElementById('motion-query');
+  if (input) input.value = query || '';
+  _motionQuickQuery = query || '';
+  searchMotionClips();
+}
+
+async function loadEventHistory() {
+  try {
+    const params = new URLSearchParams({ limit: '20' });
+    if (_eventHistoryQuery) params.set('query', _eventHistoryQuery);
+    if (_eventHistoryKind) params.set('kind', _eventHistoryKind);
+    if (_eventHistoryEventType) params.set('event_type', _eventHistoryEventType);
+    if (_eventHistorySource) params.set('event_source', _eventHistorySource);
+    if (_eventHistoryStatus) params.set('status', _eventHistoryStatus);
+    if (_eventHistoryWindow) params.set('window', _eventHistoryWindow);
+    if (_eventHistoryBeforeTs) params.set('before_ts', _eventHistoryBeforeTs);
+    const d = await api('GET', `/admin/event-history?${params.toString()}`);
+    _eventHistoryItems = d.events || [];
+    _eventHistoryBeforeTs = d.next_before_ts || _eventHistoryBeforeTs;
+    renderEventHistoryFilters();
+    renderMotionHistory();
+  } catch (e) {
+    const root = document.getElementById('motion-history-list');
+    if (root) root.innerHTML = `<div class="motion-empty">${_esc(e.message || 'Failed to load event history.')}</div>`;
+  }
+}
+
+function setEventHistoryWindow(value) {
+  _eventHistoryWindow = value || '24h';
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+function handleEventHistorySearchKey(evt) {
+  if (evt.key !== 'Enter') return;
+  evt.preventDefault();
+  applyEventHistorySearch();
+}
+
+function applyEventHistorySearch() {
+  const field = document.getElementById('event-history-query');
+  _eventHistoryQuery = field?.value.trim() || '';
+  _eventHistoryPreset = '';
+  const preset = document.getElementById('event-history-preset');
+  if (preset) preset.value = '';
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+function applyEventHistoryPreset(value) {
+  _eventHistoryPreset = value || '';
+  const query = document.getElementById('event-history-query');
+  const windowField = document.getElementById('event-history-window');
+  const kind = document.getElementById('event-history-kind');
+  const type = document.getElementById('event-history-type');
+  const source = document.getElementById('event-history-source');
+  const status = document.getElementById('event-history-status');
+  const group = document.getElementById('event-history-group');
+
+  _eventHistoryQuery = '';
+  _eventHistoryWindow = '24h';
+  _eventHistoryKind = '';
+  _eventHistoryEventType = '';
+  _eventHistorySource = '';
+  _eventHistoryStatus = '';
+  _eventHistoryGroupMode = 'time';
+
+  if (_eventHistoryPreset === 'needs_attention') {
+    _eventHistoryStatus = 'active';
+    _eventHistoryGroupMode = 'status';
+  } else if (_eventHistoryPreset === 'deliveries') {
+    _eventHistoryQuery = 'delivery package parcel';
+    _eventHistoryGroupMode = 'event_type';
+  } else if (_eventHistoryPreset === 'door_events') {
+    _eventHistoryQuery = 'doorbell visitor door';
+    _eventHistoryGroupMode = 'source';
+  } else if (_eventHistoryPreset === 'motion_review') {
+    _eventHistoryKind = 'motion_clip';
+    _eventHistoryGroupMode = 'time';
+  }
+
+  if (query) query.value = _eventHistoryQuery;
+  if (windowField) windowField.value = _eventHistoryWindow;
+  if (kind) kind.value = _eventHistoryKind;
+  if (type) type.value = _eventHistoryEventType;
+  if (source) source.value = _eventHistorySource;
+  if (status) status.value = _eventHistoryStatus;
+  if (group) group.value = _eventHistoryGroupMode;
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+function renderEventHistoryFilters() {
+  const kinds = new Map();
+  const types = new Map();
+  const sources = new Map();
+  const statuses = new Map();
+  (_eventHistoryItems || []).forEach(item => {
+    const kind = String(item.kind || '').trim();
+    const type = String(item.event_type || '').trim();
+    const source = String(item.event_source || '').trim();
+    const status = String(item.status || '').trim();
+    if (kind) kinds.set(kind, (kinds.get(kind) || 0) + 1);
+    if (type) types.set(type, (types.get(type) || 0) + 1);
+    if (source) sources.set(source, (sources.get(source) || 0) + 1);
+    if (status) statuses.set(status, (statuses.get(status) || 0) + 1);
+  });
+  const fill = (id, current, entries, labelFn, emptyLabel) => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    select.innerHTML = `<option value="">${emptyLabel}</option>`;
+    Array.from(entries.entries()).sort((a, b) => b[1] - a[1]).forEach(([value, count]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = `${labelFn(value)} (${count})`;
+      if (value === current) option.selected = true;
+      select.appendChild(option);
+    });
+  };
+  fill('event-history-kind', _eventHistoryKind, kinds, _eventHistoryKindLabel, 'All Kinds');
+  fill('event-history-type', _eventHistoryEventType, types, _motionEventTypeLabel, 'All Event Types');
+  fill('event-history-source', _eventHistorySource, sources, _motionSourceLabel, 'All Sources');
+  fill('event-history-status', _eventHistoryStatus, statuses, _motionStatusLabel, 'All Statuses');
+}
+
+function setEventHistoryKind(value) {
+  _eventHistoryKind = value || '';
+  _eventHistoryPreset = '';
+  const preset = document.getElementById('event-history-preset');
+  if (preset) preset.value = '';
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+function setEventHistoryEventType(value) {
+  _eventHistoryEventType = value || '';
+  _eventHistoryPreset = '';
+  const preset = document.getElementById('event-history-preset');
+  if (preset) preset.value = '';
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+function setEventHistorySource(value) {
+  _eventHistorySource = value || '';
+  _eventHistoryPreset = '';
+  const preset = document.getElementById('event-history-preset');
+  if (preset) preset.value = '';
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+function setEventHistoryStatus(value) {
+  _eventHistoryStatus = value || '';
+  _eventHistoryPreset = '';
+  const preset = document.getElementById('event-history-preset');
+  if (preset) preset.value = '';
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+function setEventHistoryGroup(value) {
+  _eventHistoryGroupMode = ['status', 'event_type', 'source'].includes(value) ? value : 'time';
+  _eventHistoryPreset = '';
+  const preset = document.getElementById('event-history-preset');
+  if (preset) preset.value = '';
+  const group = document.getElementById('event-history-group');
+  if (group) group.value = _eventHistoryGroupMode;
+  renderMotionHistory();
+}
+
+function resetEventHistoryFilters() {
+  _eventHistoryPreset = '';
+  _eventHistoryQuery = '';
+  _eventHistoryWindow = '24h';
+  _eventHistoryKind = '';
+  _eventHistoryEventType = '';
+  _eventHistorySource = '';
+  _eventHistoryStatus = '';
+  _eventHistoryBeforeTs = '';
+  const win = document.getElementById('event-history-window');
+  const query = document.getElementById('event-history-query');
+  const preset = document.getElementById('event-history-preset');
+  const kind = document.getElementById('event-history-kind');
+  const type = document.getElementById('event-history-type');
+  const source = document.getElementById('event-history-source');
+  const status = document.getElementById('event-history-status');
+  const group = document.getElementById('event-history-group');
+  if (preset) preset.value = '';
+  if (query) query.value = '';
+  if (win) win.value = '24h';
+  if (kind) kind.value = '';
+  if (type) type.value = '';
+  if (source) source.value = '';
+  if (status) status.value = '';
+  _eventHistoryGroupMode = 'time';
+  if (group) group.value = 'time';
+  loadEventHistory();
+}
+
+function loadOlderEventHistory() {
+  if (!_eventHistoryBeforeTs) return;
+  loadEventHistory();
+}
+
+function resetEventHistoryPaging() {
+  _eventHistoryBeforeTs = '';
+  loadEventHistory();
+}
+
+async function loadMotionClips() {
+  try {
+    const d = await api('GET', '/admin/motion-clips?limit=60');
+    _motionAllClips = d.clips || [];
+    _motionClips = _motionFilterByCamera(_motionAllClips);
+    _motionSearchMode = 'recent';
+    renderMotionCameraRail();
+    renderMotionEventTypeSelect();
+    renderMotionClips();
+    loadEventHistory();
+  } catch (e) {
+    document.getElementById('motion-grid').innerHTML = `<div class="motion-empty">${_esc(e.message || 'Failed to load motion clips.')}</div>`;
+  }
+}
+
+async function searchMotionClips() {
+  const filters = _motionFilters();
+  _motionQuickQuery = filters.query || '';
+  const preset = document.getElementById('motion-preset');
+  if (preset && preset.value !== _motionQuickQuery) preset.value = '';
+  try {
+    const d = await api('POST', '/admin/motion-clips/search', filters);
+    _motionAllClips = d.clips || [];
+    _motionClips = _motionFilterByCamera(_motionAllClips);
+    _motionSearchMode = d.mode || 'recent';
+    renderMotionCameraRail();
+    renderMotionEventTypeSelect();
+    renderMotionClips();
+    loadEventHistory();
+  } catch (e) {
+    toast('Motion search failed: ' + e.message, 'err');
+  }
+}
+
+function resetMotionFilters() {
+  document.getElementById('motion-query').value = '';
+  document.getElementById('motion-date').value = '';
+  document.getElementById('motion-start').value = '';
+  document.getElementById('motion-end').value = '';
+  document.getElementById('motion-camera').value = '';
+  document.getElementById('motion-event-type').value = '';
+  document.getElementById('motion-group-mode').value = 'day';
+  document.getElementById('motion-preset').value = '';
+  _motionQuickQuery = '';
+  _motionActiveCamera = '';
+  _motionActiveEventType = '';
+  _motionGroupMode = 'day';
+  loadMotionClips();
+}
+
+function _motionFilterByCamera(clips) {
+  let filtered = clips || [];
+  if (_motionActiveCamera) {
+    filtered = filtered.filter(clip => String(clip.camera_entity_id || '') === _motionActiveCamera);
+  }
+  if (_motionActiveEventType) {
+    filtered = filtered.filter(clip => String(clip.canonical_event_type || '') === _motionActiveEventType);
+  }
+  return filtered;
+}
+
+function setMotionCamera(cameraId) {
+  _motionActiveCamera = cameraId || '';
+  const cameraField = document.getElementById('motion-camera');
+  if (cameraField) cameraField.value = _motionActiveCamera;
+  _motionClips = _motionFilterByCamera(_motionAllClips);
+  renderMotionCameraRail();
+  renderMotionEventTypeSelect();
+  renderMotionClips();
+}
+
+function setMotionEventType(eventType) {
+  _motionActiveEventType = eventType || '';
+  const eventTypeField = document.getElementById('motion-event-type');
+  if (eventTypeField) eventTypeField.value = _motionActiveEventType;
+  _motionClips = _motionFilterByCamera(_motionAllClips);
+  renderMotionEventTypeSelect();
+  renderMotionClips();
+}
+
+function setMotionGroupMode(mode) {
+  _motionGroupMode = ['event_type', 'source', 'status'].includes(mode) ? mode : 'day';
+  const field = document.getElementById('motion-group-mode');
+  if (field) field.value = _motionGroupMode;
+  renderMotionClips();
+}
+
+function renderMotionCameraRail() {
+  const root = document.getElementById('motion-camera-list');
+  if (!root) return;
+  const counts = new Map();
+  (_motionAllClips || []).forEach(clip => {
+    const key = String(clip.camera_entity_id || 'unknown');
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  const items = [['', _motionAllClips.length], ...Array.from(counts.entries()).sort((a, b) => b[1] - a[1])];
+  root.innerHTML = '';
+  if (!items.length) {
+    root.innerHTML = '<div class="motion-empty" style="padding:18px;">No cameras indexed yet.</div>';
+    return;
+  }
+  items.forEach(([cameraId, count]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'motion-camera-item' + ((_motionActiveCamera || '') === cameraId ? ' active' : '');
+    item.innerHTML = `
+      <div class="motion-camera-name">${_esc(cameraId ? _motionCameraLabel(cameraId) : 'All Cameras')}</div>
+      <div class="motion-camera-count">${_esc(String(count || 0))}</div>
+    `;
+    item.onclick = () => setMotionCamera(cameraId);
+    root.appendChild(item);
+  });
+  renderMotionCameraSelect(items);
+}
+
+function renderMotionCameraSelect(items) {
+  const select = document.getElementById('motion-camera');
+  if (!select) return;
+  const current = _motionActiveCamera || '';
+  select.innerHTML = '<option value="">All Cameras</option>';
+  items.forEach(([cameraId, count]) => {
+    if (!cameraId) return;
+    const option = document.createElement('option');
+    option.value = cameraId;
+    option.textContent = `${_motionCameraLabel(cameraId)} (${count})`;
+    if (cameraId === current) option.selected = true;
+    select.appendChild(option);
+  });
+}
+
+function renderMotionEventTypeSelect() {
+  const select = document.getElementById('motion-event-type');
+  if (!select) return;
+  const current = _motionActiveEventType || '';
+  const counts = new Map();
+  (_motionAllClips || []).forEach(clip => {
+    const key = String(clip.canonical_event_type || '').trim();
+    if (!key) return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  select.innerHTML = '<option value="">All Event Types</option>';
+  Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).forEach(([eventType, count]) => {
+    const option = document.createElement('option');
+    option.value = eventType;
+    option.textContent = `${_motionEventTypeLabel(eventType)} (${count})`;
+    if (eventType === current) option.selected = true;
+    select.appendChild(option);
+  });
+}
+
+function renderMotionActivity() {
+  const root = document.getElementById('motion-activity-bars');
+  const note = document.getElementById('motion-activity-note');
+  if (!root) return;
+  const now = Date.now();
+  const buckets = Array.from({ length: 12 }, (_, idx) => {
+    const start = now - ((11 - idx) * 2 * 60 * 60 * 1000);
+    return { label: new Date(start).getHours(), start, end: start + (2 * 60 * 60 * 1000), count: 0 };
+  });
+  (_motionClips || []).forEach(clip => {
+    const ts = new Date(clip.ts || '').getTime();
+    if (!Number.isFinite(ts)) return;
+    buckets.forEach(bucket => {
+      if (ts >= bucket.start && ts < bucket.end) bucket.count += 1;
+    });
+  });
+  const max = Math.max(1, ...buckets.map(b => b.count));
+  root.innerHTML = '';
+  buckets.forEach(bucket => {
+    const slot = document.createElement('div');
+    slot.className = 'motion-activity-slot';
+    const height = Math.max(4, Math.round((bucket.count / max) * 42));
+    const label = `${String(bucket.label).padStart(2, '0')}:00`;
+    slot.innerHTML = `
+      <div class="motion-activity-bar" title="${_esc(label)} · ${_esc(String(bucket.count))} events">
+        <div class="motion-activity-fill" style="height:${height}px"></div>
+      </div>
+      <div class="motion-activity-label">${_esc(label)}</div>
+    `;
+    root.appendChild(slot);
+  });
+  if (note) note.textContent = _motionActiveCamera ? `Last 24h · ${_motionCameraLabel(_motionActiveCamera)}` : 'Last 24h across visible results';
+}
+
+function _motionInsightCounts(items, valueFn, labelFn) {
+  const counts = new Map();
+  (items || []).forEach(item => {
+    const key = String(valueFn(item) || '').trim();
+    if (!key) return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([key, count]) => ({ key, label: labelFn(key), count }));
+}
+
+function _renderMotionInsightChips(rootId, rows) {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  if (!rows.length) {
+    root.innerHTML = '<div class="motion-empty" style="padding:0;">No data</div>';
+    return;
+  }
+  root.innerHTML = rows.map(row => (
+    `<div class="motion-insight-chip"><strong>${_esc(String(row.count))}</strong>${_esc(row.label)}</div>`
+  )).join('');
+}
+
+function renderMotionInsights() {
+  const note = document.getElementById('motion-insights-note');
+  const clips = _motionClips || [];
+  _renderMotionInsightChips(
+    'motion-insight-types',
+    _motionInsightCounts(clips, clip => clip.canonical_event_type, value => _motionEventTypeLabel(value))
+  );
+  _renderMotionInsightChips(
+    'motion-insight-sources',
+    _motionInsightCounts(clips, clip => clip.event_source, value => String(value).replaceAll('_', ' '))
+  );
+  _renderMotionInsightChips(
+    'motion-insight-statuses',
+    _motionInsightCounts(clips, clip => clip.status || 'ready', value => String(value))
+  );
+  if (note) {
+    note.textContent = clips.length
+      ? `${clips.length} visible event${clips.length === 1 ? '' : 's'}`
+      : 'No visible events';
+  }
+}
+
+function renderMotionHistory() {
+  const root = document.getElementById('motion-history-list');
+  const note = document.getElementById('motion-history-note');
+  if (!root) return;
+  const events = (_eventHistoryItems || []).slice();
+  _renderMotionInsightChips(
+    'motion-history-status-mix',
+    _motionInsightCounts(events, item => item.status || 'unknown_status', value => _motionStatusLabel(value))
+  );
+  _renderMotionInsightChips(
+    'motion-history-type-mix',
+    _motionInsightCounts(events, item => item.event_type || 'event', value => _motionEventTypeLabel(value))
+  );
+  _renderMotionInsightChips(
+    'motion-history-source-mix',
+    _motionInsightCounts(events, item => item.event_source || 'unknown_source', value => _motionSourceLabel(value))
+  );
+  if (!events.length) {
+    root.innerHTML = '<div class="motion-empty">No visible events to show.</div>';
+    if (note) note.textContent = 'No recent events';
+    return;
+  }
+  root.innerHTML = '';
+  const groups = new Map();
+  const groupLabel = (item) => {
+    if (_eventHistoryGroupMode === 'status') return _motionStatusLabel(item.status || 'unknown_status');
+    if (_eventHistoryGroupMode === 'event_type') return _motionEventTypeLabel(item.event_type || 'event');
+    if (_eventHistoryGroupMode === 'source') return _motionSourceLabel(item.event_source || 'unknown_source');
+    return _motionGroupLabel(item.ts);
+  };
+  events.forEach(item => {
+    const label = groupLabel(item);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(item);
+  });
+  groups.forEach((groupItems, label) => {
+    const section = document.createElement('div');
+    section.className = 'motion-group';
+    section.innerHTML = `
+      <div class="motion-group-head">
+        <div class="motion-group-title">${_esc(label)}</div>
+        <div class="motion-group-count">${_esc(String(groupItems.length))} event${groupItems.length === 1 ? '' : 's'}</div>
+      </div>
+      <div class="motion-history-list"></div>
+    `;
+    const sectionRoot = section.querySelector('.motion-history-list');
+    groupItems.forEach(item => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'motion-history-item';
+    const adminNote = String(item.data?.admin_note || '').trim();
+    const openLoopNote = String(item.open_loop_note || item.data?.open_loop_note || '').trim();
+    row.innerHTML = `
+      <div class="motion-history-head">
+        <div class="motion-history-title">${_esc(item.title || _motionEventTypeLabel(item.event_type || 'event'))}</div>
+        <div class="motion-history-time">${_esc(_motionRelative(item.ts))} · ${_esc(_fmtMotionTs(item.ts))}</div>
+      </div>
+      <div class="motion-history-meta">
+        <div class="motion-chip info">${_esc(_motionEventTypeLabel(item.event_type || 'event'))}</div>
+        <div class="motion-chip">${_esc(_motionSourceLabel(item.event_source || 'unknown_source'))}</div>
+        <div class="motion-chip">${_esc(_motionStatusLabel(item.status || 'ready'))}</div>
+        ${item.camera_entity_id ? `<div class="motion-chip good">${_esc(_motionCameraLabel(item.camera_entity_id))}</div>` : ''}
+      </div>
+      <div class="motion-history-desc">${_motionHighlight(item.summary || 'No event summary available.')}</div>
+      ${adminNote ? `<div class="motion-history-note-inline"><strong>Admin note:</strong> ${_esc(adminNote)}</div>` : ''}
+      ${!adminNote && openLoopNote ? `<div class="motion-history-note-inline"><strong>Context:</strong> ${_esc(openLoopNote)}</div>` : ''}
+    `;
+    row.onclick = () => {
+      if (item.clip_id) {
+        const clip = (_motionAllClips || []).find(entry => String(entry.id) === String(item.clip_id));
+        if (clip) openMotionModal(clip);
+        else openEventHistoryModal(item);
+      } else {
+        openEventHistoryModal(item);
+      }
+    };
+    sectionRoot.appendChild(row);
+  });
+    root.appendChild(section);
+  });
+  if (note) note.textContent = `${events.length} most recent cross-event item${events.length === 1 ? '' : 's'}`;
+}
+
+function renderMotionClips() {
+  const grid = document.getElementById('motion-grid');
+  const sub = document.getElementById('motion-results-sub');
+  const countChip = document.getElementById('motion-count-chip');
+  const countChipBody = document.getElementById('motion-count-chip-body');
+  const countHero = document.getElementById('motion-count-hero');
+  const modeChip = document.getElementById('motion-mode-chip');
+  const modeChipBody = document.getElementById('motion-mode-chip-body');
+  const modeHero = document.getElementById('motion-mode-hero');
+  const resultsCount = document.getElementById('motion-results-count');
+  if (sub) {
+    const base = _motionModeLabel(_motionSearchMode);
+    const scopes = [];
+    if (_motionActiveCamera) scopes.push(_motionCameraLabel(_motionActiveCamera));
+    if (_motionActiveEventType) scopes.push(_motionEventTypeLabel(_motionActiveEventType));
+    sub.textContent = scopes.length ? `${base} · ${scopes.join(' · ')}` : base;
+  }
+  if (countChip) countChip.textContent = String(_motionClips.length);
+  if (countChipBody) countChipBody.textContent = String(_motionClips.length);
+  if (countHero) countHero.textContent = String(_motionClips.length);
+  if (modeChip) modeChip.textContent = _motionHumanMode(_motionSearchMode);
+  if (modeChipBody) modeChipBody.textContent = _motionHumanMode(_motionSearchMode);
+  if (modeHero) modeHero.textContent = _motionHumanMode(_motionSearchMode);
+  if (resultsCount) resultsCount.textContent = `${_motionClips.length} result${_motionClips.length === 1 ? '' : 's'}`;
+  if (!grid) return;
+  grid.innerHTML = '';
+  renderMotionActivity();
+  renderMotionInsights();
+  renderMotionHistory();
+  if (!_motionClips.length) {
+    const scopes = [];
+    if (_motionActiveCamera) scopes.push(`on <strong>${_esc(_motionCameraLabel(_motionActiveCamera))}</strong>`);
+    if (_motionActiveEventType) scopes.push(`for <strong>${_esc(_motionEventTypeLabel(_motionActiveEventType))}</strong>`);
+    const scope = scopes.length ? ` ${scopes.join(' ')}` : '';
+    grid.innerHTML = `<div class="motion-empty">No motion clips matched the current search${_motionQuickQuery ? ` for <strong>${_esc(_motionQuickQuery)}</strong>` : ''}${scope}.</div>`;
+    return;
+  }
+  const groups = new Map();
+  _motionClips.forEach((clip) => {
+    const key = _motionGroupHeading(clip);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(clip);
+  });
+  groups.forEach((clips, label) => {
+    const group = document.createElement('div');
+    group.className = 'motion-group';
+    group.innerHTML = `
+      <div class="motion-group-head">
+        <div class="motion-group-title">${_esc(label)}</div>
+        <div class="motion-group-count">${_esc(_motionGroupCountLabel(clips))}</div>
+      </div>
+      <div class="motion-group-grid"></div>
+    `;
+    const groupGrid = group.querySelector('.motion-group-grid');
+    clips.forEach(clip => {
+    const card = document.createElement('div');
+    card.className = 'motion-card';
+    const status = String(clip.status || 'ready');
+    const note = String(clip.extra?.open_loop_note || clip.open_loop_note || '');
+    const hasVideo = Boolean(clip.video_url);
+    const badgeClass = _motionSearchMode === 'ai' ? 'ai' : 'review';
+    const badgeLabel = _motionSearchMode === 'ai' ? 'AI Match' : 'Event';
+    const duration = clip.duration_s ? `${clip.duration_s}s` : '—';
+    const canonicalType = String(clip.canonical_event_type || '');
+    const source = String(clip.event_source || '');
+    card.innerHTML = `
+      <div class="motion-card-media">
+        ${hasVideo ? `<video src="${clip.video_url}" preload="metadata" muted playsinline></video>` : '<div class="motion-card-fallback">Clip unavailable</div>'}
+        <div class="motion-card-overlay">
+          <div class="motion-card-badge ${badgeClass}">${badgeLabel}</div>
+          <div class="motion-card-age">${_esc(_motionRelative(clip.ts))}</div>
+        </div>
+      </div>
+      <div class="motion-card-body">
+        <div class="motion-card-head">
+          <div>
+            <div class="motion-card-title">${_esc(clip.location || clip.camera_entity_id || 'Motion event')}</div>
+            <div class="motion-card-camera">${_esc(_motionCameraLabel(clip.camera_entity_id))}</div>
+            <div class="motion-card-time">${_esc(_fmtMotionTs(clip.ts))}</div>
+          </div>
+          <div class="motion-card-id">Clip ${_esc(String(clip.id || '—'))}</div>
+        </div>
+        <div class="motion-chip-row">
+          <div class="motion-chip">${_esc(status)}</div>
+          <div class="motion-chip good">${_esc(duration)}</div>
+          ${canonicalType ? `<div class="motion-chip info">${_esc(canonicalType.replaceAll('_', ' '))}</div>` : ''}
+          ${source ? `<div class="motion-chip">${_esc(source.replaceAll('_', ' '))}</div>` : ''}
+          ${_motionSearchMode === 'ai' ? '<div class="motion-chip search">AI match</div>' : ''}
+        </div>
+        <div class="motion-card-desc">${_motionHighlight(clip.description || 'No AI description available.')}</div>
+        ${note ? `<div class="motion-card-note">${_esc(note)}</div>` : ''}
+        <div class="motion-card-actions">
+          <button class="btn btn-primary btn-sm">Review</button>
+          ${hasVideo ? `<a class="btn btn-outline btn-sm" href="${clip.video_url}" target="_blank" rel="noopener">Open File</a>` : ''}
+        </div>
+      </div>
+    `;
+    const reviewBtn = card.querySelector('button');
+    if (reviewBtn) reviewBtn.onclick = () => openMotionModal(clip);
+    const video = card.querySelector('video');
+    if (video) {
+      video.onclick = () => openMotionModal(clip);
+      video.addEventListener('mouseenter', () => {
+        video.muted = true;
+        video.play().catch(() => {});
+      });
+      video.addEventListener('mouseleave', () => {
+        video.pause();
+        video.currentTime = 0;
+      });
+    }
+      groupGrid.appendChild(card);
+    });
+    grid.appendChild(group);
+  });
+}
+
+function openMotionModal(clip) {
+  _motionModalIndex = _motionClips.findIndex(item => String(item.id) === String(clip.id));
+  _motionModalHistoryIndex = -1;
+  _renderMotionModal(clip);
+}
+
+function _renderMotionModalActions(item) {
+  const root = document.getElementById('motion-modal-actions');
+  if (!root) return;
+  root.innerHTML = '';
+  const addButton = (label, fn) => {
+    const button = document.createElement('button');
+    button.className = 'btn btn-outline btn-sm';
+    button.textContent = label;
+    button.onclick = fn;
+    root.appendChild(button);
+  };
+  if (_motionModalHistoryIndex >= 0 && item.event_id) {
+    const status = String(item.status || '');
+    if (status !== 'acknowledged') {
+      addButton('Acknowledge', () => updateEventHistoryStatus(item, 'acknowledged'));
+    }
+    if (status !== 'resolved') {
+      addButton('Resolve', () => updateEventHistoryStatus(item, 'resolved'));
+    }
+    if (status !== 'active') {
+      addButton('Reopen', () => updateEventHistoryStatus(item, 'active'));
+    }
+  }
+  if (item.event_type) {
+    addButton('Filter by Type', () => applyMotionArchiveFocus({ eventType: item.event_type }));
+  }
+  if (item.camera_entity_id) {
+    addButton('Filter by Camera', () => applyMotionArchiveFocus({ camera: item.camera_entity_id }));
+  }
+  if (item.event_source) {
+    addButton('History by Source', () => {
+      _eventHistorySource = item.event_source || '';
+      _eventHistoryBeforeTs = '';
+      closeMotionModal();
+      loadEventHistory();
+    });
+  }
+  if (!root.childElementCount) {
+    root.innerHTML = '<div class="motion-empty" style="padding:0;">No drill-down actions available.</div>';
+  }
+}
+
+async function updateEventHistoryStatus(item, status) {
+  try {
+    const noteField = document.getElementById('motion-modal-note');
+    await api('POST', '/admin/event-history/action', {
+      event_id: item.event_id || '',
+      status,
+      title: item.title || '',
+      summary: item.summary || '',
+      event_type: item.event_type || '',
+      event_source: item.event_source || '',
+      camera_entity_id: item.camera_entity_id || '',
+      admin_note: noteField?.value.trim() || '',
+    });
+    toast(`Event ${_motionStatusLabel(status).toLowerCase()}`);
+    closeMotionModal();
+    await loadEventHistory();
+  } catch (e) {
+    toast('Event update failed: ' + e.message, 'err');
+  }
+}
+
+function applyMotionArchiveFocus({ camera = '', eventType = '' }) {
+  if (camera) {
+    _motionActiveCamera = camera;
+    const cameraField = document.getElementById('motion-camera');
+    if (cameraField) cameraField.value = camera;
+  }
+  if (eventType) {
+    _motionActiveEventType = eventType;
+    const eventTypeField = document.getElementById('motion-event-type');
+    if (eventTypeField) eventTypeField.value = eventType;
+  }
+  _motionClips = _motionFilterByCamera(_motionAllClips);
+  closeMotionModal();
+  renderMotionCameraRail();
+  renderMotionEventTypeSelect();
+  renderMotionClips();
+}
+
+function _renderMotionModal(clip) {
+  const modal = document.getElementById('motion-modal');
+  const strip = document.getElementById('motion-modal-strip');
+  const video = document.getElementById('motion-modal-video');
+  const fallback = document.getElementById('motion-modal-fallback');
+  document.getElementById('motion-modal-title').textContent = clip.location || clip.camera_entity_id || 'Motion Clip';
+  document.getElementById('motion-modal-time').textContent = _fmtMotionTs(clip.ts);
+  document.getElementById('motion-modal-desc').innerHTML = _motionHighlight(clip.description || 'No AI description available.');
+  if (strip) {
+    strip.innerHTML =
+      `<div class="motion-card-badge ${_motionSearchMode === 'ai' ? 'ai' : 'review'}">${_motionSearchMode === 'ai' ? 'AI Match' : 'Event Review'}</div>` +
+      `<div class="motion-card-age">${_esc(_motionRelative(clip.ts))}</div>` +
+      `<div class="motion-chip">${_esc(clip.status || 'ready')}</div>` +
+      `${clip.canonical_event_type ? `<div class="motion-chip info">${_esc(String(clip.canonical_event_type).replaceAll('_', ' '))}</div>` : ''}`;
+  }
+  document.getElementById('motion-modal-meta').innerHTML =
+    `<div class="motion-meta-row"><div class="motion-meta-key">Camera</div><div class="motion-meta-value">${_esc(_motionCameraLabel(clip.camera_entity_id))}</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Camera ID</div><div class="motion-meta-value">${_esc(clip.camera_entity_id || '—')}</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Trigger</div><div class="motion-meta-value">${_esc(clip.trigger_entity_id || '—')}</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Event Type</div><div class="motion-meta-value">${_esc(clip.canonical_event_type || '—')}</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Event ID</div><div class="motion-meta-value">${_esc(clip.canonical_event_id || '—')}</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Event Source</div><div class="motion-meta-value">${_esc(clip.event_source || '—')}</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Status</div><div class="motion-meta-value">${_esc(clip.status || '—')}</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Duration</div><div class="motion-meta-value">${_esc(String(clip.duration_s || 0))}s</div></div>` +
+    `<div class="motion-meta-row"><div class="motion-meta-key">Clip ID</div><div class="motion-meta-value">${_esc(String(clip.id || '—'))}</div></div>`;
+  _renderMotionModalActions({
+    event_type: clip.canonical_event_type || '',
+    event_source: clip.event_source || '',
+    camera_entity_id: clip.camera_entity_id || '',
+  });
+  if (fallback) fallback.classList.remove('show');
+  if (video) video.style.display = '';
+  video.src = clip.video_url || '';
+  video.currentTime = 0;
+  modal.classList.add('show');
+}
+
+function _eventDataRows(item) {
+  const rows = [];
+  rows.push(['Kind', _eventHistoryKindLabel(item.kind || 'event')]);
+  rows.push(['Event Type', _motionEventTypeLabel(item.event_type || 'event')]);
+  rows.push(['Source', _motionSourceLabel(item.event_source || 'unknown_source')]);
+  rows.push(['Status', _motionStatusLabel(item.status || 'unknown_status')]);
+  if (item.camera_entity_id) rows.push(['Camera', _motionCameraLabel(item.camera_entity_id)]);
+  if (item.event_id) rows.push(['Event ID', item.event_id]);
+  if (item.open_loop_note) rows.push(['Open Loop', item.open_loop_note]);
+  const data = item.data || {};
+  if (data.location) rows.push(['Location', data.location]);
+  if (data.trigger_entity_id) rows.push(['Trigger', data.trigger_entity_id]);
+  if (data.related_camera) rows.push(['Related Camera', _motionCameraLabel(data.related_camera)]);
+  if (data.duration_s) rows.push(['Duration', `${data.duration_s}s`]);
+  if (data.admin_note) rows.push(['Admin Note', data.admin_note]);
+  const extra = data.extra || {};
+  if (extra.open_loop_note && !item.open_loop_note) rows.push(['Open Loop', extra.open_loop_note]);
+  return rows;
+}
+
+function openEventHistoryModal(item) {
+  _motionModalIndex = -1;
+  _motionModalHistoryIndex = (_eventHistoryItems || []).findIndex(entry => String(entry.id) === String(item.id));
+  const modal = document.getElementById('motion-modal');
+  const strip = document.getElementById('motion-modal-strip');
+  const video = document.getElementById('motion-modal-video');
+  const fallback = document.getElementById('motion-modal-fallback');
+  const noteField = document.getElementById('motion-modal-note');
+  document.getElementById('motion-modal-title').textContent = item.title || _motionEventTypeLabel(item.event_type || 'event');
+  document.getElementById('motion-modal-time').textContent = _fmtMotionTs(item.ts);
+  document.getElementById('motion-modal-desc').innerHTML = _motionHighlight(item.summary || 'No event summary available.');
+  if (strip) {
+    strip.innerHTML =
+      `<div class="motion-card-badge review">Event Review</div>` +
+      `<div class="motion-card-age">${_esc(_motionRelative(item.ts))}</div>` +
+      `<div class="motion-chip">${_esc(_motionStatusLabel(item.status || 'unknown_status'))}</div>` +
+      `<div class="motion-chip info">${_esc(_motionEventTypeLabel(item.event_type || 'event'))}</div>`;
+  }
+  const rows = _eventDataRows(item);
+  document.getElementById('motion-modal-meta').innerHTML = rows.map(([key, value]) => (
+    `<div class="motion-meta-row"><div class="motion-meta-key">${_esc(key)}</div><div class="motion-meta-value">${_esc(String(value || '—'))}</div></div>`
+  )).join('');
+  if (noteField) noteField.value = String(item.data?.admin_note || '');
+  _renderMotionModalActions(item);
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    video.style.display = 'none';
+  }
+  if (fallback) {
+    document.getElementById('motion-modal-fallback-title').textContent = item.title || _motionEventTypeLabel(item.event_type || 'event');
+    document.getElementById('motion-modal-fallback-sub').textContent = item.summary || 'No linked clip is available for this event.';
+    fallback.classList.add('show');
+  }
+  modal.classList.add('show');
+}
+
+function stepMotionModal(delta) {
+  if (_motionModalIndex >= 0) {
+    if (!_motionClips.length) return;
+    const next = _motionModalIndex + delta;
+    if (next < 0 || next >= _motionClips.length) return;
+    _motionModalIndex = next;
+    _renderMotionModal(_motionClips[_motionModalIndex]);
+    return;
+  }
+  if (_motionModalHistoryIndex >= 0) {
+    const next = _motionModalHistoryIndex + delta;
+    if (next < 0 || next >= _eventHistoryItems.length) return;
+    _motionModalHistoryIndex = next;
+    openEventHistoryModal(_eventHistoryItems[_motionModalHistoryIndex]);
+  }
+}
+
+function closeMotionModal(evt) {
+  if (evt && evt.target && evt.target !== evt.currentTarget && !evt.target.classList.contains('motion-modal-close')) return;
+  const modal = document.getElementById('motion-modal');
+  modal.classList.remove('show');
+  const video = document.getElementById('motion-modal-video');
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  video.style.display = '';
+  const fallback = document.getElementById('motion-modal-fallback');
+  if (fallback) fallback.classList.remove('show');
+  const noteField = document.getElementById('motion-modal-note');
+  if (noteField) noteField.value = '';
+  _motionModalHistoryIndex = -1;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const query = document.getElementById('motion-query');
+  const camera = document.getElementById('motion-camera');
+  [query, camera].forEach(el => {
+    if (!el) return;
+    el.addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') {
+        evt.preventDefault();
+        searchMotionClips();
+      }
+    });
+  });
+  if (query) {
+    query.addEventListener('input', () => {
+      const preset = document.getElementById('motion-preset');
+      if (preset && preset.value && preset.value !== query.value.trim()) preset.value = '';
+    });
+  }
+  document.addEventListener('keydown', (evt) => {
+    const modal = document.getElementById('motion-modal');
+    if (!modal || !modal.classList.contains('show')) return;
+    if (evt.key === 'Escape') {
+      closeMotionModal();
+    } else if (evt.key === 'ArrowLeft') {
+      evt.preventDefault();
+      stepMotionModal(-1);
+    } else if (evt.key === 'ArrowRight') {
+      evt.preventDefault();
+      stepMotionModal(1);
+    }
+  });
+});
 
 // ── Health / Dashboard ────────────────────────────────────────────────────────
 
@@ -2143,6 +4283,9 @@ function _kindBadge(kind) {
 
 function _decEntryHTML(e) {
   let detail = '';
+  const llmBadge = e.llm_tag
+    ? `<span style="background:rgba(34,211,238,.12);color:#67e8f9;padding:1px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.2px;flex-shrink:0;">${e.llm_tag}</span>`
+    : '';
   if (e.kind === 'triage_announce' || e.kind === 'triage_silence') {
     const ents = (e.entities || []).join(', ');
     detail = `<span style="color:var(--text3);">${ents}</span>`;
@@ -2167,6 +4310,7 @@ function _decEntryHTML(e) {
                       display:flex;align-items:baseline;gap:8px;">
     <span style="color:var(--text3);min-width:58px;flex-shrink:0;">${e.ts}</span>
     ${_kindBadge(e.kind)}
+    ${llmBadge}
     <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${detail}</span>
   </div>`;
 }

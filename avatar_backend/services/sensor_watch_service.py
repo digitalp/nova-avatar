@@ -25,6 +25,7 @@ import httpx
 import structlog
 import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException
+from avatar_backend.services.home_runtime import load_home_runtime_config
 
 _LOGGER = structlog.get_logger()
 
@@ -56,7 +57,7 @@ _SNAPSHOT_DEVICE_CLASSES: set[str] = {
 }
 
 # ── Entity-level exclusions from snapshot (too noisy / irrelevant) ────────────
-_SNAPSHOT_EXCLUDE_PREFIXES: tuple[str, ...] = (
+_LEGACY_SNAPSHOT_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "sensor.ble_",              # BLE beacon noise
     "sensor.cpu_",              # system metrics
     "sensor.awtrix_b21ffc_",   # matrix clock device
@@ -78,16 +79,7 @@ _SNAPSHOT_EXCLUDE_PREFIXES: tuple[str, ...] = (
 # ── Hard threshold rules — immediate announcement on WebSocket event ──────────
 # Format: entity_id → {"min": float|None, "max": float|None, "label": str}
 # An announcement fires when value crosses a bound (and cooldown allows).
-_THRESHOLD_RULES: dict[str, dict] = {
-    # Fridge: normal draw 80–150 W. If it drops to near 0, compressor has stopped.
-    "sensor.fridge_power_comp": {
-        "min": 5.0,
-        "max": 400.0,
-        "label": "Fridge compressor power",
-        "unit": "W",
-        "min_msg": "The fridge compressor appears to have stopped — it's drawing almost no power. This could mean the fridge has been switched off or there's a fault. Please check it.",
-        "max_msg": "The fridge is drawing unusually high power ({value} W). It may be struggling to maintain temperature or has a fault.",
-    },
+_LEGACY_THRESHOLD_RULES: dict[str, dict] = {
     # Car fuel
     "sensor.ko66ewx_fuel_level": {
         "min": 15.0,
@@ -129,7 +121,7 @@ _THRESHOLD_RULES: dict[str, dict] = {
 
 # ── Temperature sensor entity prefixes to SKIP in threshold check ─────────────
 # (server hardware, TRV internals, door sensors — not room ambient sensors)
-_TEMP_EXCLUDE_PREFIXES: tuple[str, ...] = (
+_LEGACY_TEMP_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "sensor.tangu_home_",
     "sensor.192_168_",
     "sensor.awtrix_",
@@ -186,10 +178,30 @@ class SensorWatchService:
         self._ha_token     = ha_token
         self._ollama_url   = ollama_url
         self._announce     = announce_fn
+        runtime = load_home_runtime_config()
+        self._snapshot_exclude_prefixes = tuple(
+            dict.fromkeys(_LEGACY_SNAPSHOT_EXCLUDE_PREFIXES + tuple(runtime.sensor_snapshot_exclude_prefixes))
+        )
+        self._temp_exclude_prefixes = tuple(
+            dict.fromkeys(_LEGACY_TEMP_EXCLUDE_PREFIXES + tuple(runtime.sensor_temp_exclude_prefixes))
+        )
+        self._threshold_rules = dict(_LEGACY_THRESHOLD_RULES)
+        self._threshold_rules.update(runtime.sensor_threshold_rules)
         self._cooldowns: dict[str, float] = {}   # entity_id → last announce time
         self._last_global_announce: float  = 0.0
         self._last_review_announce: float  = 0.0
         self._task: asyncio.Task | None    = None
+        self._decision_log = None
+
+    def set_decision_log(self, log) -> None:
+        self._decision_log = log
+
+    def _llm_fields(self) -> dict[str, str]:
+        return {
+            "llm_provider": "ollama",
+            "llm_model": _OLLAMA_MODEL,
+            "llm_tag": f"ollama:{_OLLAMA_MODEL}",
+        }
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -296,9 +308,9 @@ class SensorWatchService:
         friendly     = attrs.get("friendly_name", entity_id)
 
         # ── Check hard threshold rules ────────────────────────────────────
-        if entity_id in _THRESHOLD_RULES:
+        if entity_id in self._threshold_rules:
             asyncio.create_task(
-                self._check_threshold(entity_id, friendly, new_val, _THRESHOLD_RULES[entity_id]),
+                self._check_threshold(entity_id, friendly, new_val, self._threshold_rules[entity_id]),
                 name=f"threshold_{entity_id}",
             )
             return
@@ -370,11 +382,21 @@ class SensorWatchService:
         if msg:
             _LOGGER.info("sensor_watch.threshold_breach",
                          entity_id=entity_id, value=value, rule=rule.get("label"))
+            if self._decision_log:
+                self._decision_log.record(
+                    "sensor_threshold_announce",
+                    entity=entity_id,
+                    friendly=friendly,
+                    priority=priority,
+                    rule=rule.get("label"),
+                    message=msg[:300],
+                    **self._llm_fields(),
+                )
             await self._announce_now(entity_id, msg, priority)
 
     async def _check_temperature(self, entity_id: str, friendly: str, raw_val: str) -> None:
         # Skip non-room temperature sensors
-        if any(entity_id.startswith(p) for p in _TEMP_EXCLUDE_PREFIXES):
+        if any(entity_id.startswith(p) for p in self._temp_exclude_prefixes):
             return
         if self._entity_on_cooldown(entity_id) or self._global_on_cooldown():
             return
@@ -441,7 +463,7 @@ class SensorWatchService:
             if state in _NOISE_STATES:
                 continue
             # Skip excluded prefixes
-            if any(entity_id.startswith(p) for p in _SNAPSHOT_EXCLUDE_PREFIXES):
+            if any(entity_id.startswith(p) for p in self._snapshot_exclude_prefixes):
                 continue
 
             attrs        = entity.get("attributes", {})
@@ -450,7 +472,7 @@ class SensorWatchService:
             friendly     = attrs.get("friendly_name", entity_id)
 
             # Include if device class matches OR it's one of our threshold entities
-            if device_class not in _SNAPSHOT_DEVICE_CLASSES and entity_id not in _THRESHOLD_RULES:
+            if device_class not in _SNAPSHOT_DEVICE_CLASSES and entity_id not in self._threshold_rules:
                 continue
 
             # Skip battery sensors that are fine (> 20%) to keep prompt short
@@ -516,6 +538,12 @@ class SensorWatchService:
             raw = await _ollama_generate(prompt, self._ollama_url, timeout_s=90.0)
         except Exception as exc:
             _LOGGER.warning("sensor_watch.review_ollama_failed", exc=str(exc))
+            if self._decision_log:
+                self._decision_log.record(
+                    "sensor_review_error",
+                    reason=str(exc)[:200],
+                    **self._llm_fields(),
+                )
             return
 
         raw = raw.strip()
@@ -538,6 +566,12 @@ class SensorWatchService:
 
         if not result.get("announce"):
             _LOGGER.debug("sensor_watch.review_no_action")
+            if self._decision_log:
+                self._decision_log.record(
+                    "sensor_review_silence",
+                    sensor_count=len(snapshot),
+                    **self._llm_fields(),
+                )
             return
 
         message  = (result.get("message") or "").strip()
@@ -552,6 +586,14 @@ class SensorWatchService:
         now = time.monotonic()
         self._last_review_announce = now
         self._last_global_announce = now
+        if self._decision_log:
+            self._decision_log.record(
+                "sensor_review_announce",
+                sensor_count=len(snapshot),
+                priority=priority,
+                message=message[:300],
+                **self._llm_fields(),
+            )
 
         try:
             await self._announce(message, priority)

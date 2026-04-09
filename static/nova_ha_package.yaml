@@ -11,3 +11,15 @@ rest_command:
     headers:
       X-API-Key: "<API_KEY>"
     payload: '{"message": "{{ message }}", "priority": "{{ priority | default(\"normal\") }}"}'
+  nova_visual_event:
+    url: "http://<SERVER_IP>:<PORT>/announce/visual"
+    method: POST
+    content_type: "application/json"
+    headers:
+      X-API-Key: "<API_KEY>"
+    payload: >-
+      {"event": {{ event | tojson }},
+      "title": {{ title | default('', true) | tojson }},
+      "message": {{ message | default('', true) | tojson }},
+      "image_urls_csv": {{ image_urls_csv | default('', true) | tojson }},
+      "expires_in_ms": {{ expires_in_ms | default(30000, true) }}}

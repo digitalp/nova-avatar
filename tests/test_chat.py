@@ -136,3 +136,50 @@ def test_session_clear(mock_chat, mock_ready, client):
     resp = client.delete("/chat/to_clear", headers=HEADERS)
     assert resp.status_code == 200
     assert resp.json()["cleared"] == "to_clear"
+
+
+@patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
+@patch("avatar_backend.services.conversation_service.ConversationService.handle_event_followup", new_callable=AsyncMock)
+def test_chat_followup_event_uses_stored_event_context(mock_followup, mock_ready, client):
+    from avatar_backend.services.chat_service import ChatResult
+
+    mock_followup.return_value = ChatResult(
+        text="It looks like a normal delivery.",
+        tool_calls=[],
+        processing_time_ms=42,
+        model="test-model",
+        session_id="s-followup",
+    )
+    client.app.state.recent_event_contexts["evt-1"] = (
+        0.0,
+        {
+            "event_type": "parcel_delivery",
+            "event_summary": "Package left near the front door.",
+            "event_context": {"camera_entity_id": "camera.front_door", "source": "parcel"},
+        },
+    )
+
+    resp = client.post(
+        "/chat/followup-event",
+        json={"session_id": "s-followup", "text": "Is this urgent?", "event_id": "evt-1"},
+        headers=HEADERS,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "It looks like a normal delivery."
+    turn = mock_followup.await_args.args[0]
+    assert turn.session_id == "s-followup"
+    assert turn.event_type == "parcel_delivery"
+    assert turn.event_summary == "Package left near the front door."
+    assert turn.event_context["camera_entity_id"] == "camera.front_door"
+
+
+@patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
+def test_chat_followup_event_404_when_event_unknown(mock_ready, client):
+    resp = client.post(
+        "/chat/followup-event",
+        json={"session_id": "s-missing", "text": "What happened?", "event_id": "missing"},
+        headers=HEADERS,
+    )
+
+    assert resp.status_code == 404

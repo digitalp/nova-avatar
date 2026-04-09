@@ -21,6 +21,7 @@ from avatar_backend.middleware.auth import verify_api_key_ws
 from avatar_backend.models.messages import ToolCall
 from avatar_backend.models.tool_result import ToolResult
 from avatar_backend.routers.voice import router as voice_router
+from avatar_backend.services.realtime_voice_service import RealtimeVoiceService
 from avatar_backend.services.ws_manager import ConnectionManager
 
 
@@ -60,8 +61,10 @@ def _build_test_app() -> FastAPI:
 
     # TTS mock — returns valid silent WAV
     tts_mock = MagicMock()
-    tts_mock.synthesise = AsyncMock(return_value=_make_silent_wav(
-        n_samples=100, sample_rate=22050))
+    tts_mock.synthesise_with_timing = AsyncMock(return_value=(
+        _make_silent_wav(n_samples=100, sample_rate=22050),
+        [],
+    ))
 
     # LLM mock — returns a plain text reply (no tool calls)
     llm_mock = MagicMock()
@@ -87,6 +90,7 @@ def _build_test_app() -> FastAPI:
     app.state.session_manager = sm_mock
     app.state.ha_proxy        = ha_mock
     app.state.ws_manager      = ConnectionManager()
+    app.state.realtime_voice_service = RealtimeVoiceService()
 
     return app
 
