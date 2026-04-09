@@ -505,6 +505,92 @@ def test_voice_ws_second_turn_interrupts_first_turn_on_same_socket():
     assert llm_mock.chat.await_count == 1
 
 
+def test_voice_ws_streamed_output_only_flows_for_latest_interrupted_turn():
+    app = _build_test_app()
+
+    first_gate = asyncio.Event()
+    second_gate = asyncio.Event()
+    transcripts = ["first streamed turn", "second streamed turn"]
+
+    async def transcribe(_audio: bytes) -> str:
+        text = transcripts.pop(0)
+        gate = first_gate if text == "first streamed turn" else second_gate
+        await gate.wait()
+        return text
+
+    stt_mock = app.state.stt_service
+    stt_mock.transcribe = AsyncMock(side_effect=transcribe)
+
+    llm_mock = app.state.llm_service
+    llm_mock.is_ready = AsyncMock(return_value=True)
+    llm_mock.chat = AsyncMock(return_value=("Only the latest streamed turn should speak.", []))
+
+    app.state.session_manager = SessionManager("System prompt")
+    app.state.conversation_service = ConversationService(app)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/voice?api_key=test-key&session_id=coordinator-streamed-interrupt") as ws:
+            msg = json.loads(ws.receive_text())
+            assert msg["type"] == "state"
+            assert msg["state"] == "idle"
+
+            msg = json.loads(ws.receive_text())
+            assert msg["type"] == "voice_capabilities"
+
+            ws.send_text(json.dumps({
+                "type": "client_capabilities",
+                "output_streaming": True,
+                "output_audio_format": "pcm_s16le",
+            }))
+            ack = json.loads(ws.receive_text())
+            assert ack["type"] == "client_capabilities_ack"
+            assert ack["output_streaming"] is True
+            assert ack["output_audio_format"] == "pcm_s16le"
+
+            ws.send_bytes(_make_silent_wav(n_samples=90))
+
+            interrupted_turn_id = None
+            response_turn_ids: list[int] = []
+            output_start = None
+            output_end = None
+            chunk_count = 0
+
+            for _ in range(40):
+                data = ws.receive()
+                if data.get("bytes"):
+                    chunk_count += 1
+                    continue
+                msg = json.loads(data.get("text", ""))
+                if msg.get("type") == "turn_started" and msg["turn_id"] == 1:
+                    ws.send_bytes(_make_silent_wav(n_samples=100))
+                    second_gate.set()
+                elif msg.get("type") == "turn_interrupted":
+                    interrupted_turn_id = msg["interrupted_turn_id"]
+                    first_gate.set()
+                elif msg.get("type") == "response":
+                    response_turn_ids.append(msg["turn_id"])
+                elif msg.get("type") == "output_audio_start":
+                    output_start = msg
+                elif msg.get("type") == "output_audio_end":
+                    output_end = msg
+                    if output_end["turn_id"] == 2:
+                        break
+                elif msg.get("type") == "error":
+                    pytest.fail(f"Got error from server: {msg}")
+
+    assert interrupted_turn_id == 1
+    assert response_turn_ids == [2]
+    assert output_start is not None
+    assert output_start["turn_id"] == 2
+    assert output_start["audio_format"] == "pcm_s16le"
+    assert output_start["chunk_count"] >= 1
+    assert output_end is not None
+    assert output_end["turn_id"] == 2
+    assert chunk_count == output_start["chunk_count"]
+    assert stt_mock.transcribe.await_count == 2
+    assert llm_mock.chat.await_count == 1
+
+
 def test_voice_ws_uses_persisted_home_context_from_prior_chat_turn():
     app = _build_test_app()
 
