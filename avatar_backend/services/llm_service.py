@@ -32,6 +32,15 @@ _FAST_LOCAL_TEXT_MODEL_PREFERENCES: tuple[str, ...] = (
     "gemma2:9b",
 )
 
+
+def _format_exc_reason(exc: Exception | None) -> str:
+    if exc is None:
+        return "unknown"
+    text = str(exc).strip()
+    if text:
+        return f"{type(exc).__name__}: {text}"[:120]
+    return type(exc).__name__[:120]
+
 # ── Tool schemas (OpenAI/Ollama format) ───────────────────────────────────────
 
 HA_TOOLS: list[dict] = [
@@ -890,7 +899,7 @@ class LLMService:
                         purpose=purpose,
                         model=backend.model_name,
                         retry_delay_s=retry_delay_s,
-                        reason=str(exc)[:120],
+                        reason=_format_exc_reason(exc),
                     )
                     await asyncio.sleep(retry_delay_s)
                     continue
@@ -903,7 +912,7 @@ class LLMService:
                 local_model=backend.model_name,
                 provider=self._provider,
                 cloud_model=self._backend.model_name,
-                reason=str(last_exc)[:120] if last_exc else "local_failed",
+                reason=_format_exc_reason(last_exc),
             )
             return await self.generate_text(prompt, timeout_s=fallback_timeout_s or min(timeout_s, 45.0))
 
@@ -945,6 +954,48 @@ class LLMService:
             fallback_timeout_s=fallback_timeout_s,
         )
 
+    async def _chat_local_resilient(
+        self,
+        *,
+        backend: _OllamaFallbackBackend,
+        messages: list[dict[str, Any]],
+        use_tools: bool,
+        retry_delay_s: float,
+        purpose: str,
+    ) -> tuple[str, list[ToolCall]]:
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                return await backend.chat(messages, use_tools)
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+                last_exc = exc
+                if attempt == 0:
+                    logger.warning(
+                        "llm.local_chat_retry_scheduled",
+                        purpose=purpose,
+                        model=backend.model_name,
+                        retry_delay_s=retry_delay_s,
+                        reason=_format_exc_reason(exc),
+                    )
+                    await asyncio.sleep(retry_delay_s)
+                    continue
+                break
+
+        if self._provider != "ollama":
+            logger.warning(
+                "llm.local_chat_failed_using_cloud",
+                purpose=purpose,
+                local_model=backend.model_name,
+                provider=self._provider,
+                cloud_model=self._backend.model_name,
+                reason=_format_exc_reason(last_exc),
+            )
+            return await self.chat(messages, use_tools=use_tools)
+
+        if last_exc is not None:
+            raise RuntimeError(f"Local chat unavailable after retry: {last_exc}") from last_exc
+        raise RuntimeError("Local chat unavailable after retry")
+
     async def chat_local(
         self,
         messages: list[dict[str, Any]],
@@ -952,6 +1003,29 @@ class LLMService:
     ) -> tuple[str, list[ToolCall]]:
         """Strictly local chat via the preferred Ollama model."""
         return await self._local_text_backend.chat(messages, use_tools)
+
+    async def chat_local_fast(
+        self,
+        messages: list[dict[str, Any]],
+        use_tools: bool = True,
+    ) -> tuple[str, list[ToolCall]]:
+        """Strictly local chat via the faster preferred Ollama model."""
+        return await self._fast_local_text_backend.chat(messages, use_tools)
+
+    async def chat_local_fast_resilient(
+        self,
+        messages: list[dict[str, Any]],
+        use_tools: bool = True,
+        retry_delay_s: float = 2.0,
+        purpose: str = "fast_local_chat",
+    ) -> tuple[str, list[ToolCall]]:
+        return await self._chat_local_resilient(
+            backend=self._fast_local_text_backend,
+            messages=messages,
+            use_tools=use_tools,
+            retry_delay_s=retry_delay_s,
+            purpose=purpose,
+        )
 
     async def describe_image(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None) -> str:
         """Describe a camera image using vision capability of the active LLM provider."""

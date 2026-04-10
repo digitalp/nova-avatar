@@ -91,6 +91,10 @@ def test_select_fast_local_text_model_prefers_qwen_when_available():
         llm_module.httpx.Client = original
 
 
+def test_format_exc_reason_uses_exception_type_when_message_blank():
+    assert llm_module._format_exc_reason(httpx.ReadTimeout("")) == "ReadTimeout"
+
+
 @pytest.mark.asyncio
 async def test_generate_text_local_fast_resilient_falls_back_to_cloud_after_retry(monkeypatch):
     service = llm_module.LLMService.__new__(llm_module.LLMService)
@@ -115,6 +119,30 @@ async def test_generate_text_local_fast_resilient_falls_back_to_cloud_after_retr
     assert result == '{"announce": false}'
     assert service._fast_local_text_backend.generate_text.await_count == 2
     service.generate_text.assert_awaited_once_with("prompt", timeout_s=5.0)
+
+
+@pytest.mark.asyncio
+async def test_chat_local_fast_resilient_falls_back_to_cloud_after_retry(monkeypatch):
+    service = llm_module.LLMService.__new__(llm_module.LLMService)
+    service._provider = "google"
+    service._backend = SimpleNamespace(model_name="gemini-2.5-flash")
+    service._fast_local_text_backend = SimpleNamespace(
+        model_name="qwen2.5:7b",
+        chat=AsyncMock(side_effect=[httpx.ReadTimeout("timed out"), httpx.ReadTimeout("timed out")]),
+    )
+    service.chat = AsyncMock(return_value=("No change needed.", []))
+    monkeypatch.setattr(llm_module.asyncio, "sleep", AsyncMock())
+
+    result = await service.chat_local_fast_resilient(
+        [{"role": "user", "content": "prompt"}],
+        use_tools=True,
+        retry_delay_s=0.1,
+        purpose="test_chat",
+    )
+
+    assert result == ("No change needed.", [])
+    assert service._fast_local_text_backend.chat.await_count == 2
+    service.chat.assert_awaited_once_with([{"role": "user", "content": "prompt"}], use_tools=True)
 
 
 def test_select_sensor_watch_model_prefers_faster_review_model():

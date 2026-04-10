@@ -1066,7 +1066,7 @@ class ProactiveService:
 
     async def _run_heating_shadow(self, messages: list[dict], *, season: str, now_str: str) -> None:
         """Run a local-only heating evaluation pass without executing tools."""
-        if not hasattr(self._llm, "chat_local"):
+        if not hasattr(self._llm, "chat_local_fast_resilient") and not hasattr(self._llm, "chat_local"):
             return
 
         _LOGGER.info("heating.shadow_eval_start")
@@ -1075,11 +1075,18 @@ class ProactiveService:
                 "heating_shadow_eval_start",
                 season=season,
                 time=now_str,
-                **self._local_llm_fields(),
+                **self._fast_local_llm_fields(),
             )
 
         try:
-            text, tool_calls = await self._llm.chat_local(list(messages), use_tools=True)
+            if hasattr(self._llm, "chat_local_fast_resilient"):
+                text, tool_calls = await self._llm.chat_local_fast_resilient(
+                    list(messages),
+                    use_tools=True,
+                    purpose="heating_shadow",
+                )
+            else:
+                text, tool_calls = await self._llm.chat_local(list(messages), use_tools=True)
         except Exception as exc:
             formatted_exc = _format_exc(exc)
             _LOGGER.warning("heating.shadow_eval_failed", exc=formatted_exc[:200])
@@ -1087,7 +1094,7 @@ class ProactiveService:
                 self._decision_log.record(
                     "heating_shadow_eval_error",
                     reason=formatted_exc[:200],
-                    **self._local_llm_fields(),
+                    **self._fast_local_llm_fields(),
                 )
             return
 
@@ -1103,13 +1110,13 @@ class ProactiveService:
                         "heating_shadow_tool_call",
                         tool=tc.function_name,
                         args={k: str(v)[:80] for k, v in tc.arguments.items()},
-                        **self._local_llm_fields(),
+                        **self._fast_local_llm_fields(),
                     )
                 self._decision_log.record(
                     "heating_shadow_action",
                     message=(text or "").strip()[:300],
                     tool_calls=summaries,
-                    **self._local_llm_fields(),
+                    **self._fast_local_llm_fields(),
                 )
             return
 
@@ -1119,5 +1126,5 @@ class ProactiveService:
             self._decision_log.record(
                 "heating_shadow_eval_silent",
                 reason=reason,
-                **self._local_llm_fields(),
+                **self._fast_local_llm_fields(),
             )

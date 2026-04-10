@@ -21,7 +21,8 @@ async def test_heating_shadow_logs_tool_calls_without_execution():
         provider_name="google",
         model_name="gemini-2.5-flash",
         local_text_model_name="mistral-nemo:12b",
-        chat_local=AsyncMock(return_value=(
+        fast_local_text_model_name="qwen2.5:7b",
+        chat_local_fast_resilient=AsyncMock(return_value=(
             "I would raise the heating.",
             [ToolCall(function_name="call_ha_service", arguments={"domain": "climate", "service": "set_temperature"})],
         )),
@@ -45,7 +46,7 @@ async def test_heating_shadow_logs_tool_calls_without_execution():
         now_str="Friday, 10 April 2026 20:00",
     )
 
-    llm.chat_local.assert_awaited_once()
+    llm.chat_local_fast_resilient.assert_awaited_once()
     kinds = [kind for kind, _ in log.records]
     assert "heating_shadow_eval_start" in kinds
     assert "heating_shadow_tool_call" in kinds
@@ -59,7 +60,8 @@ async def test_heating_shadow_logs_silence_when_local_model_suggests_no_change()
         provider_name="google",
         model_name="gemini-2.5-flash",
         local_text_model_name="mistral-nemo:12b",
-        chat_local=AsyncMock(return_value=("No change needed right now.", [])),
+        fast_local_text_model_name="qwen2.5:7b",
+        chat_local_fast_resilient=AsyncMock(return_value=("No change needed right now.", [])),
     )
     service = ProactiveService(
         ha_url="http://ha.local",
@@ -90,7 +92,8 @@ async def test_heating_shadow_logs_typed_error_reason():
         provider_name="google",
         model_name="gemini-2.5-flash",
         local_text_model_name="mistral-nemo:12b",
-        chat_local=AsyncMock(side_effect=TimeoutError()),
+        fast_local_text_model_name="qwen2.5:7b",
+        chat_local_fast_resilient=AsyncMock(side_effect=TimeoutError()),
     )
     service = ProactiveService(
         ha_url="http://ha.local",
@@ -113,3 +116,30 @@ async def test_heating_shadow_logs_typed_error_reason():
     error_rows = [payload for kind, payload in log.records if kind == "heating_shadow_eval_error"]
     assert error_rows
     assert error_rows[0]["reason"] == "TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_heating_shadow_uses_legacy_local_path_when_fast_path_missing():
+    llm = SimpleNamespace(
+        provider_name="google",
+        model_name="gemini-2.5-flash",
+        local_text_model_name="mistral-nemo:12b",
+        chat_local=AsyncMock(return_value=("No action.", [])),
+    )
+    service = ProactiveService(
+        ha_url="http://ha.local",
+        ha_token="token",
+        ha_proxy=SimpleNamespace(),
+        llm_service=llm,
+        motion_clip_service=SimpleNamespace(),
+        announce_fn=AsyncMock(),
+        system_prompt="system prompt",
+    )
+
+    await service._run_heating_shadow(
+        [{"role": "system", "content": "system prompt"}, {"role": "user", "content": "evaluate heating"}],
+        season="autumn/winter",
+        now_str="Friday, 10 April 2026 20:00",
+    )
+
+    llm.chat_local.assert_awaited_once()
