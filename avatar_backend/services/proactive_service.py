@@ -174,6 +174,8 @@ class ProactiveService:
         announce_fn: Callable[[str, str], Awaitable[None]],
         system_prompt: str,
         event_service=None,
+        camera_event_service=None,
+        issue_autofix_service=None,
     ) -> None:
         self._ha_url = ha_url.rstrip("/")
         self._ha_token = ha_token
@@ -183,6 +185,8 @@ class ProactiveService:
         self._announce = announce_fn
         self._system_prompt = system_prompt
         self._event_service = event_service
+        self._camera_event_service = camera_event_service
+        self._issue_autofix_service = issue_autofix_service
         runtime = load_home_runtime_config()
         self._motion_camera_map = dict(_LEGACY_MOTION_CAMERA_MAP)
         self._motion_camera_map.update(runtime.motion_camera_map)
@@ -212,6 +216,15 @@ class ProactiveService:
     def _active_llm_fields(self) -> dict[str, str]:
         provider = getattr(self._llm, "provider_name", "unknown")
         model = getattr(self._llm, "model_name", "unknown")
+        return {
+            "llm_provider": provider,
+            "llm_model": model,
+            "llm_tag": f"{provider}:{model}",
+        }
+
+    def _local_llm_fields(self) -> dict[str, str]:
+        provider = "ollama"
+        model = getattr(self._llm, "local_text_model_name", "unknown")
         return {
             "llm_provider": provider,
             "llm_model": model,
@@ -263,6 +276,13 @@ class ProactiveService:
                     exc=str(exc),
                     retry_in_s=backoff,
                 )
+                if self._issue_autofix_service is not None:
+                    await self._issue_autofix_service.report_issue(
+                        "proactive_ws_disconnected",
+                        source="proactive._run",
+                        summary="Proactive websocket disconnected",
+                        details={"exc": str(exc), "retry_in_s": backoff},
+                    )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 120)
 
@@ -305,6 +325,11 @@ class ProactiveService:
                 raise RuntimeError(f"subscribe_events failed: {msg}")
 
             _LOGGER.info("proactive.subscribed_to_state_changed")
+            if self._issue_autofix_service is not None:
+                await self._issue_autofix_service.resolve_issue(
+                    "proactive_ws_disconnected",
+                    source="proactive.ws_ready",
+                )
 
             # Start batch processor, daily forecast, and heating control loops
             batch_task   = asyncio.create_task(self._batch_loop(), name="proactive_batcher")
@@ -456,95 +481,62 @@ class ProactiveService:
             )
 
         try:
-            image_bytes = await self._ha.fetch_camera_image(camera_id)
+            result = await self._camera_event_service.analyze_motion(
+                camera_entity_id=camera_id,
+                location=friendly,
+                trigger_entity_id=entity_id,
+                source="proactive_motion",
+                system_prompt=self._system_prompt or None,
+                vision_prompt=self._camera_vision_prompts.get(camera_id),
+            )
         except Exception as exc:
-            _LOGGER.warning("proactive.motion_camera_fetch_failed", camera=camera_id, exc=str(exc))
-            image_bytes = None
+            _LOGGER.warning("proactive.motion_describe_failed", camera=camera_id, exc=str(exc))
+            result = {
+                "message": f"Motion detected by {friendly}.",
+                "description": "",
+                "archive_description": f"Motion detected by {friendly}.",
+                "suppressed": False,
+                "is_delivery": False,
+                "delivery_company": "",
+                "raw_description": "",
+                "canonical_event": None,
+            }
 
-        is_delivery = False
-        delivery_company = ""
-        message = f"Motion detected by {friendly}."
-        description = ""
+        is_delivery = bool(result["is_delivery"])
+        delivery_company = str(result["delivery_company"] or "")
+        message = str(result["message"] or f"Motion detected by {friendly}.")
+        description = str(result["archive_description"] or result["description"] or message)
 
-        if image_bytes:
-            vision_prompt = self._camera_vision_prompts.get(camera_id)
-            try:
-                raw_desc = await self._llm.describe_image_with_gemini(
-                    image_bytes,
-                    prompt=vision_prompt,
-                    system_instruction=self._system_prompt or None,
+        if result["suppressed"]:
+            _LOGGER.info("proactive.motion_suppressed", camera=camera_id, reason="owner_car_or_no_cause")
+            if self._decision_log:
+                self._decision_log.record(
+                    "motion_suppressed",
+                    camera=camera_id,
+                    reason="NO_MOTION",
+                    **self._gemini_llm_fields(),
                 )
-            except Exception as exc:
-                _LOGGER.warning("proactive.motion_describe_failed", camera=camera_id, exc=str(exc))
-                raw_desc = ""
-
-            if raw_desc and raw_desc.strip().startswith("NO_MOTION"):
-                description = "No meaningful motion visible."
-                _LOGGER.info("proactive.motion_suppressed", camera=camera_id, reason="owner_car_or_no_cause")
+        elif result["raw_description"]:
+            _LOGGER.info("proactive.motion_described", camera=camera_id,
+                         chars=len(result["raw_description"]), delivery=is_delivery)
+            if is_delivery:
+                _LOGGER.info("proactive.delivery_detected", camera=camera_id,
+                             company=delivery_company)
                 if self._decision_log:
                     self._decision_log.record(
-                        "motion_suppressed",
+                        "delivery_detected",
                         camera=camera_id,
-                        reason="NO_MOTION",
+                        company=delivery_company,
+                        scene=description[:200],
                         **self._gemini_llm_fields(),
                     )
-            elif raw_desc:
-                # Parse delivery detection line  (format: "DELIVERY: <company>")
-                scene_lines, delivery_line = [], ""
-                for line in raw_desc.splitlines():
-                    if line.strip().upper().startswith("DELIVERY:"):
-                        delivery_line = line.strip()
-                    else:
-                        scene_lines.append(line)
-                scene = " ".join(scene_lines).strip()
-                description = scene or raw_desc.strip()
 
-                if delivery_line:
-                    is_delivery = True
-                    delivery_company = delivery_line.split(":", 1)[1].strip()
-                    company_label = delivery_company if delivery_company.lower() != "unknown" else "a courier"
-                    message = f"Delivery alert! There's {company_label} delivery at the driveway. {scene}"
-                    _LOGGER.info("proactive.delivery_detected", camera=camera_id,
-                                 company=delivery_company)
-                    if self._decision_log:
-                        self._decision_log.record(
-                            "delivery_detected",
-                            camera=camera_id,
-                            company=delivery_company,
-                            scene=scene[:200],
-                            **self._gemini_llm_fields(),
-                        )
-                else:
-                    message = f"Motion on the driveway. {scene}"
-
-                _LOGGER.info("proactive.motion_described", camera=camera_id,
-                             chars=len(raw_desc), delivery=is_delivery)
-        if not description:
-            description = message
-
-        if self._event_service is not None:
-            canonical_event = self._event_service.build_event(
-                event_id=f"proactive-{int(time.time() * 1000)}-{camera_id}",
-                event_type="delivery_detected" if is_delivery else "motion_detected",
-                title=f"Delivery at {friendly}" if is_delivery else f"Motion at {friendly}",
-                message=description,
-                camera_entity_id=camera_id,
-                event_context={
-                    "trigger_entity_id": entity_id,
-                    "location": friendly,
-                    "delivery": is_delivery,
-                    "delivery_company": delivery_company,
-                    "source": "proactive_motion",
-                },
-            )
-            description = canonical_event.message or description
-            extra = {
-                "delivery": is_delivery,
-                "delivery_company": delivery_company,
-                "canonical_event": self._event_service.to_dict(canonical_event),
-            }
-        else:
-            extra = {"delivery": is_delivery, "delivery_company": delivery_company}
+        extra = {
+            "delivery": is_delivery,
+            "delivery_company": delivery_company,
+        }
+        if result.get("canonical_event") is not None:
+            extra["canonical_event"] = result["canonical_event"]
 
         self._motion_clip_service.schedule_capture(
             camera_entity_id=camera_id,
@@ -620,7 +612,7 @@ class ProactiveService:
         )
 
         try:
-            message = await self._llm.generate_text(prompt, timeout_s=20.0)
+            message = await self._llm.generate_text_local(prompt, timeout_s=20.0)
             message = message.strip()
             if message:
                 self._last_weather_announce_time = time.monotonic()
@@ -711,7 +703,7 @@ class ProactiveService:
         )
 
         try:
-            message = await self._llm.generate_text(prompt, timeout_s=30.0)
+            message = await self._llm.generate_text_local(prompt, timeout_s=30.0)
             message = message.strip()
             if message:
                 await self._announce(message, "normal")
@@ -814,7 +806,7 @@ class ProactiveService:
         )
 
         try:
-            raw = await self._llm.generate_text(prompt, timeout_s=60.0)
+            raw = await self._llm.generate_text_local(prompt, timeout_s=60.0)
         except Exception as exc:
             _LOGGER.warning("proactive.llm_failed", exc=str(exc))
             return
@@ -967,6 +959,7 @@ class ProactiveService:
                 time=now_str,
                 **self._active_llm_fields(),
             )
+        await self._run_heating_shadow(messages, season=season, now_str=now_str)
 
         all_tool_calls: list[str] = []
 
@@ -1038,3 +1031,60 @@ class ProactiveService:
                 break
 
         _LOGGER.info("heating.eval_done")
+
+    async def _run_heating_shadow(self, messages: list[dict], *, season: str, now_str: str) -> None:
+        """Run a local-only heating evaluation pass without executing tools."""
+        if not hasattr(self._llm, "chat_local"):
+            return
+
+        _LOGGER.info("heating.shadow_eval_start")
+        if self._decision_log:
+            self._decision_log.record(
+                "heating_shadow_eval_start",
+                season=season,
+                time=now_str,
+                **self._local_llm_fields(),
+            )
+
+        try:
+            text, tool_calls = await self._llm.chat_local(list(messages), use_tools=True)
+        except Exception as exc:
+            _LOGGER.warning("heating.shadow_eval_failed", exc=str(exc)[:200])
+            if self._decision_log:
+                self._decision_log.record(
+                    "heating_shadow_eval_error",
+                    reason=str(exc)[:200],
+                    **self._local_llm_fields(),
+                )
+            return
+
+        if tool_calls:
+            summaries = [
+                f"{tc.function_name}({tc.arguments})"
+                for tc in tool_calls
+            ]
+            _LOGGER.info("heating.shadow_tool_calls", count=len(tool_calls))
+            if self._decision_log:
+                for tc in tool_calls:
+                    self._decision_log.record(
+                        "heating_shadow_tool_call",
+                        tool=tc.function_name,
+                        args={k: str(v)[:80] for k, v in tc.arguments.items()},
+                        **self._local_llm_fields(),
+                    )
+                self._decision_log.record(
+                    "heating_shadow_action",
+                    message=(text or "").strip()[:300],
+                    tool_calls=summaries,
+                    **self._local_llm_fields(),
+                )
+            return
+
+        reason = text.strip()[:200] if text else "no local action suggested"
+        _LOGGER.info("heating.shadow_eval_silent", reason=reason)
+        if self._decision_log:
+            self._decision_log.record(
+                "heating_shadow_eval_silent",
+                reason=reason,
+                **self._local_llm_fields(),
+            )

@@ -202,6 +202,7 @@ AREA: MAIN BEDROOM  (Penn & Daisy)
     climate.main_room_thermo              — primary TRV
     climate.main_room_thermo_2            — secondary TRV
     input_number.main_bed_room_eco        — eco temperature target
+    No dedicated comfort helper exists yet — when heating turns on, use 24°C as the comfort target for both TRVs
     sensor.main_room_power                — room power draw
 
   Sensors:
@@ -212,6 +213,7 @@ AREA: MAIN BEDROOM  (Penn & Daisy)
     binary_sensor.main_bedroom_pir_occupancy
 
   Appliance — CPAP (AirSense 11):
+    switch.smart_tower_fan_2_power_switch - smart fan
     sensor.cpap_usage_minutes             — Penn asleep when > 30 min at night
     sensor.cpap_ahi_events_per_hour
     RULE: Never interrupt CPAP. Never mention CPAP data unless Penn directly asks.
@@ -440,12 +442,14 @@ Central heating — Hive boiler (Nova is the primary controller):
   TRV comfort/eco targets (adjust if rooms persistently too hot or cold):
     input_number.bed_room_1comfort_temperature, input_number.bed_room_1_eco_temp
     input_number.main_bed_room_eco, input_number.living_room_comfort
+    Where no dedicated comfort helper exists, treat 24°C as the static comfort target
 
   Individual room TRVs (for fine-grained per-room control):
-    Living Room:  climate.living_room_1_thermostat
-    Bedroom 1:    climate.bedroom_1_thermo
-    TSE Room:     climate.tse_room_thermostat
-    Hallway:      climate.hallway_thermostat
+    Living Room:  climate.living_room_thermostat, climate.living_room_1_thermostat, climate.living_room_2_better_thermostat
+    Main Bedroom: climate.main_room_thermo, climate.main_room_thermo_2
+    Bedroom 1:    climate.bedroom_1_thermostat, climate.bedroom_1_thermo
+    TSE Room:     climate.tse_s_bedroom_thermostat, climate.tse_room_thermostat
+    Hallway:      climate.hallway, climate.hallway_thermostat
 
   ── HEATING DECISION RULES (apply in order — first match wins) ────────────────
 
@@ -462,11 +466,18 @@ Central heating — Hive boiler (Nova is the primary controller):
        • Someone is home (person.penn home, or any room PIR recently active)
      → set input_boolean.winter_mode ON
      → set climate.hive_receiver_climate hvac_mode=heat
-     → set each room TRV to comfort temperature:
-          climate.living_room_1_thermostat → get_entity_state(input_number.living_room_comfort)
-          climate.bedroom_1_thermo         → get_entity_state(input_number.bed_room_1comfort_temperature)
-          climate.tse_room_thermostat      → use 21°C (no input_number; set directly)
-          climate.hallway_thermostat       → use 19°C
+     → set ALL room TRVs to comfort temperature, not eco temperature:
+          climate.living_room_thermostat         → get_entity_state(input_number.living_room_comfort)
+          climate.living_room_1_thermostat       → get_entity_state(input_number.living_room_comfort)
+          climate.living_room_2_better_thermostat → get_entity_state(input_number.living_room_comfort)
+          climate.main_room_thermo               → use 24°C
+          climate.main_room_thermo_2             → use 24°C
+          climate.bedroom_1_thermostat           → get_entity_state(input_number.bed_room_1comfort_temperature)
+          climate.bedroom_1_thermo               → get_entity_state(input_number.bed_room_1comfort_temperature)
+          climate.tse_s_bedroom_thermostat       → use 24°C
+          climate.tse_room_thermostat            → use 24°C
+          climate.hallway                        → use 24°C
+          climate.hallway_thermostat             → use 24°C
      → announce if this is a change: "Heating turned on — rooms are getting cold."
 
   3. GREY ZONE (outdoor 14–16 °C, rooms 18–21 °C):

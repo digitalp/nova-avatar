@@ -622,6 +622,7 @@ let latestSurfaceState = null;
 let pendingSurfaceConfirmation = null;
 let pendingTurnContext = null;
 let reconnectDelay = 1000;
+let handledServerRestart = false;
 let isBusy         = false;    // Nova is thinking/speaking
 let visualEventTimer = null;
 
@@ -904,6 +905,12 @@ async function connectWs() {
     }
     try {
       const msg = JSON.parse(evt.data);
+      if (msg.type === 'server_restarted' && !handledServerRestart) {
+        handledServerRestart = true;
+        setStatus('Server restarted. Reloading…', '');
+        setTimeout(() => window.location.reload(), 250);
+        return;
+      }
       if (msg.type === 'voice_capabilities') serverVoiceCapabilities = { ...serverVoiceCapabilities, ...msg };
       if (msg.type === 'state' || msg.type === 'avatar_state') handleState(msg.state);
       if (msg.type === 'surface_state') applySurfaceState(msg);
