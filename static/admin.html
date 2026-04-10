@@ -1922,12 +1922,13 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;margin-top:12px;">
+          <div id="memory-edit-state" style="font-size:12px;color:var(--text3);display:none;"></div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer;">
             <input id="memory-pinned" type="checkbox">
             Pin this memory
           </label>
           <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn btn-primary" onclick="addMemory()">Save Memory</button>
+            <button id="memory-save-btn" class="btn btn-primary" onclick="saveMemory()">Save Memory</button>
             <button class="btn btn-outline" onclick="loadMemory()">Refresh</button>
             <button class="btn btn-outline" onclick="clearMemoryForm()">Reset Form</button>
             <button class="btn btn-danger" onclick="clearAllMemory()">Clear All</button>
@@ -1944,7 +1945,7 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
               <th style="width:100px;">Pinned</th>
               <th style="width:90px;">Seen</th>
               <th style="width:170px;">Updated</th>
-              <th style="width:110px;">Action</th>
+              <th style="width:160px;">Action</th>
             </tr>
           </thead>
           <tbody id="memory-tbody"><tr><td colspan="7" style="color:var(--text3);">Loading…</td></tr></tbody>
@@ -4290,10 +4291,18 @@ async function clearSession(sessionId) {
 // ── Persistent memory ────────────────────────────────────────────────────────
 
 function clearMemoryForm() {
+  window._editingMemoryId = null;
   document.getElementById('memory-summary').value = '';
   document.getElementById('memory-category').value = 'general';
   document.getElementById('memory-confidence').value = '0.90';
   document.getElementById('memory-pinned').checked = false;
+  const saveBtn = document.getElementById('memory-save-btn');
+  if (saveBtn) saveBtn.textContent = 'Save Memory';
+  const state = document.getElementById('memory-edit-state');
+  if (state) {
+    state.textContent = '';
+    state.style.display = 'none';
+  }
 }
 
 function _escapeHtml(value) {
@@ -4334,7 +4343,10 @@ async function loadMemory() {
         <td>${m.pinned ? '<span class="badge" style="background:rgba(34,197,94,.16);color:#86efac;">Pinned</span>' : '<span style="color:var(--text3);">No</span>'}</td>
         <td>${m.times_seen ?? 0}</td>
         <td style="color:var(--text2);font-size:12px;">${_fmtMemoryTs(m.updated_ts || m.created_ts)}</td>
-        <td><button class="btn btn-outline" onclick="deleteMemory(${m.id})">Delete</button></td>
+        <td style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-outline" onclick="editMemory(${m.id})">Edit</button>
+          <button class="btn btn-outline" onclick="deleteMemory(${m.id})">Delete</button>
+        </td>
       </tr>
     `).join('');
   } catch(e) {
@@ -4343,7 +4355,7 @@ async function loadMemory() {
   }
 }
 
-async function addMemory() {
+async function saveMemory() {
   const summary = document.getElementById('memory-summary').value.trim();
   const category = document.getElementById('memory-category').value.trim() || 'general';
   const confidence = Number(document.getElementById('memory-confidence').value);
@@ -4353,12 +4365,40 @@ async function addMemory() {
     return toast('Confidence must be between 0 and 1', 'warn');
   }
   try {
-    await api('POST', '/admin/memory', { summary, category, confidence, pinned });
+    if (window._editingMemoryId) {
+      await api('PUT', '/admin/memory/' + encodeURIComponent(window._editingMemoryId), { summary, category, confidence, pinned });
+      toast('Memory updated', 'ok');
+    } else {
+      await api('POST', '/admin/memory', { summary, category, confidence, pinned });
+      toast('Memory saved', 'ok');
+    }
     clearMemoryForm();
     await loadMemory();
-    toast('Memory saved', 'ok');
   } catch(e) {
     toast('Failed to save memory: ' + e.message, 'err');
+  }
+}
+
+async function editMemory(id) {
+  try {
+    const d = await api('GET', '/admin/memory?n=200');
+    const memory = (d.memories || []).find(m => Number(m.id) === Number(id));
+    if (!memory) return toast('Memory not found', 'err');
+    window._editingMemoryId = Number(id);
+    document.getElementById('memory-summary').value = memory.summary || '';
+    document.getElementById('memory-category').value = memory.category || 'general';
+    document.getElementById('memory-confidence').value = Number(memory.confidence || 0.9).toFixed(2);
+    document.getElementById('memory-pinned').checked = !!memory.pinned;
+    const saveBtn = document.getElementById('memory-save-btn');
+    if (saveBtn) saveBtn.textContent = 'Update Memory';
+    const state = document.getElementById('memory-edit-state');
+    if (state) {
+      state.textContent = `Editing memory #${id}`;
+      state.style.display = '';
+    }
+    document.getElementById('memory-summary').focus();
+  } catch(e) {
+    toast('Failed to load memory for editing: ' + e.message, 'err');
   }
 }
 

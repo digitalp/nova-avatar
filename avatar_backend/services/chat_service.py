@@ -5,6 +5,7 @@ Accepts a session_id + user text, runs the multi-round LLM/tool loop,
 and returns the final text response plus all ToolCall results.
 """
 from __future__ import annotations
+import re
 import time
 import time as _time_module
 from dataclasses import dataclass, field
@@ -24,6 +25,14 @@ from avatar_backend.services.session_manager import SessionManager
 _LOGGER = structlog.get_logger()
 
 _MAX_TOOL_ROUNDS = 3
+_TIME_QUERY_RE = re.compile(
+    r"\b(what(?:'s|\s+is)?\s+the\s+time|what\s+time\s+is\s+it|current\s+time|tell\s+me\s+the\s+time|time\s+now)\b",
+    re.IGNORECASE,
+)
+_DATE_QUERY_RE = re.compile(
+    r"\b(what(?:'s|\s+is)?\s+the\s+date|what\s+day\s+is\s+it|today'?s\s+date|current\s+date|date\s+today)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -62,7 +71,21 @@ async def run_chat(
     messages = await sm.get_messages(session_id)
 
     memory_ids: list[int] = []
+    enforced_memory_ids: list[int] = []
     if memory_service is not None:
+        enforced_context, enforced_memory_ids = memory_service.build_enforced_preferences_context()
+        if enforced_context:
+            messages = _inject_enforced_preferences(messages, enforced_context)
+            if decision_log:
+                decision_log.record(
+                    "memory_context_used",
+                    session=session_id,
+                    query=user_text[:100],
+                    memory_count=len(enforced_memory_ids),
+                    memory_ids=enforced_memory_ids,
+                    memory_preview=enforced_context[:240],
+                    phase="enforced",
+                )
         memory_context, memory_ids = memory_service.build_context(user_text)
         if memory_context:
             if decision_log:
@@ -81,6 +104,26 @@ async def run_chat(
     # time/date questions without needing a tool call.
     tz_name = _time_module.strftime("%Z")  # "BST" in summer, "GMT" in winter
     now_str = datetime.now().strftime(f"%A, %d %B %Y %H:%M {tz_name}")
+    direct_response = _maybe_direct_time_or_date_response(user_text, tz_name=tz_name)
+    if direct_response:
+        await sm.add_message(session_id, "assistant", direct_response)
+        elapsed_ms = int((time.monotonic() - t_start) * 1000)
+        if decision_log:
+            decision_log.record(
+                "chat_response",
+                session=session_id,
+                query=user_text[:100],
+                tool_count=0,
+                response=direct_response[:150],
+                ms=elapsed_ms,
+            )
+        return ChatResult(
+            text=direct_response,
+            tool_calls=[],
+            processing_time_ms=elapsed_ms,
+            model="deterministic_time",
+            session_id=session_id,
+        )
     messages = _inject_datetime(messages, now_str)
 
     final_text = ""
@@ -144,6 +187,9 @@ async def run_chat(
             messages = list(messages) + [{"role": "tool", "content": result.message}]
 
         if memory_service is not None:
+            enforced_context, enforced_memory_ids = memory_service.build_enforced_preferences_context()
+            if enforced_context:
+                messages = _inject_enforced_preferences(messages, enforced_context)
             memory_context, memory_ids = memory_service.build_context(user_text)
             if memory_context:
                 if decision_log:
@@ -170,15 +216,15 @@ async def run_chat(
 
     elapsed_ms = int((time.monotonic() - t_start) * 1000)
 
-    if memory_service is not None and memory_ids:
-        memory_service.mark_referenced(memory_ids)
+    if memory_service is not None and (memory_ids or enforced_memory_ids):
+        memory_service.mark_referenced(sorted(set(memory_ids + enforced_memory_ids)))
         if decision_log:
             decision_log.record(
                 "memory_context_referenced",
                 session=session_id,
                 query=user_text[:100],
-                memory_count=len(memory_ids),
-                memory_ids=memory_ids,
+                memory_count=len(set(memory_ids + enforced_memory_ids)),
+                memory_ids=sorted(set(memory_ids + enforced_memory_ids)),
             )
 
     if memory_service is not None and final_text:
@@ -219,6 +265,31 @@ def _inject_persistent_memory(messages: list[dict], memory_context: str) -> list
         sys_msg["content"] = f"{original}\n\n{memory_context}".strip()
     result[0] = sys_msg
     return result
+
+
+def _inject_enforced_preferences(messages: list[dict], memory_context: str) -> list[dict]:
+    if not messages or not memory_context:
+        return messages
+    result = list(messages)
+    sys_msg = dict(result[0])
+    original = sys_msg.get("content", "")
+    marker = "Enforced household preferences and policies."
+    if marker not in original:
+        sys_msg["content"] = f"{memory_context}\n\n{original}".strip()
+    result[0] = sys_msg
+    return result
+
+
+def _maybe_direct_time_or_date_response(user_text: str, *, tz_name: str) -> str:
+    text = " ".join((user_text or "").split()).strip().lower()
+    if not text:
+        return ""
+    now = datetime.now()
+    if _TIME_QUERY_RE.search(text):
+        return f"The current time is {now.strftime('%H:%M')} {tz_name}."
+    if _DATE_QUERY_RE.search(text):
+        return f"Today is {now.strftime('%A, %d %B %Y')}."
+    return ""
 
 
 def _drop_dangling_tool_calls(messages: list[dict]) -> list[dict]:

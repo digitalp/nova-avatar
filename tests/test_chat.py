@@ -2,6 +2,7 @@
 Phase 2/3 — Chat endpoint tests.
 Ollama and ha_proxy are mocked so these run without real services.
 """
+from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
@@ -46,6 +47,19 @@ HEADERS = {"X-API-Key": "test-key-p2"}
 def test_chat_requires_auth(client):
     resp = client.post("/chat", json={"session_id": "s1", "text": "hello"})
     assert resp.status_code == 401
+
+
+@patch("avatar_backend.services.chat_service.datetime")
+@patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
+@patch("avatar_backend.services.llm_service.LLMService.chat", new_callable=AsyncMock)
+def test_chat_time_question_is_answered_deterministically(mock_chat, mock_ready, mock_datetime, client):
+    mock_datetime.now.return_value = datetime(2026, 4, 10, 16, 0)
+
+    resp = client.post("/chat", json={"session_id": "time-test", "text": "what time is it?"}, headers=HEADERS)
+
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "The current time is 16:00 BST."
+    assert mock_chat.await_count == 0
 
 
 @patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
@@ -193,6 +207,30 @@ def test_chat_context_merges_incrementally_across_requests(mock_chat, mock_ready
         "  mode: Evening\n"
         "  climate.target: 21"
     )
+
+
+@patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)
+@patch("avatar_backend.services.llm_service.LLMService.chat", new_callable=AsyncMock, return_value=("Using the preference.", []))
+def test_chat_always_injects_enforced_preference_memories(mock_chat, mock_ready, client):
+    client.app.state.memory_service.add_memory(
+        summary="Nova should speak units as words rather than symbols in spoken output.",
+        category="preference",
+        source="manual",
+        confidence=1.0,
+        pinned=True,
+    )
+
+    resp = client.post(
+        "/chat",
+        json={"session_id": "pref-test", "text": "Give me a quick update."},
+        headers=HEADERS,
+    )
+
+    assert resp.status_code == 200
+    first_messages = mock_chat.await_args_list[0].args[0]
+    system_text = first_messages[0]["content"]
+    assert "Enforced household preferences and policies." in system_text
+    assert "speak units as words rather than symbols" in system_text
 
 
 @patch("avatar_backend.services.llm_service.LLMService.is_ready", new_callable=AsyncMock, return_value=True)

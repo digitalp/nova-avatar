@@ -257,6 +257,7 @@ class ProactiveService:
         event_service=None,
         camera_event_service=None,
         issue_autofix_service=None,
+        memory_service=None,
     ) -> None:
         self._ha_url = ha_url.rstrip("/")
         self._ha_token = ha_token
@@ -268,6 +269,7 @@ class ProactiveService:
         self._event_service = event_service
         self._camera_event_service = camera_event_service
         self._issue_autofix_service = issue_autofix_service
+        self._memory_service = memory_service
         runtime = load_home_runtime_config()
         self._motion_camera_map = dict(_LEGACY_MOTION_CAMERA_MAP)
         self._motion_camera_map.update(runtime.motion_camera_map)
@@ -334,6 +336,15 @@ class ProactiveService:
         """Called by sync-prompt to keep the proactive context current."""
         self._system_prompt = prompt
         _LOGGER.info("proactive.prompt_updated", chars=len(prompt))
+
+    def _enforced_preferences_prompt(self) -> str:
+        memory_service = self._memory_service
+        if memory_service is None:
+            return ""
+        context, _ = memory_service.build_enforced_preferences_context()
+        if not context:
+            return ""
+        return context
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -691,16 +702,18 @@ class ProactiveService:
         temp  = attrs.get("temperature", "?")
         wind  = attrs.get("wind_speed", "")
         wind_str = f", wind {wind} kilometres per hour" if wind else ""
+        enforced = self._enforced_preferences_prompt()
 
         prompt = (
             f"The weather at home has just changed from '{old_condition}' to '{new_condition}'. "
             f"Current temperature: {temp} degrees Celsius{wind_str}. "
-            f"{_SPOKEN_ANNOUNCEMENT_STYLE} "
-            "Write a brief 1 to 2 sentence spoken announcement about this weather change. "
-            "Include a practical tip if relevant (e.g. umbrella for rain, stay indoors for lightning). "
-            "Be conversational and warm, not robotic. "
-            "Good example: 'Rain has started outside, and it is fifteen degrees Celsius. Take an umbrella if you are heading out.' "
-            "When speaking, always say units as words, not symbols."
+            + (f"{enforced}\n\n" if enforced else "")
+            + f"{_SPOKEN_ANNOUNCEMENT_STYLE} "
+            + "Write a brief 1 to 2 sentence spoken announcement about this weather change. "
+            + "Include a practical tip if relevant (e.g. umbrella for rain, stay indoors for lightning). "
+            + "Be conversational and warm, not robotic. "
+            + "Good example: 'Rain has started outside, and it is fifteen degrees Celsius. Take an umbrella if you are heading out.' "
+            + "When speaking, always say units as words, not symbols."
         )
 
         try:
@@ -788,18 +801,20 @@ class ProactiveService:
 
         today_line = _fmt(forecasts[0]) if forecasts else "No data"
         week_lines = "\n".join(_fmt(f) for f in forecasts[1:6]) if len(forecasts) > 1 else ""
+        enforced = self._enforced_preferences_prompt()
 
         prompt = (
             f"Good morning. Here is today's weather and the week ahead:\n"
             f"Today: {today_line}\n"
             + (f"This week:\n{week_lines}\n" if week_lines else "")
+            + (f"{enforced}\n\n" if enforced else "")
             + f"\n{_SPOKEN_ANNOUNCEMENT_STYLE} "
             + "Write a friendly 2 to 4 sentence morning weather briefing. "
             + "When speaking, always say units as words, not symbols. "
-            "Highlight the most important weather for today, note anything noteworthy "
-            "coming this week (rain, heat, cold), and give a practical tip. "
-            "Be warm and natural, not a robotic read-out. "
-            "Start with today's weather, then mention the most important change coming later in the week."
+            + "Highlight the most important weather for today, note anything noteworthy "
+            + "coming this week (rain, heat, cold), and give a practical tip. "
+            + "Be warm and natural, not a robotic read-out. "
+            + "Start with today's weather, then mention the most important change coming later in the week."
         )
 
         try:
@@ -884,33 +899,35 @@ class ProactiveService:
         _LOGGER.info("proactive.triaging", n_changes=len(changes), entities=entity_ids)
 
         prompt_ctx = self._system_prompt[:3000]
+        enforced = self._enforced_preferences_prompt()
 
         prompt = (
             "You are Nova's proactive home monitor. Review these Home Assistant state "
             "changes and decide if any warrant a spoken announcement.\n\n"
-            f"Home context:\n{prompt_ctx}\n\n"
-            f"State changes:\n{lines}\n\n"
-            "STRICT RULES — the default answer is NO. Only announce if the event:\n"
-            "  • Is a genuine safety or security concern (alarm triggered, unexpected "
-            "door/lock change, smoke/CO detector, flood)\n"
-            "  • Requires immediate human action (door left open, critical alert)\n"
-            "  • Is a clear exception or anomaly that the household would want to know "
-            "RIGHT NOW and could not figure out themselves\n\n"
-            "DO NOT ANNOUNCE any of the following — return {\"announce\": false}:\n"
-            "  • Motion sensors, presence sensors, occupancy sensors detecting movement\n"
-            "  • Routine door open/close during normal waking hours\n"
-            "  • Any light, switch, or media player change\n"
-            "  • Person/device_tracker arriving or leaving home\n"
-            "  • Climate mode or setpoint changes\n"
-            "  • Any binary_sensor that is merely reporting a normal condition\n"
-            "  • Anything already handled by a dedicated HA automation\n\n"
-            f"{_SPOKEN_ANNOUNCEMENT_STYLE}\n"
-            "If you announce, name the room or device in the first sentence. "
-            "Keep it brief and concrete.\n\n"
-            "Reply with JSON only (no markdown fences):\n"
-            '{"announce": true, "message": "...", "priority": "normal"}\n'
-            "or\n"
-            '{"announce": false}'
+            + f"Home context:\n{prompt_ctx}\n\n"
+            + (f"{enforced}\n\n" if enforced else "")
+            + f"State changes:\n{lines}\n\n"
+            + "STRICT RULES — the default answer is NO. Only announce if the event:\n"
+            + "  • Is a genuine safety or security concern (alarm triggered, unexpected "
+            + "door/lock change, smoke/CO detector, flood)\n"
+            + "  • Requires immediate human action (door left open, critical alert)\n"
+            + "  • Is a clear exception or anomaly that the household would want to know "
+            + "RIGHT NOW and could not figure out themselves\n\n"
+            + "DO NOT ANNOUNCE any of the following — return {\"announce\": false}:\n"
+            + "  • Motion sensors, presence sensors, occupancy sensors detecting movement\n"
+            + "  • Routine door open/close during normal waking hours\n"
+            + "  • Any light, switch, or media player change\n"
+            + "  • Person/device_tracker arriving or leaving home\n"
+            + "  • Climate mode or setpoint changes\n"
+            + "  • Any binary_sensor that is merely reporting a normal condition\n"
+            + "  • Anything already handled by a dedicated HA automation\n\n"
+            + f"{_SPOKEN_ANNOUNCEMENT_STYLE}\n"
+            + "If you announce, name the room or device in the first sentence. "
+            + "Keep it brief and concrete.\n\n"
+            + "Reply with JSON only (no markdown fences):\n"
+            + '{"announce": true, "message": "...", "priority": "normal"}\n'
+            + "or\n"
+            + '{"announce": false}'
         )
 
         try:
@@ -1063,7 +1080,7 @@ class ProactiveService:
         )
 
         messages = [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": f"{self._enforced_preferences_prompt()}\n\n{self._system_prompt}".strip()},
             {"role": "user",   "content": task_msg},
         ]
 

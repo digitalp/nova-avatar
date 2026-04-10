@@ -918,6 +918,57 @@ class MetricsDB:
         with self._conn() as conn:
             return [dict(r) for r in conn.execute(sql, (limit,)).fetchall()]
 
+    def update_memory(
+        self,
+        memory_id: int,
+        *,
+        summary: str,
+        category: str = "general",
+        confidence: float = 0.5,
+        pinned: bool = False,
+    ) -> dict | None:
+        summary = " ".join(summary.split()).strip()
+        if not summary:
+            return None
+        category = (category or "general").strip().lower()[:40] or "general"
+        confidence = max(0.0, min(float(confidence), 1.0))
+        now = datetime.now(timezone.utc).isoformat()
+        fp = self._memory_fingerprint(summary, category)
+
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM long_term_memories WHERE id = ?",
+                (int(memory_id),),
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute(
+                """
+                UPDATE long_term_memories
+                SET updated_ts = ?,
+                    category = ?,
+                    summary = ?,
+                    confidence = ?,
+                    pinned = ?,
+                    fingerprint = ?
+                WHERE id = ?
+                """,
+                (
+                    now,
+                    category,
+                    summary,
+                    confidence,
+                    1 if pinned else 0,
+                    fp,
+                    int(memory_id),
+                ),
+            )
+            out = conn.execute(
+                "SELECT * FROM long_term_memories WHERE id = ?",
+                (int(memory_id),),
+            ).fetchone()
+        return dict(out) if out else None
+
     def delete_memory(self, memory_id: int) -> bool:
         with self._lock, self._conn() as conn:
             cur = conn.execute("DELETE FROM long_term_memories WHERE id = ?", (memory_id,))

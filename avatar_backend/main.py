@@ -272,6 +272,7 @@ async def lifespan(app: FastAPI):
         event_service=app.state.event_service,
         camera_event_service=app.state.camera_event_service,
         issue_autofix_service=app.state.issue_autofix_service,
+        memory_service=app.state.memory_service,
     )
     app.state.proactive_service = proactive
     await proactive.start()

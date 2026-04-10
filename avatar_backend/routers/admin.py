@@ -429,6 +429,22 @@ async def create_memory(body: MemoryBody, request: Request):
     return {"memory": memory}
 
 
+@router.put("/memory/{memory_id}")
+async def update_memory(memory_id: int, body: MemoryBody, request: Request):
+    _require_session(request, min_role="admin")
+    svc = request.app.state.memory_service
+    memory = svc.update_memory(
+        memory_id,
+        summary=body.summary,
+        category=body.category,
+        confidence=body.confidence,
+        pinned=body.pinned,
+    )
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"memory": memory}
+
+
 @router.delete("/memory")
 async def clear_memory(request: Request):
     _require_session(request, min_role="admin")

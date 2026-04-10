@@ -334,16 +334,17 @@ def _pcm_to_wav(pcm_bytes: bytes, sample_rate: int = 22050) -> bytes:
 
 
 async def _run_piper(piper_bin: str, model_path: str, text: str) -> bytes:
-    proc = await asyncio.create_subprocess_exec(
-        piper_bin,
-        "--model", model_path,
-        "--output_file", "-",
-        "--quiet",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate(input=text.encode("utf-8"))
+    with _suppress_process_stderr():
+        proc = await asyncio.create_subprocess_exec(
+            piper_bin,
+            "--model", model_path,
+            "--output_file", "-",
+            "--quiet",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate(input=text.encode("utf-8"))
     if proc.returncode != 0:
         raise RuntimeError(f"Piper exited {proc.returncode}: {stderr.decode()[:200]}")
     return stdout

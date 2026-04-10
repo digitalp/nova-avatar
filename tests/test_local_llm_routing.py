@@ -238,6 +238,35 @@ async def test_persistent_memory_uses_local_text_generation():
 
 
 @pytest.mark.asyncio
+async def test_persistent_memory_falls_back_to_primary_local_text_generation():
+    records = []
+
+    class FakeDB:
+        def upsert_memory(self, **kwargs):
+            records.append(kwargs)
+
+    llm = SimpleNamespace(
+        generate_text_local_fast_resilient=AsyncMock(side_effect=httpx.ReadTimeout("timed out")),
+        generate_text_local_resilient=AsyncMock(
+            return_value='[{"summary":"Penn prefers units spoken as words.","category":"preference","confidence":0.9}]'
+        ),
+    )
+    service = PersistentMemoryService(FakeDB())
+
+    await service._learn_from_exchange(
+        session_id="s1",
+        user_text="Please remember that units should be spoken as words.",
+        assistant_text="I will remember that preference.",
+        llm=llm,
+    )
+
+    llm.generate_text_local_fast_resilient.assert_awaited_once()
+    llm.generate_text_local_resilient.assert_awaited_once()
+    assert records
+    assert records[0]["category"] == "preference"
+
+
+@pytest.mark.asyncio
 async def test_motion_clip_ranking_uses_local_text_generation(tmp_path, monkeypatch):
     monkeypatch.setattr("avatar_backend.services.motion_clip_service.data_dir", lambda: tmp_path)
     llm = SimpleNamespace(generate_text_local=AsyncMock(return_value='{"ids":[2,1]}'))

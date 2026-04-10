@@ -44,6 +44,23 @@ class PersistentMemoryService:
     def delete_memory(self, memory_id: int) -> bool:
         return self._db.delete_memory(memory_id)
 
+    def update_memory(
+        self,
+        memory_id: int,
+        *,
+        summary: str,
+        category: str = "general",
+        confidence: float = 0.9,
+        pinned: bool = False,
+    ) -> dict | None:
+        return self._db.update_memory(
+            memory_id,
+            summary=summary,
+            category=category,
+            confidence=confidence,
+            pinned=pinned,
+        )
+
     def add_memory(
         self,
         *,
@@ -124,6 +141,32 @@ class PersistentMemoryService:
         )
         return context, ids
 
+    def build_enforced_preferences_context(self, limit: int = 8) -> tuple[str, list[int]]:
+        memories = self._db.list_memories(limit=300)
+        if not memories:
+            return "", []
+
+        chosen: list[dict] = []
+        for mem in memories:
+            category = str(mem.get("category", "general")).strip().lower()
+            summary = " ".join(str(mem.get("summary", "")).split()).strip()
+            if not summary:
+                continue
+            if mem.get("pinned") or category in {"preference", "policy"}:
+                chosen.append(mem)
+
+        if not chosen:
+            return "", []
+
+        chosen = chosen[:limit]
+        ids = [int(mem["id"]) for mem in chosen if str(mem.get("id", "")).isdigit()]
+        lines = [f"- [{mem.get('category', 'general')}] {mem.get('summary', '')}" for mem in chosen]
+        context = (
+            "Enforced household preferences and policies. These are binding unless the user explicitly overrides them in this turn.\n"
+            + "\n".join(lines)
+        )
+        return context, ids
+
     def mark_referenced(self, memory_ids: list[int]) -> None:
         self._db.mark_memories_referenced(memory_ids)
 
@@ -167,16 +210,25 @@ class PersistentMemoryService:
             f"Assistant:\n{assistant_text}\n"
         )
         try:
-            raw = await llm.generate_text_local_fast_resilient(
-                prompt,
-                timeout_s=8.0,
-                retry_delay_s=2.0,
-                fallback_timeout_s=10.0,
-                purpose="persistent_memory",
-            )
+            try:
+                raw = await llm.generate_text_local_fast_resilient(
+                    prompt,
+                    timeout_s=8.0,
+                    retry_delay_s=2.0,
+                    fallback_timeout_s=10.0,
+                    purpose="persistent_memory",
+                )
+            except Exception:
+                raw = await llm.generate_text_local_resilient(
+                    prompt,
+                    timeout_s=12.0,
+                    retry_delay_s=2.0,
+                    fallback_timeout_s=12.0,
+                    purpose="persistent_memory_fallback",
+                )
             memories = self._parse_memories(raw)
         except Exception as exc:
-            _LOGGER.warning("persistent_memory.learn_failed", session_id=session_id, exc=self._format_exc(exc))
+            _LOGGER.info("persistent_memory.learn_skipped", session_id=session_id, exc=self._format_exc(exc))
             return
 
         inserted = 0
