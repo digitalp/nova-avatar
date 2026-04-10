@@ -222,6 +222,15 @@ class ProactiveService:
             "llm_tag": f"{provider}:{model}",
         }
 
+    def _local_llm_fields(self) -> dict[str, str]:
+        provider = "ollama"
+        model = getattr(self._llm, "local_text_model_name", "unknown")
+        return {
+            "llm_provider": provider,
+            "llm_model": model,
+            "llm_tag": f"{provider}:{model}",
+        }
+
     def _gemini_llm_fields(self) -> dict[str, str]:
         provider = getattr(self._llm, "gemini_vision_provider_name", "google")
         model = getattr(self._llm, "gemini_vision_effective_model_name", "gemini")
@@ -950,6 +959,7 @@ class ProactiveService:
                 time=now_str,
                 **self._active_llm_fields(),
             )
+        await self._run_heating_shadow(messages, season=season, now_str=now_str)
 
         all_tool_calls: list[str] = []
 
@@ -1021,3 +1031,60 @@ class ProactiveService:
                 break
 
         _LOGGER.info("heating.eval_done")
+
+    async def _run_heating_shadow(self, messages: list[dict], *, season: str, now_str: str) -> None:
+        """Run a local-only heating evaluation pass without executing tools."""
+        if not hasattr(self._llm, "chat_local"):
+            return
+
+        _LOGGER.info("heating.shadow_eval_start")
+        if self._decision_log:
+            self._decision_log.record(
+                "heating_shadow_eval_start",
+                season=season,
+                time=now_str,
+                **self._local_llm_fields(),
+            )
+
+        try:
+            text, tool_calls = await self._llm.chat_local(list(messages), use_tools=True)
+        except Exception as exc:
+            _LOGGER.warning("heating.shadow_eval_failed", exc=str(exc)[:200])
+            if self._decision_log:
+                self._decision_log.record(
+                    "heating_shadow_eval_error",
+                    reason=str(exc)[:200],
+                    **self._local_llm_fields(),
+                )
+            return
+
+        if tool_calls:
+            summaries = [
+                f"{tc.function_name}({tc.arguments})"
+                for tc in tool_calls
+            ]
+            _LOGGER.info("heating.shadow_tool_calls", count=len(tool_calls))
+            if self._decision_log:
+                for tc in tool_calls:
+                    self._decision_log.record(
+                        "heating_shadow_tool_call",
+                        tool=tc.function_name,
+                        args={k: str(v)[:80] for k, v in tc.arguments.items()},
+                        **self._local_llm_fields(),
+                    )
+                self._decision_log.record(
+                    "heating_shadow_action",
+                    message=(text or "").strip()[:300],
+                    tool_calls=summaries,
+                    **self._local_llm_fields(),
+                )
+            return
+
+        reason = text.strip()[:200] if text else "no local action suggested"
+        _LOGGER.info("heating.shadow_eval_silent", reason=reason)
+        if self._decision_log:
+            self._decision_log.record(
+                "heating_shadow_eval_silent",
+                reason=reason,
+                **self._local_llm_fields(),
+            )

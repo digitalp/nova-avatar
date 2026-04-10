@@ -4399,6 +4399,8 @@ const _kindMeta = {
   chat_response:   { label:'💬 CHAT',    bg:'rgba(34,211,238,.12)', color:'#22d3ee' },
   motion_announce: { label:'📷 MOTION',  bg:'rgba(245,158,11,.15)', color:'#f59e0b' },
   weather_announce:{ label:'🌤 WEATHER', bg:'rgba(56,189,248,.12)', color:'#38bdf8' },
+  auto_fix_issue_attempt: { label:'🛠 AUTO-FIX', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  auto_fix_issue_resolved:{ label:'✓ FIXED',    bg:'rgba(74,222,128,.12)', color:'#4ade80' },
 };
 
 function _kindBadge(kind) {
@@ -4429,6 +4431,18 @@ function _decEntryHTML(e) {
   } else if (e.kind === 'motion_announce' || e.kind === 'weather_announce') {
     detail = `<span style="color:#f59e0b;">${e.camera || (e.old + ' → ' + e.new)}</span>`;
     if (e.message) detail += ` <span style="color:#86efac;">→ "${e.message}"</span>`;
+  } else if (e.kind === 'auto_fix_issue_attempt') {
+    const issue = e.issue_kind || 'unknown_issue';
+    const action = e.action || 'noop';
+    const ok = e.success ? '<span style="color:#4ade80;">✓</span>' : '<span style="color:#f43f5e;">✗</span>';
+    detail = `${ok} <span style="color:#facc15;">${issue}</span>`;
+    detail += ` <span style="color:var(--text3);">→ ${action}</span>`;
+    if (e.detail) detail += ` <span style="color:var(--text3);">(${e.detail})</span>`;
+    if (e.source) detail += ` <span style="color:var(--text3);">[${e.source}]</span>`;
+  } else if (e.kind === 'auto_fix_issue_resolved') {
+    const issue = e.issue_kind || 'unknown_issue';
+    detail = `<span style="color:#4ade80;">${issue}</span>`;
+    if (e.source) detail += ` <span style="color:var(--text3);">resolved via ${e.source}</span>`;
   }
   return `<div class="dec-entry" data-kind="${e.kind}"
                style="padding:5px 18px;border-bottom:1px solid rgba(255,255,255,.03);

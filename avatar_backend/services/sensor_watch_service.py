@@ -24,6 +24,8 @@ from typing import Awaitable, Callable
 import httpx
 import structlog
 import websockets
+from avatar_backend.config import get_settings
+from avatar_backend.services.llm_service import _select_local_text_model
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from avatar_backend.services.home_runtime import load_home_runtime_config
 
@@ -33,9 +35,6 @@ _LOGGER = structlog.get_logger()
 def _format_exc(exc: BaseException) -> str:
     message = str(exc).strip()
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
-
-# ── Ollama config ─────────────────────────────────────────────────────────────
-_OLLAMA_MODEL = "gemma2:9b"
 
 # ── Timing ────────────────────────────────────────────────────────────────────
 # How often to run the periodic snapshot review
@@ -174,10 +173,15 @@ def _spoken_unit(unit: str) -> str:
 
 # ── Minimal inline Ollama client ──────────────────────────────────────────────
 
-async def _ollama_generate(prompt: str, ollama_url: str, timeout_s: float = 90.0) -> str:
+async def _ollama_generate(
+    prompt: str,
+    ollama_url: str,
+    model: str,
+    timeout_s: float = 120.0,
+) -> str:
     """Single-shot text generation via local Ollama. No tools, low temperature."""
     payload = {
-        "model": _OLLAMA_MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 300},
@@ -211,6 +215,10 @@ class SensorWatchService:
         self._ollama_url   = ollama_url
         self._announce     = announce_fn
         self._issue_autofix_service = issue_autofix_service
+        settings = get_settings()
+        configured_model = (settings.sensor_watch_ollama_model or "").strip()
+        self._ollama_model = configured_model or _select_local_text_model(settings)
+        self._review_timeout_s = max(30.0, float(settings.sensor_watch_review_timeout_s))
         runtime = load_home_runtime_config()
         self._snapshot_exclude_prefixes = tuple(
             dict.fromkeys(_LEGACY_SNAPSHOT_EXCLUDE_PREFIXES + tuple(runtime.sensor_snapshot_exclude_prefixes))
@@ -232,15 +240,19 @@ class SensorWatchService:
     def _llm_fields(self) -> dict[str, str]:
         return {
             "llm_provider": "ollama",
-            "llm_model": _OLLAMA_MODEL,
-            "llm_tag": f"ollama:{_OLLAMA_MODEL}",
+            "llm_model": self._ollama_model,
+            "llm_tag": f"ollama:{self._ollama_model}",
         }
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="sensor_watch")
-        _LOGGER.info("sensor_watch.started", model=_OLLAMA_MODEL)
+        _LOGGER.info(
+            "sensor_watch.started",
+            model=self._ollama_model,
+            review_timeout_s=self._review_timeout_s,
+        )
 
     async def stop(self) -> None:
         if self._task:
@@ -582,13 +594,24 @@ class SensorWatchService:
         )
 
         try:
-            raw = await _ollama_generate(prompt, self._ollama_url, timeout_s=90.0)
+            raw = await _ollama_generate(
+                prompt,
+                self._ollama_url,
+                model=self._ollama_model,
+                timeout_s=self._review_timeout_s,
+            )
         except Exception as exc:
-            _LOGGER.warning("sensor_watch.review_ollama_failed", exc=_format_exc(exc))
+            _LOGGER.warning(
+                "sensor_watch.review_ollama_failed",
+                exc=_format_exc(exc),
+                model=self._ollama_model,
+                timeout_s=self._review_timeout_s,
+            )
             if self._decision_log:
                 self._decision_log.record(
                     "sensor_review_error",
                     reason=_format_exc(exc)[:200],
+                    timeout_s=self._review_timeout_s,
                     **self._llm_fields(),
                 )
             return

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from avatar_backend.services import llm_service as llm_module
+from avatar_backend.services.sensor_watch_service import SensorWatchService
 from avatar_backend.services.motion_clip_service import MotionClipService
 from avatar_backend.services.persistent_memory import PersistentMemoryService
 
@@ -93,3 +94,51 @@ async def test_motion_clip_ranking_uses_local_text_generation(tmp_path, monkeypa
 
     llm.generate_text_local.assert_awaited_once()
     assert ranked == [2, 1]
+
+
+@pytest.mark.asyncio
+async def test_sensor_watch_uses_preferred_local_model_and_timeout(monkeypatch):
+    monkeypatch.setattr(
+        "avatar_backend.services.sensor_watch_service.get_settings",
+        lambda: SimpleNamespace(
+            sensor_watch_ollama_model="",
+            sensor_watch_review_timeout_s=150.0,
+            ollama_local_text_model="",
+            ollama_url="http://localhost:11434",
+            ollama_model="llama3.1:8b-instruct-q4_K_M",
+        ),
+    )
+    monkeypatch.setattr(
+        "avatar_backend.services.sensor_watch_service._select_local_text_model",
+        lambda settings: "mistral-nemo:12b",
+    )
+    service = SensorWatchService(
+        ha_url="http://ha.local",
+        ha_token="token",
+        ollama_url="http://localhost:11434",
+        announce_fn=AsyncMock(),
+    )
+    monkeypatch.setattr(service, "_fetch_sensor_snapshot", AsyncMock(return_value=[
+        {
+            "entity_id": "sensor.room_temp",
+            "friendly": "Room Temperature",
+            "state": "12",
+            "unit": "°C",
+            "device_class": "temperature",
+        }
+    ]))
+    calls = {}
+
+    async def fake_ollama_generate(prompt, ollama_url, model, timeout_s=120.0):
+        calls["ollama_url"] = ollama_url
+        calls["model"] = model
+        calls["timeout_s"] = timeout_s
+        return '{"announce": false}'
+
+    monkeypatch.setattr("avatar_backend.services.sensor_watch_service._ollama_generate", fake_ollama_generate)
+
+    await service._run_snapshot_review()
+
+    assert calls["ollama_url"] == "http://localhost:11434"
+    assert calls["model"] == "mistral-nemo:12b"
+    assert calls["timeout_s"] == 150.0

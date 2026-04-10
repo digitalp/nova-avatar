@@ -835,6 +835,14 @@ class LLMService:
         """Strictly local text generation via the preferred Ollama model."""
         return await self._local_text_backend.generate_text(prompt, timeout_s=timeout_s)
 
+    async def chat_local(
+        self,
+        messages: list[dict[str, Any]],
+        use_tools: bool = True,
+    ) -> tuple[str, list[ToolCall]]:
+        """Strictly local chat via the preferred Ollama model."""
+        return await self._local_text_backend.chat(messages, use_tools)
+
     async def describe_image(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None) -> str:
         """Describe a camera image using vision capability of the active LLM provider."""
         _prompt = prompt or _DEFAULT_IMAGE_PROMPT
