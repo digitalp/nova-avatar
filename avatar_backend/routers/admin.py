@@ -346,6 +346,43 @@ async def save_config(body: ConfigUpdate, request: Request):
     return {"saved": True}
 
 
+# ── Speaker routing ────────────────────────────────────────────────────────────
+
+class SpeakerPrefsBody(BaseModel):
+    speakers: list[dict]
+
+
+@router.get("/speakers")
+async def get_speakers(request: Request):
+    _require_session(request, min_role="viewer")
+    svc = getattr(request.app.state, "speaker_service", None)
+    if svc is None:
+        return {"areas": [], "occupied_areas": []}
+    catalog = await svc.get_speaker_catalog()
+    occupied = await svc.get_occupied_areas()
+    # Group by area_name for the admin UI
+    area_map: dict[str, list[dict]] = {}
+    for sp in catalog:
+        area = sp.get("area_name") or "Unknown"
+        area_map.setdefault(area, []).append(sp)
+    areas = [
+        {"area_name": name, "speakers": speakers}
+        for name, speakers in sorted(area_map.items(), key=lambda x: x[0].lower())
+    ]
+    return {"areas": areas, "occupied_areas": occupied}
+
+
+@router.post("/speakers")
+async def save_speakers(body: SpeakerPrefsBody, request: Request):
+    _require_session(request, min_role="admin")
+    svc = getattr(request.app.state, "speaker_service", None)
+    if svc is None:
+        raise HTTPException(status_code=503, detail="Speaker service not available")
+    svc.set_speaker_preferences(body.speakers)
+    _LOGGER.info("admin.speakers_saved", count=len(body.speakers))
+    return {"saved": True}
+
+
 # ── System prompt ─────────────────────────────────────────────────────────────
 
 class TextBody(BaseModel):
