@@ -3436,6 +3436,7 @@ function navigate(el) {
   if (sec === 'speakers')  loadSpeakerConfig();
   if (sec === 'pylog')     initPylog();
   if (sec === 'motion')    loadMotionClips();
+  if (sec === 'tools')   { loadWakeStatus(); loadAnnouncementLog(); }
 }
 
 function refreshSection() {
