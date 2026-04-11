@@ -459,6 +459,11 @@ class RealtimeVoiceService:
                     _settings = _get_settings()
                     offset_s = _settings.speaker_audio_offset_ms / 1000.0
                     wav_bytes, word_timings = await adapter.synthesise_reply(ctx, reply_text)
+                    try:
+                        from avatar_backend.routers.announce import _log_announcement
+                        _log_announcement(reply_text, "normal", [], source="voice")
+                    except Exception:
+                        pass
                     if session_key and not await self._is_current_turn(session_key, turn_id):
                         finish_reason = "superseded"
                         await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
