@@ -613,14 +613,23 @@ class ProactiveService:
         description = str(result["archive_description"] or result["description"] or message)
 
         if result["suppressed"]:
-            _LOGGER.info("proactive.motion_suppressed", camera=camera_id, reason="owner_car_or_no_cause")
+            # Gemini confirmed nothing worth alerting — don't archive a clip.
+            # Coral may have triggered a false positive; Gemini is the final arbiter.
+            _LOGGER.info(
+                "proactive.motion_suppressed_no_archive",
+                camera=camera_id,
+                reason="gemini_no_motion",
+                coral_detections=_coral_detections,
+            )
             if self._decision_log:
                 self._decision_log.record(
                     "motion_suppressed",
                     camera=camera_id,
                     reason="NO_MOTION",
+                    coral_detections=_coral_detections,
                     **self._gemini_llm_fields(),
                 )
+            return
         elif result["raw_description"]:
             _LOGGER.info("proactive.motion_described", camera=camera_id,
                          chars=len(result["raw_description"]), delivery=is_delivery)
