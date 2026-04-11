@@ -1082,12 +1082,15 @@ async def get_avatar_settings(request: Request):
     import json as _json
     if _AVATAR_SETTINGS_FILE.exists():
         return _json.loads(_AVATAR_SETTINGS_FILE.read_text())
-    return {"skin_tone": 0, "avatar_url": ""}
+    return {"skin_tone": 0, "avatar_url": "", "bg_type": "color", "bg_color": "", "bg_image_url": ""}
 
 
 class AvatarSettings(BaseModel):
     skin_tone: int = 0
     avatar_url: str = ""
+    bg_type: str = "color"  # "color" or "image"
+    bg_color: str = ""  # hex color e.g. "#080d16"
+    bg_image_url: str = ""  # URL to background image
 
 
 @router.post("/avatar-settings")
