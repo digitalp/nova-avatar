@@ -23,6 +23,7 @@ from typing import Any
 from typing import Literal
 
 _AUDIO_CACHE_TTL = 60  # seconds before an unplayed cache entry expires
+_MP3_CACHE_TTL = 120  # Alexa may take longer to fetch the MP3
 
 import httpx
 import structlog
@@ -136,8 +137,21 @@ async def announce_handler(body: AnnounceRequest, request: Request):
                     cache.pop(k, None)
                 cache[token] = (wav_bytes, expiry)
                 audio_url = f"{public_url}/tts/audio/{token}"
+
+                # Convert WAV to Alexa-compatible MP3 for Echo devices
+                mp3_url = None
+                try:
+                    mp3_bytes = await _wav_to_alexa_mp3(wav_bytes)
+                    if mp3_bytes:
+                        mp3_token = uuid.uuid4().hex
+                        cache[f"mp3:{mp3_token}"] = (mp3_bytes, time.time() + _MP3_CACHE_TTL)
+                        mp3_url = f"{public_url}/tts/audio_mp3/{mp3_token}"
+                        _LOGGER.info("announce.mp3_ready", mp3_bytes=len(mp3_bytes), url=mp3_url)
+                except Exception as exc:
+                    _LOGGER.warning("announce.mp3_convert_failed", exc=str(exc))
+
                 speaker_task = asyncio.create_task(
-                    speaker.speak_wav(text, audio_url, target_areas=target_areas, area_aware=True)
+                    speaker.speak_wav(text, audio_url, mp3_url=mp3_url, target_areas=target_areas, area_aware=True)
                 )
             else:
                 speaker_task = asyncio.create_task(
@@ -597,3 +611,86 @@ async def serve_tts_audio(token: str, request: Request):
     if time.time() > expiry:
         raise HTTPException(status_code=404, detail="Audio not found or already played")
     return Response(content=data, media_type="audio/wav")
+
+
+@router.get(
+    "/tts/audio_mp3/{token}",
+    include_in_schema=False,
+    summary="Serve Alexa-compatible MP3 for SSML <audio> playback on Echo devices",
+)
+async def serve_tts_audio_mp3(token: str, request: Request):
+    """Serve an Alexa-compatible MP3.
+
+    Unlike the WAV endpoint, this does NOT pop the entry on first read because
+    Amazon's servers may retry the fetch.  The entry expires naturally via TTL.
+    """
+    cache: dict = getattr(request.app.state, "audio_cache", {})
+    entry = cache.get(f"mp3:{token}")
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Audio not found or expired")
+    data, expiry = entry
+    if time.time() > expiry:
+        cache.pop(f"mp3:{token}", None)
+        raise HTTPException(status_code=404, detail="Audio not found or expired")
+    return Response(content=data, media_type="audio/mpeg")
+
+
+# ── WAV → Alexa-compatible MP3 conversion ─────────────────────────────────────
+
+async def _wav_to_alexa_mp3(wav_bytes: bytes) -> bytes | None:
+    """Convert WAV to Alexa-compatible MP3 using ffmpeg.
+
+    Output format: stereo, libmp3lame, 48 kbps, 24 kHz, no Xing header.
+    This matches the format the Alexa Media Player integration uses.
+    """
+    import tempfile
+    import os
+
+    in_path = out_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as inf:
+            inf.write(wav_bytes)
+            in_path = inf.name
+        out_path = in_path.replace(".wav", "_alexa.mp3")
+
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", in_path,
+            "-ac", "2",
+            "-codec:a", "libmp3lame",
+            "-b:a", "48k",
+            "-ar", "24000",
+            "-write_xing", "0",
+            out_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+
+        if proc.returncode != 0:
+            _LOGGER.error("wav_to_mp3.ffmpeg_failed", returncode=proc.returncode,
+                          stderr=stderr.decode()[:200] if stderr else "")
+            return None
+
+        with open(out_path, "rb") as f:
+            mp3_bytes = f.read()
+
+        _LOGGER.debug("wav_to_mp3.ok", wav_size=len(wav_bytes), mp3_size=len(mp3_bytes))
+        return mp3_bytes
+
+    except asyncio.TimeoutError:
+        _LOGGER.error("wav_to_mp3.timeout")
+        return None
+    except FileNotFoundError:
+        _LOGGER.error("wav_to_mp3.ffmpeg_not_found",
+                      detail="ffmpeg is not installed — run: sudo apt install ffmpeg")
+        return None
+    except Exception as exc:
+        _LOGGER.error("wav_to_mp3.error", exc=str(exc))
+        return None
+    finally:
+        for path in (in_path, out_path):
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass

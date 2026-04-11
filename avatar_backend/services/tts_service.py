@@ -14,10 +14,15 @@ import re
 import struct
 import subprocess
 import threading
+import warnings
 import wave
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from pathlib import Path
+
+# Suppress phonemizer verbosity before the module is imported
+warnings.filterwarnings("ignore", message=".*words count mismatch.*")
+warnings.filterwarnings("ignore", message=".*phonemizer.*")
 
 import httpx
 import structlog
@@ -40,6 +45,8 @@ def _normalize_tts_text(text: str) -> str:
     text = text.replace("•", ". ").replace("–", "-").replace("—", "-")
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"\s*\n\s*", ". ", text)
+    text = re.sub(r"\s*\.\s*\.\s*", ". ", text)
+    text = re.sub(r"\.\s+\.", ".", text)
     text = re.sub(r"\.{2,}", ".", text)
     text = re.sub(r"([!?]){2,}", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -246,6 +253,74 @@ class AfroTTSService(BaseTTSService):
     def is_ready(self) -> bool:
         return True  # Kokoro downloads model weights on first use
 
+
+class IntronAfroTTSService(BaseTTSService):
+    """HTTP-backed XTTS sidecar for accented speech synthesis.
+
+    The sidecar runs in a Python 3.11 GPU container because Coqui TTS does not
+    currently support this app's Python 3.12 runtime directly.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        timeout_s: float = 90.0,
+        reference_wav: str = "",
+        language: str = "en",
+    ) -> None:
+        self._base_url = (base_url or "").rstrip("/")
+        self._timeout_s = max(float(timeout_s or 90.0), 5.0)
+        self._reference_wav = str(reference_wav or "").strip()
+        self._language = str(language or "en").strip() or "en"
+        self._sample_rate = 24000
+
+    async def synthesise_with_timing(self, text: str) -> tuple[bytes, list[dict]]:
+        wav_bytes = await self.synthesise(text)
+        return wav_bytes, _estimate_word_timings(text, wav_bytes)
+
+    async def synthesise(self, text: str) -> bytes:
+        text = _normalize_tts_text(text)
+        if not text:
+            return _silent_wav(self._sample_rate)
+        if not self._base_url:
+            raise RuntimeError("Intron Afro TTS URL is not configured.")
+        payload = {
+            "text": text,
+            "language": self._language,
+        }
+        if self._reference_wav:
+            payload["reference_wav"] = self._reference_wav
+        async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout_s)) as client:
+            resp = await client.post(
+                f"{self._base_url}/v1/synth",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+        wav_bytes = resp.content
+        _LOGGER.info(
+            "tts.intron_afro_tts.synthesised",
+            chars=len(text),
+            wav_bytes=len(wav_bytes),
+            reference_wav=bool(self._reference_wav),
+        )
+        return wav_bytes
+
+    async def is_ready_remote(self) -> bool:
+        if not self._base_url:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(min(self._timeout_s, 10.0))) as client:
+                resp = await client.get(f"{self._base_url}/health")
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    @property
+    def is_ready(self) -> bool:
+        return bool(self._base_url)
+
 def create_tts_service(settings) -> BaseTTSService:
     """Return the configured TTS service based on settings.tts_provider."""
     provider = (settings.tts_provider or "piper").lower().strip()
@@ -255,7 +330,9 @@ def create_tts_service(settings) -> BaseTTSService:
         "huggingface_hub",
         "huggingface_hub.utils._http",
     ):
-        structlog.stdlib.logging.getLogger(noisy_logger).setLevel("ERROR")
+        _nl = structlog.stdlib.logging.getLogger(noisy_logger)
+        _nl.setLevel("ERROR")
+        _nl.propagate = False
     if provider == "elevenlabs":
         _LOGGER.info("tts.provider", provider="elevenlabs",
                      voice_id=settings.elevenlabs_voice_id)
@@ -270,6 +347,20 @@ def create_tts_service(settings) -> BaseTTSService:
         return AfroTTSService(
             voice=settings.afrotts_voice,
             speed=settings.afrotts_speed,
+        )
+    if provider == "intron_afro_tts":
+        _LOGGER.info(
+            "tts.provider",
+            provider="intron_afro_tts",
+            url=settings.intron_afro_tts_url,
+            language=settings.intron_afro_tts_language,
+            reference_wav=bool(settings.intron_afro_tts_reference_wav),
+        )
+        return IntronAfroTTSService(
+            base_url=settings.intron_afro_tts_url,
+            timeout_s=settings.intron_afro_tts_timeout_s,
+            reference_wav=settings.intron_afro_tts_reference_wav,
+            language=settings.intron_afro_tts_language,
         )
     _LOGGER.info("tts.provider", provider="piper", voice=settings.piper_voice)
     return PiperTTSService(voice_name=settings.piper_voice)
@@ -418,4 +509,4 @@ def _silent_wav(sample_rate: int = 22050, duration_ms: int = 100) -> bytes:
 
 
 # Back-compat alias
-TTSService = PiperTTSService
+TTSService = BaseTTSService

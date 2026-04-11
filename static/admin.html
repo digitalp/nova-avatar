@@ -730,620 +730,483 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
 .dash-sys-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 16px; }
 @media (max-width: 720px) { .dash-sys-grid { grid-template-columns: 1fr 1fr; } }
 
-/* ── Motion search / event review ───────────────────────────────────────────── */
-.motion-hero {
-  display: grid;
-  gap: 18px;
-  padding: 22px;
-  border-radius: 18px;
+/* ── Find Anything — Apple-style redesign ──────────────────────────────────── */
+
+/* Search header */
+.fa-header { display: grid; gap: 12px; margin-bottom: 20px; }
+
+.fa-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fa-search-icon {
+  position: absolute;
+  left: 18px;
+  color: rgba(255,255,255,.30);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.fa-search-input {
+  width: 100%;
+  height: 52px;
+  padding: 0 120px 0 52px;
+  border-radius: 16px;
   border: 1px solid rgba(255,255,255,.10);
-  background:
-    radial-gradient(circle at top right, rgba(16,185,129,.10), transparent 28%),
-    radial-gradient(circle at top left, rgba(59,130,246,.12), transparent 36%),
-    linear-gradient(180deg, rgba(12,18,27,.98), rgba(7,10,17,.98));
-  box-shadow: 0 18px 44px rgba(0,0,0,.34);
-  margin-bottom: 16px;
+  background: rgba(255,255,255,.065);
+  color: #fff;
+  font-size: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-weight: 400;
+  outline: none;
+  transition: border-color .18s, background .18s;
+  -webkit-appearance: none;
 }
-.motion-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.04);
-  color: #b9c4d7;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
+
+.fa-search-input::placeholder { color: rgba(255,255,255,.25); }
+
+.fa-search-input:focus {
+  border-color: rgba(10,132,255,.55);
+  background: rgba(255,255,255,.09);
 }
-.motion-eyebrow::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 10px rgba(34,197,94,.65);
-}
-.motion-hero-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr);
-  gap: 18px;
-  align-items: start;
-}
-.motion-hero-copy {
-  display: grid;
-  gap: 10px;
-}
-.motion-hero-title { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
-.motion-hero-sub { font-size: 13px; color: #9db0c8; max-width: 760px; }
-.motion-kpis {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.motion-kpi {
-  padding: 14px 15px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
-}
-.motion-kpi-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: #7f8ca1;
-}
-.motion-kpi-value {
-  margin-top: 8px;
-  font-size: 22px;
-  font-weight: 700;
-  color: #f6fbff;
-  letter-spacing: -.04em;
-}
-.motion-kpi-sub {
-  margin-top: 3px;
-  font-size: 12px;
-  color: #9db0c8;
-}
-.motion-summary {
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 14px;
-  background: rgba(255,255,255,.03);
-  overflow: hidden;
-}
-.motion-summary summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
+
+.fa-search-btn {
+  position: absolute;
+  right: 10px;
+  padding: 7px 16px;
+  border-radius: 10px;
+  border: none;
+  background: #0A84FF;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   cursor: pointer;
-  list-style: none;
+  transition: opacity .15s;
+  letter-spacing: -.01em;
 }
-.motion-summary summary::-webkit-details-marker { display: none; }
-.motion-summary-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: #8ea1b8;
+.fa-search-btn:active { opacity: .75; }
+
+.fa-reset-btn {
+  flex-shrink: 0;
+  padding: 0 16px;
+  height: 52px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.55);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  white-space: nowrap;
 }
-.motion-summary-preview {
+.fa-reset-btn:hover { background: rgba(255,255,255,.09); color: #fff; }
+
+/* Camera filter pills */
+.fa-pill-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.motion-summary-caret {
-  color: #8ea1b8;
-  font-size: 12px;
-  transition: transform .15s ease;
-}
-.motion-summary[open] .motion-summary-caret {
-  transform: rotate(180deg);
-}
-.motion-summary-body {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 0 14px 14px;
-  border-top: 1px solid rgba(255,255,255,.06);
-}
-.motion-summary-chip {
-  display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 2px;
+  flex-wrap: nowrap;
+}
+.fa-pill-row::-webkit-scrollbar { display: none; }
+
+/* JS renders motion-camera-item buttons into motion-camera-list — pill style */
+.motion-camera-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
   border-radius: 999px;
-  background: rgba(255,255,255,.04);
-  border: 1px solid var(--border);
-  color: var(--text2);
+  border: 1px solid rgba(255,255,255,.11);
+  background: rgba(255,255,255,.055);
+  color: rgba(255,255,255,.65);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .15s, background .15s, color .15s;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+}
+.motion-camera-item:hover { border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.09); color: #fff; }
+.motion-camera-item.active { border-color: #0A84FF; background: rgba(10,132,255,.18); color: #fff; font-weight: 600; }
+.motion-camera-name { font-size: 13px; font-weight: inherit; color: inherit; word-break: normal; }
+.motion-camera-count { color: rgba(255,255,255,.40); font-size: 12px; font-weight: 600; }
+.motion-camera-item.active .motion-camera-count { color: rgba(255,255,255,.65); }
+
+/* Tab control */
+.fa-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 3px;
+  width: fit-content;
+  margin-bottom: 18px;
+}
+
+.fa-tab {
+  padding: 7px 20px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,.50);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  white-space: nowrap;
+}
+.fa-tab.active { background: rgba(255,255,255,.12); color: #fff; font-weight: 600; }
+
+/* Stats row */
+.fa-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.fa-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
   font-size: 12px;
   font-weight: 600;
+  color: rgba(255,255,255,.70);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
-.motion-summary-chip.ai {
-  background: rgba(34,211,238,.10);
-  color: #b6edf7;
-  border-color: rgba(34,211,238,.18);
+
+.fa-results-sub {
+  font-size: 12px;
+  color: rgba(255,255,255,.30);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
-.motion-summary-chip.green {
-  background: rgba(16,185,129,.10);
-  color: #bff6dd;
-  border-color: rgba(16,185,129,.18);
+
+.fa-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #30D158;
+  flex-shrink: 0;
+  animation: fa-pulse 2.4s infinite;
 }
-.motion-summary-chip strong {
-  color: var(--text);
-  font-size: 13px;
-}
-.motion-searchbar {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 10px;
-  align-items: end;
-}
-.motion-searchbar > .field:nth-child(1) { grid-column: span 2; }
-.motion-searchbar > .field:nth-child(2) { grid-column: span 2; }
-.motion-searchbar > .field:nth-child(3),
-.motion-searchbar > .field:nth-child(4),
-.motion-searchbar > .field:nth-child(5),
-.motion-searchbar > .field:nth-child(6) { grid-column: span 1; }
-.motion-searchbar > .btn { min-width: 0; }
-.motion-searchbar input, .motion-searchbar select {
-  width: 100%;
-}
-.motion-results-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-.motion-activity {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-.motion-activity-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-.motion-activity-title {
+@keyframes fa-pulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
+
+/* Section label */
+.fa-section-label {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
+  font-weight: 600;
+  letter-spacing: .04em;
   text-transform: uppercase;
-  color: #8ea1b8;
+  color: rgba(255,255,255,.30);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
-.motion-activity-note {
-  font-size: 11px;
-  color: #7f8ca1;
+
+/* Activity timeline */
+.fa-timeline { margin-bottom: 24px; }
+.fa-timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
 }
+.fa-timeline-note { font-size: 11px; color: rgba(255,255,255,.22); }
+
 .motion-activity-bars {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 8px;
+  gap: 4px;
+  align-items: end;
+  height: 36px;
 }
-.motion-insights {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.motion-insights-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-.motion-insight-card {
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
-  padding: 12px 14px;
-  display: grid;
-  gap: 8px;
-}
-.motion-insight-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: #8ea1b8;
-}
-.motion-insight-items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.motion-insight-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.035);
-  padding: 6px 10px;
-  font-size: 11px;
-  color: #dbe7f5;
-}
-.motion-insight-chip strong {
-  color: #7dd3fc;
-  font-weight: 700;
-}
-.motion-history {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.motion-history-list {
-  display: grid;
-  gap: 8px;
-}
-.motion-history-item {
-  display: grid;
-  gap: 8px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.08);
-  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
-  padding: 12px 14px;
-  cursor: pointer;
-  transition: border-color .15s, transform .15s, background .15s;
-}
-.motion-history-item:hover {
-  border-color: rgba(125,211,252,.32);
-  background: linear-gradient(180deg, rgba(36,64,94,.24), rgba(255,255,255,.02));
-  transform: translateY(-1px);
-}
-.motion-history-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.motion-history-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #eef6ff;
-}
-.motion-history-time {
-  font-size: 11px;
-  color: #8ea1b8;
-}
-.motion-history-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.motion-history-desc {
-  font-size: 12px;
-  color: #b8c4d6;
-  line-height: 1.5;
-}
-.motion-history-note-inline {
-  font-size: 11px;
-  color: var(--text2);
-  line-height: 1.45;
-  padding-left: 10px;
-  border-left: 2px solid rgba(129,140,248,.35);
-}
-.motion-history-note-inline strong {
-  color: #cfd9e8;
-  font-weight: 600;
-}
-.motion-activity-slot {
-  display: grid;
-  gap: 6px;
-}
+.motion-activity-slot { display: grid; gap: 3px; align-items: end; }
 .motion-activity-bar {
-  height: 42px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,.06);
-  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+  height: 28px;
+  border-radius: 4px;
+  border: none;
+  background: rgba(255,255,255,.05);
   overflow: hidden;
   display: flex;
-  align-items: end;
+  align-items: flex-end;
 }
 .motion-activity-fill {
   width: 100%;
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(34,211,238,.70), rgba(59,130,246,.95));
-  min-height: 4px;
+  border-radius: 3px;
+  background: #0A84FF;
+  opacity: .70;
+  min-height: 3px;
 }
-.motion-activity-label {
-  font-size: 10px;
-  color: #7f8ca1;
-  text-align: center;
-}
-.motion-layout {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 16px;
-}
-.motion-sidebar {
-  padding: 16px;
-  border-radius: 18px;
+.motion-activity-label { font-size: 9px; color: rgba(255,255,255,.18); text-align: center; }
+.motion-activity-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.motion-activity-title { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:#8ea1b8; }
+.motion-activity-note { font-size:11px; color:#7f8ca1; }
+
+/* Event history filter bar */
+.fa-history-bar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.08);
-  background: linear-gradient(180deg, rgba(15,21,31,.98), rgba(7,10,17,.98));
-  box-shadow: 0 16px 36px rgba(0,0,0,.28);
-  align-self: start;
-  position: sticky;
-  top: 24px;
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
 }
-.motion-side-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
+.fa-history-bar .field { min-width: 120px; flex: 1; margin: 0; }
+.fa-history-bar .field label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
   text-transform: uppercase;
-  color: #7f8ca1;
-  margin-bottom: 12px;
+  color: rgba(255,255,255,.32);
+  margin-bottom: 6px;
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
-.motion-camera-list {
+
+/* Workflow queue */
+.fa-queue-card {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  padding: 14px 18px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
-.motion-camera-item {
+.fa-queue-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 11px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,.06);
-  background: rgba(255,255,255,.03);
-  color: #d7e0ec;
-  cursor: pointer;
-  transition: border-color .15s, background .15s, transform .15s;
-}
-.motion-camera-item:hover {
-  border-color: rgba(255,255,255,.14);
-  background: rgba(255,255,255,.05);
-  transform: translateY(-1px);
-}
-.motion-camera-item.active {
-  border-color: rgba(59,130,246,.34);
-  background: rgba(59,130,246,.12);
-}
-.motion-camera-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: #eef6ff;
-  word-break: break-word;
-}
-.motion-camera-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: rgba(255,255,255,.07);
-  color: #b8c4d6;
-  font-size: 11px;
-  font-weight: 700;
-}
-.motion-side-note {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255,255,255,.06);
-  font-size: 12px;
-  color: #91a3ba;
-  line-height: 1.5;
-}
-.motion-results-meta {
-  display: flex;
-  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-.motion-results-badge {
+.fa-queue-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Insight/stat chips (used by JS workflow summary renderer) */
+.motion-stat {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  background: rgba(255,255,255,.04);
-  border: 1px solid var(--border);
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: #b5c0d0;
+  color: rgba(255,255,255,.50);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
-.motion-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+.motion-stat strong { color: #fff; font-weight: 700; }
+
+.motion-insights, .motion-insights-grid, .motion-insight-card,
+.motion-insight-label, .motion-insight-items { /* JS compat — invisible */ }
+.motion-insight-chip {
+  display: none; /* hidden in new design */
 }
-.motion-group {
-  display: grid;
-  gap: 12px;
-}
+.motion-insight-chip strong { color: #7dd3fc; font-weight: 700; }
+
+/* Group structure — used by JS renderMotionClips */
+.motion-grid { display: grid; gap: 28px; }
+
+.motion-group { display: grid; gap: 14px; }
+
 .motion-group-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 2px;
+  gap: 10px;
+  padding-bottom: 2px;
 }
 .motion-group-title {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: #93a4bb;
-}
-.motion-group-count {
   font-size: 11px;
-  color: #7f8ca1;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.30);
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
+.motion-group-count { font-size: 11px; color: rgba(255,255,255,.20); }
+
 .motion-group-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
 }
+
+/* Motion cards — Apple-style */
 .motion-card {
   display: grid;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 16px;
   border: 1px solid rgba(255,255,255,.08);
-  background: linear-gradient(180deg, rgba(15,21,31,.98), rgba(7,10,17,.98));
-  box-shadow: 0 16px 36px rgba(0,0,0,.34);
-  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  background: rgba(255,255,255,.05);
+  transition: transform .20s ease, border-color .20s ease;
+  cursor: pointer;
 }
-.motion-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(255,255,255,.16);
-  box-shadow: 0 22px 44px rgba(0,0,0,.42);
-}
+.motion-card:hover { transform: scale(1.012); border-color: rgba(255,255,255,.16); box-shadow: none; }
+
 .motion-card-media {
   position: relative;
-  background: #05070d;
+  background: #000;
+  border-bottom: 1px solid rgba(255,255,255,.05);
 }
 .motion-card video,
 .motion-card-fallback {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  background: #05070d;
+  display: block;
+  background: #0a0a0a;
 }
 .motion-card-fallback {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text3);
+  color: rgba(255,255,255,.18);
   font-size: 12px;
 }
+
 .motion-card-overlay {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
+  inset: 0;
+  bottom: auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  background: linear-gradient(180deg, rgba(3,6,12,.72), transparent 72%);
+  gap: 8px;
+  padding: 10px;
+  background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, transparent 100%);
   pointer-events: none;
 }
+
 .motion-card-badge,
 .motion-card-age {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 9px;
+  gap: 5px;
+  padding: 4px 9px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(6,10,18,.78);
-  color: #f3f8ff;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  background: rgba(0,0,0,.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,.12);
+  color: rgba(255,255,255,.90);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
+
 .motion-card-badge::before {
   content: '';
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: #22c55e;
+  background: #30D158;
+  flex-shrink: 0;
 }
-.motion-card-badge.ai::before { background: #22d3ee; }
-.motion-card-badge.review::before { background: #818cf8; }
-.motion-card-body {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-}
+.motion-card-badge.ai::before { background: #0A84FF; }
+.motion-card-badge.review::before { background: rgba(255,255,255,.45); }
+
+.motion-card-body { display: grid; gap: 10px; padding: 14px 16px 16px; }
+
 .motion-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
-.motion-card-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-.motion-card-time {
-  font-size: 12px;
-  color: var(--text3);
-}
-.motion-card-id {
-  font-size: 11px;
-  color: var(--text3);
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-.motion-card-camera {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: #7f8ca1;
-}
-.motion-chip-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
+.motion-card-title { font-size: 14px; font-weight: 600; color: #fff; line-height: 1.3; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+.motion-card-time { font-size: 11px; color: rgba(255,255,255,.32); margin-top: 2px; }
+.motion-card-id { font-size: 10px; color: rgba(255,255,255,.20); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; padding-top: 2px; }
+.motion-card-camera { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.30); margin-top: 2px; }
+
+.motion-chip-row { display: flex; gap: 5px; flex-wrap: wrap; }
 .motion-chip {
   display: inline-flex;
   align-items: center;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border2);
-  background: rgba(129,140,248,.10);
-  color: var(--text2);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.09);
+  background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.50);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
-.motion-chip.search {
-  background: rgba(34,211,238,.12);
-  color: var(--cyan);
-  border-color: rgba(34,211,238,.22);
-}
-.motion-chip.good {
-  background: rgba(16,185,129,.10);
-  color: #c7f9de;
-  border-color: rgba(16,185,129,.20);
-}
+.motion-chip.search { background: rgba(10,132,255,.12); color: rgba(10,132,255,.90); border-color: rgba(10,132,255,.20); }
+.motion-chip.good { background: rgba(48,209,88,.10); color: rgba(48,209,88,.85); border-color: rgba(48,209,88,.18); }
+.motion-chip.info { background: rgba(10,132,255,.10); color: rgba(10,132,255,.80); border-color: rgba(10,132,255,.15); }
+
 .motion-card-desc {
-  font-size: 13px;
-  color: var(--text2);
-  line-height: 1.45;
-  min-height: 62px;
+  font-size: 12px;
+  color: rgba(255,255,255,.48);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.motion-mark {
-  padding: 0 4px;
-  border-radius: 4px;
-  background: rgba(34,211,238,.18);
-  color: #eefbff;
-}
-.motion-card-note {
-  font-size: 11px;
-  color: var(--text3);
-  letter-spacing: .03em;
-  text-transform: uppercase;
-}
-.motion-card-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+
+.motion-mark { padding: 0 3px; border-radius: 3px; background: rgba(10,132,255,.22); color: #70b8ff; }
+.motion-card-note { font-size: 11px; color: rgba(255,255,255,.26); }
+.motion-card-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 2px; }
+
 .motion-empty {
-  padding: 26px;
-  border: 1px dashed var(--border2);
-  border-radius: var(--radius);
-  color: var(--text3);
+  padding: 40px 24px;
   text-align: center;
+  color: rgba(255,255,255,.26);
+  font-size: 14px;
+  border: 1px dashed rgba(255,255,255,.09);
+  border-radius: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
+
+/* Event history list items */
+.motion-history-list { display: grid; gap: 6px; }
+.motion-history-item {
+  display: grid;
+  gap: 8px;
+  border-radius: 13px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(255,255,255,.04);
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  transition: border-color .15s, background .15s;
+}
+.motion-history-item:hover { border-color: rgba(10,132,255,.28); background: rgba(255,255,255,.06); transform: none; }
+.motion-history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.motion-history-title { font-size: 13px; font-weight: 600; color: #fff; }
+.motion-history-time { font-size: 11px; color: rgba(255,255,255,.30); }
+.motion-history-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.motion-history-desc { font-size: 12px; color: rgba(255,255,255,.42); line-height: 1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.motion-history-note-inline { font-size:11px; color:rgba(255,255,255,.36); line-height:1.45; padding-left:10px; border-left:2px solid rgba(10,132,255,.28); }
+.motion-history-note-inline strong { color:rgba(255,255,255,.55); font-weight:600; }
+
+/* Modal — Apple style */
 .motion-modal {
   position: fixed;
   inset: 0;
@@ -1351,189 +1214,108 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 30px;
-  background: rgba(4,6,12,.82);
-  backdrop-filter: blur(4px);
+  padding: 24px;
+  background: rgba(0,0,0,.78);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 .motion-modal.show { display: flex; }
+
 .motion-modal-card {
-  width: min(1220px, 96vw);
+  width: min(1180px, 96vw);
   max-height: 92vh;
   overflow: auto;
-  border-radius: 18px;
-  border: 1px solid var(--border2);
-  background: linear-gradient(180deg, rgba(17,24,39,.98), rgba(8,12,22,.98));
-  box-shadow: var(--shadow-lg);
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(28,28,30,.98);
+  box-shadow: 0 32px 80px rgba(0,0,0,.72);
 }
 .motion-modal-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px;
-  border-bottom: 1px solid var(--border);
+  padding: 18px 22px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
 }
-.motion-modal-title {
-  font-size: 17px;
-  font-weight: 700;
-}
+.motion-modal-title { font-size: 16px; font-weight: 700; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
 .motion-modal-close {
-  background: transparent;
-  border: 0;
-  color: var(--text2);
-  font-size: 28px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,.10);
+  border: none;
+  border-radius: 50%;
+  color: rgba(255,255,255,.60);
+  font-size: 16px;
   cursor: pointer;
+  line-height: 1;
+  transition: background .15s, color .15s;
 }
+.motion-modal-close:hover { background: rgba(255,255,255,.18); color: #fff; }
+
 .motion-modal-body {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, .85fr);
-  gap: 20px;
-  padding: 20px;
-}
-.motion-modal video {
-  width: 100%;
-  border-radius: 14px;
-  background: #05070d;
-}
-.motion-modal-fallback {
-  display: none;
-  min-height: 260px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background:
-    radial-gradient(circle at top right, rgba(34,211,238,.14), transparent 36%),
-    linear-gradient(160deg, rgba(129,140,248,.12), rgba(8,12,22,.92));
-  padding: 24px;
-  align-items: flex-end;
-}
-.motion-modal-fallback.show { display: flex; }
-.motion-modal-fallback-copy { max-width: 520px; }
-.motion-modal-fallback-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: .9px;
-  color: var(--text3);
-  margin-bottom: 8px;
-}
-.motion-modal-fallback-title {
-  font-size: 28px;
-  line-height: 1.05;
-  letter-spacing: -.5px;
-  margin-bottom: 10px;
-}
-.motion-modal-fallback-sub {
-  color: var(--text2);
-  max-width: 52ch;
+  grid-template-columns: minmax(0, 1.6fr) minmax(300px, .75fr);
 }
 .motion-modal-stage {
   display: grid;
   gap: 14px;
+  padding: 20px;
+  border-right: 1px solid rgba(255,255,255,.07);
+  align-content: start;
 }
-.motion-modal-strip {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.motion-modal-side {
-  display: grid;
-  gap: 12px;
-}
-.motion-modal-nav {
-  display: flex;
-  gap: 8px;
-}
-.motion-meta-block {
-  padding: 14px;
-  border-radius: 14px;
+.motion-modal video { width: 100%; border-radius: 12px; background: #000; display: block; }
+.motion-modal-fallback {
+  display: none;
+  min-height: 220px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.08);
   background: rgba(255,255,255,.03);
-  border: 1px solid var(--border);
+  padding: 24px;
+  align-items: center;
 }
-.motion-meta-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text3);
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-.motion-meta-value {
-  font-size: 13px;
-  color: var(--text);
-  line-height: 1.5;
-}
-.motion-meta-grid {
-  display: grid;
-  gap: 10px;
-}
-.motion-meta-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 0;
-  border-bottom: 1px solid rgba(255,255,255,.05);
-}
+.motion-modal-fallback.show { display: flex; }
+.motion-modal-fallback-copy { max-width: 520px; }
+.motion-modal-fallback-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.30); font-weight: 600; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+.motion-modal-fallback-title { font-size: 22px; font-weight: 700; letter-spacing: -.3px; margin-bottom: 8px; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+.motion-modal-fallback-sub { font-size: 13px; color: rgba(255,255,255,.48); line-height: 1.5; max-width: 52ch; }
+.motion-modal-strip { display: flex; gap: 6px; flex-wrap: wrap; }
+.motion-modal-side { display: grid; gap: 0; overflow-y: auto; max-height: 80vh; padding: 20px; align-content: start; }
+.motion-modal-nav { display: flex; gap: 8px; margin-bottom: 16px; }
+
+.motion-meta-block { padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.motion-meta-block:last-child { border-bottom: 0; }
+.motion-meta-label { font-size: 10px; font-weight: 600; color: rgba(255,255,255,.28); letter-spacing: .07em; text-transform: uppercase; margin-bottom: 8px; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+.motion-meta-value { font-size: 13px; color: rgba(255,255,255,.78); line-height: 1.55; }
+.motion-meta-grid { display: grid; gap: 8px; }
+.motion-meta-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
 .motion-meta-row:last-child { border-bottom: 0; padding-bottom: 0; }
-.motion-meta-key {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: #7f8ca1;
-}
-.motion-meta-row .motion-meta-value {
-  text-align: right;
-}
-@media (max-width: 1180px) {
-  .motion-searchbar {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-  .motion-searchbar > .field:nth-child(1),
-  .motion-searchbar > .field:nth-child(2) { grid-column: span 2; }
-  .motion-searchbar > .field:nth-child(3),
-  .motion-searchbar > .field:nth-child(4),
-  .motion-searchbar > .field:nth-child(5),
-  .motion-searchbar > .field:nth-child(6),
-  .motion-searchbar > .btn { grid-column: span 1; }
-  .motion-layout {
-    grid-template-columns: 1fr;
-  }
-  .motion-sidebar {
-    position: static;
-  }
-}
+.motion-meta-key { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.30); }
+.motion-meta-row .motion-meta-value { text-align: right; font-size: 12px; }
+
+/* Sidebar note */
+.motion-side-note { margin-top:14px; padding-top:14px; border-top:1px solid rgba(255,255,255,.06); font-size:12px; color:#91a3ba; line-height:1.5; }
+
+/* Results meta (hidden in new design, kept for JS compat) */
+.motion-results-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.motion-results-badge { display:none; }
+.motion-results-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
+
+/* Responsive */
 @media (max-width: 960px) {
-  .motion-hero-top {
-    grid-template-columns: 1fr;
-  }
-  .motion-searchbar {
-    grid-template-columns: 1fr 1fr;
-  }
-  .motion-searchbar > .field,
-  .motion-searchbar > .btn { grid-column: span 1; }
-  .motion-results-toolbar,
-  .motion-activity-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .motion-insights-grid {
-    grid-template-columns: 1fr;
-  }
-  .motion-modal-body {
-    grid-template-columns: 1fr;
-  }
+  .motion-modal-body { grid-template-columns: 1fr; }
+  .motion-modal-stage { border-right: none; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .motion-group-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 }
 @media (max-width: 640px) {
-  .motion-searchbar {
-    grid-template-columns: 1fr;
-  }
-  .motion-activity-bars {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-  .motion-group-grid,
-  .motion-grid {
-    grid-template-columns: 1fr;
-  }
+  .fa-search-input { font-size: 15px; }
+  .motion-group-grid { grid-template-columns: 1fr; }
+  .motion-activity-bars { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
+
 
 </style>
 </head>
@@ -1691,6 +1473,10 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
         <div class="stat-card">
           <div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
           <div class="stat-body"><div class="stat-label">Home Assistant</div><div class="stat-value" id="h-ha">—</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon yellow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></div>
+          <div class="stat-body"><div class="stat-label">Intron Afro TTS</div><div class="stat-value" id="h-intron">—</div></div>
         </div>
       </div>
 
@@ -1989,253 +1775,189 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
 
     <!-- ══════════════ FIND ANYTHING ══════════════ -->
     <div id="section-motion" class="section">
-      <div class="page-header">
-        <div class="page-title">Find Anything</div>
-        <div class="page-sub">Nova-native motion archive with AI descriptions, playback, and natural-language search</div>
+
+      <!-- Search header -->
+      <div class="fa-header">
+        <div class="fa-search-wrap">
+          <svg class="fa-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input id="motion-query" type="text" class="fa-search-input" placeholder="Search clips, events, or locations…" onkeydown="if(event.key==='Enter')searchMotionClips()">
+          <button class="fa-search-btn" onclick="searchMotionClips()">Search</button>
+        </div>
+
+        <!-- Camera filter pills — JS populates this with motion-camera-item buttons -->
+        <div class="fa-pill-row" id="motion-camera-list"></div>
+
+        <!-- Hidden form controls read by JS filter functions -->
+        <select id="motion-camera" style="display:none" onchange="setMotionCamera(this.value)"></select>
+        <select id="motion-event-type" style="display:none" onchange="setMotionEventType(this.value)"></select>
+        <select id="motion-group-mode" style="display:none" onchange="setMotionGroupMode(this.value)">
+          <option value="day">Day</option>
+          <option value="event_type">Event Type</option>
+          <option value="source">Source</option>
+          <option value="status">Status</option>
+        </select>
+        <select id="motion-preset" style="display:none" onchange="setMotionPreset(this.value)">
+          <option value="">Custom search</option>
+          <option value="person at door">Person at door</option>
+          <option value="vehicle in driveway">Vehicle in driveway</option>
+          <option value="package delivery">Package delivery</option>
+          <option value="motion in garden">Motion in garden</option>
+          <option value="person near outdoor 1">Person near Outdoor 1</option>
+          <option value="person near outdoor 2">Person near Outdoor 2</option>
+          <option value="doorbell visitor">Doorbell visitor</option>
+        </select>
+        <input id="motion-date" type="date" style="display:none">
+        <input id="motion-start" type="time" style="display:none">
+        <input id="motion-end" type="time" style="display:none">
       </div>
 
-      <div class="motion-hero">
-        <div class="motion-hero-top">
-          <div class="motion-hero-copy">
-            <div class="motion-eyebrow">AI Evidence Review</div>
-            <div class="motion-hero-title">Search motion clips like an incident console</div>
-            <div class="motion-hero-sub">
-            Nova captures short motion clips, writes an AI description for each event, and lets you investigate the archive with natural language.
-            </div>
-          </div>
-          <div class="motion-kpis">
-            <div class="motion-kpi">
-              <div class="motion-kpi-label">Indexed Events</div>
-              <div id="motion-count-hero" class="motion-kpi-value">0</div>
-              <div class="motion-kpi-sub">playable clips in archive</div>
-            </div>
-            <div class="motion-kpi">
-              <div class="motion-kpi-label">Review Mode</div>
-              <div id="motion-mode-hero" class="motion-kpi-value" style="font-size:18px;">Recent</div>
-              <div class="motion-kpi-sub">AI-ranked when a search is active</div>
-            </div>
-          </div>
+      <!-- View tabs -->
+      <div class="fa-tabs">
+        <button class="fa-tab active" id="fa-tab-clips" onclick="
+          document.getElementById('fa-pane-clips').style.display='';
+          document.getElementById('fa-pane-history').style.display='none';
+          document.querySelectorAll('.fa-tab').forEach(t=>t.classList.remove('active'));
+          this.classList.add('active');
+        ">Motion Archive</button>
+        <button class="fa-tab" id="fa-tab-history" onclick="
+          document.getElementById('fa-pane-clips').style.display='none';
+          document.getElementById('fa-pane-history').style.display='';
+          document.querySelectorAll('.fa-tab').forEach(t=>t.classList.remove('active'));
+          this.classList.add('active');
+          loadEventHistory();
+        ">Event History</button>
+      </div>
+
+      <!-- Stats row -->
+      <div class="fa-stats-row">
+        <span id="motion-results-count" class="fa-count-badge">
+          <span class="fa-live-dot"></span>0 results
+        </span>
+        <span id="motion-results-sub" class="fa-results-sub">Recent Nova-indexed motion clips</span>
+        <!-- JS compat: hidden KPI spans -->
+        <span id="motion-count-hero" style="display:none">0</span>
+        <span id="motion-mode-hero" style="display:none">Recent</span>
+        <span id="motion-count-chip" style="display:none">0</span>
+        <span id="motion-mode-chip" style="display:none">Recent</span>
+        <span id="motion-count-chip-body" style="display:none">0</span>
+        <span id="motion-mode-chip-body" style="display:none">Recent</span>
+      </div>
+
+      <!-- Activity timeline -->
+      <div class="fa-timeline">
+        <div class="fa-timeline-head">
+          <span class="fa-section-label">Activity — last 24h</span>
+          <span id="motion-activity-note" class="fa-timeline-note"></span>
         </div>
-        <details class="motion-summary">
-          <summary>
-            <div class="motion-summary-label">Archive Details</div>
-            <div class="motion-summary-preview">
-              <div class="motion-summary-chip"><strong id="motion-count-chip">0</strong> clips</div>
-              <div class="motion-summary-chip"><strong id="motion-mode-chip">Recent</strong> mode</div>
-              <div class="motion-summary-caret">▼</div>
+        <div id="motion-activity-bars" class="motion-activity-bars"></div>
+      </div>
+
+      <!-- Pane: Motion Archive -->
+      <div id="fa-pane-clips">
+        <div id="motion-grid" class="motion-grid">
+          <div class="motion-empty">Loading motion archive…</div>
+        </div>
+      </div>
+
+      <!-- Pane: Event History -->
+      <div id="fa-pane-history" style="display:none">
+
+        <!-- Workflow queue -->
+        <div class="fa-queue-card">
+          <div class="fa-queue-head">
+            <span class="fa-section-label">Open Loop Queue</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-outline btn-sm" onclick="runEventHistoryWorkflow({ includeReminders: true, includeEscalations: false })">Apply Reminders</button>
+              <button class="btn btn-outline btn-sm" onclick="runEventHistoryWorkflow({ includeReminders: false, includeEscalations: true })">Apply Escalations</button>
             </div>
-          </summary>
-          <div class="motion-summary-body">
-            <div class="motion-summary-chip"><strong id="motion-count-chip-body">0</strong> indexed clips</div>
-            <div class="motion-summary-chip"><strong id="motion-mode-chip-body">Recent</strong> review mode</div>
-            <div class="motion-summary-chip ai"><strong>AI</strong> natural-language retrieval</div>
-            <div class="motion-summary-chip green"><strong>Local</strong> archived playback</div>
           </div>
-        </details>
-        <div class="motion-searchbar">
-          <div class="field" style="margin:0;">
-            <label for="motion-preset">Preset</label>
-            <select id="motion-preset" onchange="setMotionPreset(this.value)">
-              <option value="">Custom search</option>
-              <option value="person at door">Person at door</option>
-              <option value="vehicle in driveway">Vehicle in driveway</option>
-              <option value="package delivery">Package delivery</option>
-              <option value="motion in garden">Motion in garden</option>
-              <option value="person near outdoor 1">Person near Outdoor 1</option>
-              <option value="person near outdoor 2">Person near Outdoor 2</option>
-              <option value="doorbell visitor">Doorbell visitor</option>
+          <div class="fa-queue-chips" id="motion-history-open-loop"></div>
+        </div>
+
+        <!-- History filters -->
+        <div class="fa-history-bar">
+          <div class="field" style="margin:0;min-width:130px;flex:1;">
+            <label for="event-history-preset">Preset</label>
+            <select id="event-history-preset" onchange="applyEventHistoryPreset(this.value)">
+              <option value="">Custom View</option>
+              <option value="needs_attention">Needs Attention</option>
+              <option value="deliveries">Deliveries</option>
+              <option value="door_events">Door Events</option>
+              <option value="motion_review">Motion Review</option>
             </select>
           </div>
-          <div class="field" style="margin:0;">
-            <label for="motion-query">Ask Nova</label>
-            <input id="motion-query" type="text" placeholder="e.g. red car on driveway, package delivery, person at gate">
+          <div class="field" style="margin:0;min-width:160px;flex:2;">
+            <label for="event-history-query">Search</label>
+            <input id="event-history-query" type="text" placeholder="Search events, notes, or sources" onkeydown="handleEventHistorySearchKey(event)">
           </div>
-          <div class="field" style="margin:0;">
-            <label for="motion-date">Date</label>
-            <input id="motion-date" type="date">
-          </div>
-          <div class="field" style="margin:0;">
-            <label for="motion-start">Start</label>
-            <input id="motion-start" type="time">
-          </div>
-          <div class="field" style="margin:0;">
-            <label for="motion-end">End</label>
-            <input id="motion-end" type="time">
-          </div>
-          <div class="field" style="margin:0;">
-            <label for="motion-camera">Camera</label>
-            <select id="motion-camera" onchange="setMotionCamera(this.value)">
-              <option value="">All Cameras</option>
+          <div class="field" style="margin:0;min-width:110px;flex:1;">
+            <label for="event-history-window">Window</label>
+            <select id="event-history-window" onchange="setEventHistoryWindow(this.value)">
+              <option value="24h">Last 24h</option>
+              <option value="3d">Last 3 days</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
             </select>
           </div>
-          <div class="field" style="margin:0;">
-            <label for="motion-event-type">Event Type</label>
-            <select id="motion-event-type" onchange="setMotionEventType(this.value)">
+          <div class="field" style="margin:0;min-width:110px;flex:1;">
+            <label for="event-history-kind">Kind</label>
+            <select id="event-history-kind" onchange="setEventHistoryKind(this.value)">
+              <option value="">All Kinds</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;min-width:120px;flex:1;">
+            <label for="event-history-type">Event Type</label>
+            <select id="event-history-type" onchange="setEventHistoryEventType(this.value)">
               <option value="">All Event Types</option>
             </select>
           </div>
-          <div class="field" style="margin:0;">
-            <label for="motion-group-mode">Group By</label>
-            <select id="motion-group-mode" onchange="setMotionGroupMode(this.value)">
-              <option value="day">Day</option>
-              <option value="event_type">Event Type</option>
-              <option value="source">Source</option>
-              <option value="status">Status</option>
+          <div class="field" style="margin:0;min-width:110px;flex:1;">
+            <label for="event-history-source">Source</label>
+            <select id="event-history-source" onchange="setEventHistorySource(this.value)">
+              <option value="">All Sources</option>
             </select>
           </div>
-          <button class="btn btn-primary" onclick="searchMotionClips()">Search</button>
-          <button class="btn btn-outline" onclick="resetMotionFilters()">Reset</button>
+          <div class="field" style="margin:0;min-width:110px;flex:1;">
+            <label for="event-history-status">Status</label>
+            <select id="event-history-status" onchange="setEventHistoryStatus(this.value)">
+              <option value="">All Statuses</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;min-width:110px;flex:1;">
+            <label for="event-history-group">Group By</label>
+            <select id="event-history-group" onchange="setEventHistoryGroup(this.value)">
+              <option value="time">Time</option>
+              <option value="status">Status</option>
+              <option value="event_type">Event Type</option>
+              <option value="source">Source</option>
+            </select>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="resetEventHistoryFilters()" style="align-self:flex-end;flex-shrink:0;">Reset</button>
+        </div>
+
+        <div id="motion-history-list" class="motion-history-list">
+          <div class="motion-empty">Loading event history…</div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+          <button class="btn btn-outline btn-sm" onclick="loadOlderEventHistory()">Older</button>
+          <button class="btn btn-outline btn-sm" onclick="resetEventHistoryPaging()">Newest</button>
         </div>
       </div>
 
-      <div class="motion-layout">
-        <div class="motion-sidebar">
-          <div class="motion-side-title">Cameras</div>
-          <div id="motion-camera-list" class="motion-camera-list">
-            <div class="motion-empty" style="padding:18px;">Loading cameras…</div>
-          </div>
-          <div class="motion-side-note">
-            Narrowing by camera updates both the visible archive and AI search scope. Use this first when you already know which entrance or zone matters.
-          </div>
-        </div>
-        <div class="card" style="margin-bottom:0;">
-          <div class="motion-results-toolbar">
-            <div>
-              <div class="card-title-lg">Motion Archive</div>
-              <div class="card-sub" id="motion-results-sub">Recent Nova-indexed motion clips</div>
-            </div>
-            <div class="motion-results-meta">
-              <div class="motion-results-badge" id="motion-results-count">0 results</div>
-              <div class="live-indicator"><span class="live-dot"></span>Nova indexed</div>
-            </div>
-          </div>
-          <div class="motion-activity">
-            <div class="motion-activity-head">
-              <div class="motion-activity-title">Activity Timeline</div>
-              <div class="motion-activity-note" id="motion-activity-note">Recent archive density</div>
-            </div>
-            <div id="motion-activity-bars" class="motion-activity-bars"></div>
-          </div>
-          <div class="motion-insights">
-            <div class="motion-activity-head">
-              <div class="motion-activity-title">Event Summary</div>
-              <div class="motion-activity-note" id="motion-insights-note">Visible archive mix</div>
-            </div>
-            <div class="motion-insights-grid">
-              <div class="motion-insight-card">
-                <div class="motion-insight-label">Event Types</div>
-                <div class="motion-insight-items" id="motion-insight-types"></div>
-              </div>
-              <div class="motion-insight-card">
-                <div class="motion-insight-label">Sources</div>
-                <div class="motion-insight-items" id="motion-insight-sources"></div>
-              </div>
-              <div class="motion-insight-card">
-                <div class="motion-insight-label">Statuses</div>
-                <div class="motion-insight-items" id="motion-insight-statuses"></div>
-              </div>
-            </div>
-          </div>
-          <div class="motion-history">
-            <div class="motion-activity-head">
-              <div class="motion-activity-title">Event History</div>
-              <div class="motion-activity-note" id="motion-history-note">Most recent visible events</div>
-            </div>
-            <div class="motion-insights-grid" style="margin-bottom:12px;">
-              <div class="motion-insight-card">
-                <div class="motion-insight-label">Status Mix</div>
-                <div class="motion-insight-items" id="motion-history-status-mix"></div>
-              </div>
-              <div class="motion-insight-card">
-                <div class="motion-insight-label">Event Types</div>
-                <div class="motion-insight-items" id="motion-history-type-mix"></div>
-              </div>
-              <div class="motion-insight-card">
-                <div class="motion-insight-label">Sources</div>
-                <div class="motion-insight-items" id="motion-history-source-mix"></div>
-              </div>
-              <div class="motion-insight-card">
-                <div class="motion-insight-label">Open Loop Queue</div>
-                <div class="motion-insight-items" id="motion-history-open-loop"></div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-                  <button class="btn btn-outline btn-sm" onclick="runEventHistoryWorkflow({ includeReminders: true, includeEscalations: false })">Apply Due Reminders</button>
-                  <button class="btn btn-outline btn-sm" onclick="runEventHistoryWorkflow({ includeReminders: false, includeEscalations: true })">Apply Due Escalations</button>
-                </div>
-              </div>
-            </div>
-            <div class="motion-searchbar" style="margin-top:0;">
-              <div class="field" style="margin:0;">
-                <label for="event-history-preset">Preset</label>
-                <select id="event-history-preset" onchange="applyEventHistoryPreset(this.value)">
-                  <option value="">Custom View</option>
-                  <option value="needs_attention">Needs Attention</option>
-                  <option value="deliveries">Deliveries</option>
-                  <option value="door_events">Door Events</option>
-                  <option value="motion_review">Motion Review</option>
-                </select>
-              </div>
-              <div class="field" style="margin:0;">
-                <label for="event-history-query">Search</label>
-                <input id="event-history-query" type="text" placeholder="Search events, notes, or sources" onkeydown="handleEventHistorySearchKey(event)">
-              </div>
-              <div class="field" style="margin:0;">
-                <label for="event-history-window">Window</label>
-                <select id="event-history-window" onchange="setEventHistoryWindow(this.value)">
-                  <option value="24h">Last 24h</option>
-                  <option value="3d">Last 3 days</option>
-                  <option value="7d">Last 7 days</option>
-                  <option value="30d">Last 30 days</option>
-                </select>
-              </div>
-              <div class="field" style="margin:0;">
-                <label for="event-history-kind">Kind</label>
-                <select id="event-history-kind" onchange="setEventHistoryKind(this.value)">
-                  <option value="">All Kinds</option>
-                </select>
-              </div>
-              <div class="field" style="margin:0;">
-                <label for="event-history-type">Event Type</label>
-                <select id="event-history-type" onchange="setEventHistoryEventType(this.value)">
-                  <option value="">All Event Types</option>
-                </select>
-              </div>
-              <div class="field" style="margin:0;">
-                <label for="event-history-source">Source</label>
-                <select id="event-history-source" onchange="setEventHistorySource(this.value)">
-                  <option value="">All Sources</option>
-                </select>
-              </div>
-              <div class="field" style="margin:0;">
-                <label for="event-history-status">Status</label>
-                <select id="event-history-status" onchange="setEventHistoryStatus(this.value)">
-                  <option value="">All Statuses</option>
-                </select>
-              </div>
-              <div class="field" style="margin:0;">
-                <label for="event-history-group">Group By</label>
-                <select id="event-history-group" onchange="setEventHistoryGroup(this.value)">
-                  <option value="time">Time</option>
-                  <option value="status">Status</option>
-                  <option value="event_type">Event Type</option>
-                  <option value="source">Source</option>
-                </select>
-              </div>
-              <button class="btn btn-outline" onclick="resetEventHistoryFilters()">Reset History</button>
-            </div>
-            <div id="motion-history-list" class="motion-history-list">
-              <div class="motion-empty">Loading event history…</div>
-            </div>
-            <div class="motion-results-meta" style="justify-content:flex-end;">
-              <button class="btn btn-outline btn-sm" onclick="loadOlderEventHistory()">Older</button>
-              <button class="btn btn-outline btn-sm" onclick="resetEventHistoryPaging()">Newest</button>
-            </div>
-          </div>
-          <div id="motion-grid" class="motion-grid">
-            <div class="motion-empty">Loading motion archive…</div>
-          </div>
-        </div>
+      <!-- JS compat: hidden elements referenced by render functions -->
+      <div style="display:none">
+        <div id="motion-insights-note"></div>
+        <div id="motion-history-note"></div>
+        <div id="motion-insight-types"></div>
+        <div id="motion-insight-sources"></div>
+        <div id="motion-insight-statuses"></div>
+        <div id="motion-history-status-mix"></div>
+        <div id="motion-history-type-mix"></div>
+        <div id="motion-history-source-mix"></div>
       </div>
+
     </div>
+
 
     <!-- ══════════════ LLM COST ══════════════ -->
     <div id="section-costs" class="section">
@@ -2484,7 +2206,7 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
         <div id="motion-modal-title" class="motion-modal-title">Motion Clip</div>
         <div id="motion-modal-time" class="motion-card-time"></div>
       </div>
-      <button class="motion-modal-close" onclick="closeMotionModal(event)">&times;</button>
+      <button class="motion-modal-close" onclick="closeMotionModal(event)">&#x2715;</button>
     </div>
     <div class="motion-modal-body">
       <div class="motion-modal-stage">
@@ -2500,8 +2222,8 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
       </div>
       <div class="motion-modal-side">
         <div class="motion-modal-nav">
-          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(-1)">Previous</button>
-          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(1)">Next</button>
+          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(-1)">&#8592; Previous</button>
+          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(1)">Next &#8594;</button>
         </div>
         <div class="motion-meta-block">
           <div class="motion-meta-label">AI Description</div>
@@ -2516,12 +2238,12 @@ tr:hover td { background: rgba(255,255,255,.02); color: var(--text); }
           <div id="motion-modal-meta" class="motion-meta-grid">—</div>
         </div>
         <div class="motion-meta-block">
-          <div class="motion-meta-label">Drill Down</div>
+          <div class="motion-meta-label">Actions</div>
           <div id="motion-modal-actions" class="motion-modal-nav"></div>
         </div>
         <div class="motion-meta-block">
           <div class="motion-meta-label">Incident Note</div>
-          <textarea id="motion-modal-note" rows="3" placeholder="Add context for this status change..."></textarea>
+          <textarea id="motion-modal-note" rows="3" placeholder="Add context for this status change…"></textarea>
         </div>
       </div>
     </div>
@@ -3948,13 +3670,13 @@ async function pollHealth() {
 
 function renderHealth(d) {
   const comp = d.components || {};
-  const map = { ollama:'h-ollama', whisper:'h-whisper', piper:'h-piper', home_assistant:'h-ha' };
+  const map = { ollama:'h-ollama', whisper:'h-whisper', piper:'h-piper', home_assistant:'h-ha', intron_afro_tts:'h-intron' };
   for (const [k, eid] of Object.entries(map)) {
     const el = document.getElementById(eid);
     if (!el) continue;
     const v = comp[k] || '—';
     el.textContent = v;
-    el.className = 'stat-value ' + (v === 'reachable' || v === 'ready' ? 'ok' : v === 'loading' ? 'warn' : 'err');
+    el.className = 'stat-value ' + (v === 'reachable' || v === 'ready' ? 'ok' : v === 'loading' ? 'warn' : v === 'not_configured' ? '' : 'err');
   }
   document.getElementById('dash-version').textContent = d.version || '—';
 }
@@ -4003,7 +3725,7 @@ const _CLOUD_MODELS = {
 
 const _FIELD_OPTIONS = {
   LLM_PROVIDER:  ['ollama', 'openai', 'google', 'anthropic'],
-  TTS_PROVIDER:  ['piper', 'elevenlabs', 'afrotts'],
+  TTS_PROVIDER:  ['piper', 'elevenlabs', 'afrotts', 'intron_afro_tts'],
   AFROTTS_VOICE: ['af_heart', 'af_nicole', 'af_sarah', 'af_sky', 'am_adam', 'am_michael', 'bf_emma', 'bf_isabella', 'bm_george', 'bm_lewis'],
   WHISPER_MODEL: ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'],
   LOG_LEVEL:     ['INFO', 'DEBUG', 'WARNING', 'ERROR'],
@@ -4013,7 +3735,50 @@ const _TTS_FIELDS = {
   piper:      ['PIPER_VOICE'],
   elevenlabs: ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID', 'ELEVENLABS_MODEL'],
   afrotts:    ['AFROTTS_VOICE', 'AFROTTS_SPEED'],
+  intron_afro_tts: ['INTRON_AFRO_TTS_URL', 'INTRON_AFRO_TTS_REFERENCE_WAV', 'INTRON_AFRO_TTS_LANGUAGE', 'INTRON_AFRO_TTS_TIMEOUT_S'],
 };
+
+let _intronVoices = [];
+
+async function _fetchIntronVoices() {
+  try {
+    const d = await api('GET', '/admin/intron-voices');
+    _intronVoices = d.voices || [];
+  } catch(_) { _intronVoices = []; }
+  // If sidecar is down, provide a sensible default so the field is still usable
+  if (_intronVoices.length === 0) {
+    _intronVoices = [
+      { id: 'reference_accent', name: 'Reference Accent', path: '/models/intron_afro_tts/audios/reference_accent.wav' },
+    ];
+  }
+}
+
+function _updateIntronVoiceDropdown(currentVal) {
+  const el = document.getElementById('cfg-INTRON_AFRO_TTS_REFERENCE_WAV');
+  if (!el) return;
+  if (_intronVoices.length === 0) return;
+
+  // Build a select dropdown to replace the current element
+  const select = document.createElement('select');
+  select.id = 'cfg-INTRON_AFRO_TTS_REFERENCE_WAV';
+  select.dataset.key = 'INTRON_AFRO_TTS_REFERENCE_WAV';
+
+  // Add a default/empty option
+  const defaultOpt = document.createElement('option');
+  defaultOpt.value = '';
+  defaultOpt.textContent = '— Default reference voice —';
+  select.appendChild(defaultOpt);
+
+  for (const voice of _intronVoices) {
+    const opt = document.createElement('option');
+    opt.value = voice.path;
+    opt.textContent = voice.name + ' (' + voice.id + ')';
+    if (currentVal && currentVal === voice.path) opt.selected = true;
+    select.appendChild(opt);
+  }
+
+  el.replaceWith(select);
+}
 
 function _updateTTSFields(provider) {
   const all = Object.values(_TTS_FIELDS).flat();
@@ -4129,8 +3894,20 @@ async function loadConfig() {
 
     const ttsProviderEl = document.getElementById('cfg-TTS_PROVIDER');
     if (ttsProviderEl) {
-      ttsProviderEl.addEventListener('change', () => _updateTTSFields(ttsProviderEl.value));
+      ttsProviderEl.addEventListener('change', async () => {
+        _updateTTSFields(ttsProviderEl.value);
+        if (ttsProviderEl.value === 'intron_afro_tts') {
+          await _fetchIntronVoices();
+          const refVal = (d.values || {})['INTRON_AFRO_TTS_REFERENCE_WAV'] || '';
+          _updateIntronVoiceDropdown(refVal);
+        }
+      });
       _updateTTSFields(ttsProviderEl.value);
+      if (ttsProviderEl.value === 'intron_afro_tts') {
+        await _fetchIntronVoices();
+        const refVal = (d.values || {})['INTRON_AFRO_TTS_REFERENCE_WAV'] || '';
+        _updateIntronVoiceDropdown(refVal);
+      }
     }
   } catch(e) { toast('Failed to load config: ' + e.message, 'err'); }
 }

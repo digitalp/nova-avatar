@@ -130,305 +130,210 @@
       text-align: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 5;
     }
     #subtitle.on { opacity: 1; }
+    /* ── Event Popup (Apple HIG) ───────────────────────────────────────── */
     #event-popup {
-      position: absolute; top: 104px; right: 18px; z-index: 8;
-      width: min(31vw, 360px);
-      background: rgba(7, 12, 22, 0.88);
-      border: 1px solid rgba(103,232,249,.24);
-      border-radius: 18px;
-      box-shadow: 0 18px 44px rgba(0,0,0,.38);
-      backdrop-filter: blur(14px);
+      position: absolute; bottom: 88px; left: 20px; z-index: 8;
+      width: min(38vw, 380px);
+      background: rgba(28, 28, 30, 0.82);
+      border: 0.5px solid rgba(255,255,255,.12);
+      border-radius: 22px;
+      box-shadow: 0 24px 80px rgba(0,0,0,.55), 0 0 1px rgba(255,255,255,.1);
+      backdrop-filter: blur(40px) saturate(1.6);
+      -webkit-backdrop-filter: blur(40px) saturate(1.6);
       overflow: hidden;
       opacity: 0;
-      transform: translateY(14px) scale(.98);
-      transition: opacity .22s ease, transform .22s ease;
+      transform: translateY(12px) scale(.97);
+      transition: opacity .3s cubic-bezier(.4,0,.2,1), transform .3s cubic-bezier(.4,0,.2,1);
       pointer-events: none;
     }
     #event-popup.on {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-      pointer-events: auto;
+      opacity: 1; transform: translateY(0) scale(1); pointer-events: auto;
+    }
+    #event-popup.alert-pulse {
+      border-color: rgba(255,69,58,.35);
+      box-shadow: 0 24px 80px rgba(0,0,0,.55), 0 0 0 0.5px rgba(255,69,58,.3), 0 0 40px rgba(255,69,58,.12);
+      animation: popup-glow 2.4s ease-in-out infinite;
+    }
+    @keyframes popup-glow {
+      0%, 100% { box-shadow: 0 24px 80px rgba(0,0,0,.55), 0 0 30px rgba(255,69,58,.08); }
+      50%      { box-shadow: 0 24px 80px rgba(0,0,0,.55), 0 0 50px rgba(255,69,58,.15); }
+    }
+    #event-popup-timer {
+      height: 2.5px; width: 100%;
+      background: linear-gradient(90deg, rgba(10,132,255,1), rgba(94,92,230,.6));
+      transition: width linear;
+    }
+    #event-popup.alert-pulse #event-popup-timer {
+      background: linear-gradient(90deg, rgba(255,69,58,1), rgba(255,159,10,.7));
     }
     #event-popup-head {
       display: flex; align-items: center; gap: 10px;
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(255,255,255,.08);
-      background: linear-gradient(135deg, rgba(239,68,68,.22), rgba(8,145,178,.14));
+      padding: 14px 16px 12px;
     }
+    #event-popup-icon {
+      width: 32px; height: 32px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 10px;
+      background: rgba(10,132,255,.15);
+    }
+    #event-popup-icon svg { width: 17px; height: 17px; stroke: #0a84ff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    #event-popup.alert-pulse #event-popup-icon { background: rgba(255,69,58,.15); }
+    #event-popup.alert-pulse #event-popup-icon svg { stroke: #ff453a; }
     #event-popup-title {
-      flex: 1;
-      font-size: .86rem;
-      font-weight: 700;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      color: #e2e8f0;
+      flex: 1; font-size: .92rem; font-weight: 600; letter-spacing: -.01em;
+      color: rgba(255,255,255,.92);
     }
     #event-popup-close {
-      border: 0; background: transparent; color: #cbd5e1; cursor: pointer;
-      font-size: 1.15rem; line-height: 1; padding: 0 2px;
+      width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      border: 0; border-radius: 50%;
+      background: rgba(255,255,255,.1); color: rgba(255,255,255,.55);
+      cursor: pointer; font-size: 1rem; line-height: 1;
+      transition: background .15s;
     }
+    #event-popup-close:hover { background: rgba(255,255,255,.18); color: rgba(255,255,255,.8); }
     #event-popup-msg {
-      padding: 10px 12px 0;
-      color: #cbd5e1;
-      font-size: .84rem;
+      padding: 0 16px; color: rgba(255,255,255,.6);
+      font-size: .82rem; line-height: 1.45;
     }
     #event-popup-note {
-      display: none;
-      padding: 8px 12px 0;
-      color: rgba(191,219,254,.84);
-      font-size: .73rem;
-      letter-spacing: .03em;
+      display: none; padding: 6px 16px 0;
+      color: rgba(10,132,255,.8); font-size: .75rem; line-height: 1.35;
     }
-    #event-popup-note.on {
-      display: block;
-    }
-    #event-popup-actions {
-      display: none;
-      padding: 10px 12px 0;
-    }
+    #event-popup-note.on { display: block; }
+    #event-popup-actions { display: none; padding: 12px 16px 4px; }
     #event-popup-actions.on {
-      display: grid;
-      gap: 8px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
     }
-    .event-action-btn,
-    .event-confirm-btn,
-    .event-confirm-cancel {
-      width: 100%;
-      border: 1px solid rgba(103,232,249,.24);
-      background: linear-gradient(135deg, rgba(8,145,178,.18), rgba(14,116,144,.28));
-      color: #e0f2fe;
-      border-radius: 12px;
-      padding: 10px 12px;
-      font-size: .82rem;
-      font-weight: 600;
-      cursor: pointer;
+    .event-action-btn, .event-confirm-btn, .event-confirm-cancel {
+      width: 100%; border: 0;
+      background: rgba(255,255,255,.08); color: rgba(255,255,255,.85);
+      border-radius: 12px; padding: 10px 12px;
+      font-size: .8rem; font-weight: 500; cursor: pointer;
+      transition: background .12s;
     }
-    .event-action-btn.warn,
-    .event-confirm-btn.warn {
-      border-color: rgba(250,204,21,.26);
-      background: linear-gradient(135deg, rgba(161,98,7,.18), rgba(120,53,15,.28));
-      color: #fef3c7;
+    .event-action-btn:hover { background: rgba(255,255,255,.14); }
+    .event-action-btn.warn { background: rgba(255,159,10,.12); color: rgba(255,214,10,.9); }
+    .event-action-btn.warn:hover { background: rgba(255,159,10,.2); }
+    .event-action-btn.success { background: rgba(48,209,88,.1); color: rgba(48,209,88,.9); }
+    .event-action-btn.success:hover { background: rgba(48,209,88,.18); }
+    .event-action-btn.quiet, .event-confirm-cancel {
+      background: rgba(255,255,255,.05); color: rgba(255,255,255,.5);
     }
-    .event-action-btn.success,
-    .event-confirm-btn.success {
-      border-color: rgba(74,222,128,.24);
-      background: linear-gradient(135deg, rgba(21,128,61,.18), rgba(20,83,45,.28));
-      color: #dcfce7;
-    }
-    .event-action-btn.quiet,
-    .event-confirm-cancel {
-      border-color: rgba(148,163,184,.2);
-      background: rgba(15,23,42,.58);
-      color: #cbd5e1;
-    }
-    .event-action-btn:disabled,
-    .event-confirm-btn:disabled,
-    .event-confirm-cancel:disabled {
-      opacity: .55;
-      cursor: default;
+    .event-action-btn:disabled, .event-confirm-btn:disabled, .event-confirm-cancel:disabled {
+      opacity: .4; cursor: default;
     }
     .event-popup-confirm {
-      display: grid;
-      gap: 8px;
-      border: 1px solid rgba(250,204,21,.16);
-      background: rgba(15,23,42,.45);
-      border-radius: 12px;
-      padding: 10px 12px;
+      display: grid; gap: 8px;
+      background: rgba(255,255,255,.04); border-radius: 12px; padding: 12px;
     }
-    .event-popup-confirm-text {
-      color: #e2e8f0;
-      font-size: .78rem;
-      line-height: 1.45;
-    }
-    .event-popup-confirm-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
+    .event-popup-confirm-text { color: rgba(255,255,255,.7); font-size: .78rem; line-height: 1.4; }
+    .event-popup-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     #event-popup-feed {
       display: none;
-      width: calc(100% - 24px);
-      margin: 10px 12px 12px;
-      aspect-ratio: 16 / 9;
-      object-fit: cover;
-      border-radius: 12px;
-      background: rgba(15,23,42,.8);
-      border: 1px solid rgba(255,255,255,.08);
+      width: calc(100% - 32px); margin: 12px 16px 16px;
+      aspect-ratio: 16 / 9; object-fit: cover;
+      border-radius: 14px; background: rgba(0,0,0,.4);
     }
     #event-popup-gallery {
       display: none;
-      grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
-      gap: 10px;
-      padding: 10px 12px 12px;
+      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+      gap: 8px; padding: 8px 16px 16px;
     }
     .event-popup-art {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 110px;
-      padding: 10px;
-      border-radius: 12px;
-      background: radial-gradient(circle at top, rgba(30,41,59,.72), rgba(15,23,42,.92));
-      border: 1px solid rgba(255,255,255,.08);
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100px; padding: 8px; border-radius: 12px; background: rgba(0,0,0,.3);
     }
-    .event-popup-art img {
-      width: 100%;
-      max-height: 112px;
-      object-fit: contain;
-      filter: drop-shadow(0 14px 18px rgba(0,0,0,.34));
-    }
+    .event-popup-art img { width: 100%; max-height: 110px; object-fit: contain; }
+
+    /* ── Recent Events (Apple HIG) ─────────────────────────────────────── */
     #event-recent {
-      position: absolute; top: 438px; right: 18px; z-index: 7;
-      width: min(31vw, 360px);
-      display: none;
-      gap: 8px;
-      padding: 12px;
-      border-radius: 16px;
-      background: rgba(7, 12, 22, 0.72);
-      border: 1px solid rgba(148,163,184,.16);
-      box-shadow: 0 16px 34px rgba(0,0,0,.28);
-      backdrop-filter: blur(14px);
+      position: absolute; top: 20px; right: 20px; z-index: 7;
+      width: min(24vw, 260px);
+      display: none; flex-direction: column;
+      border-radius: 18px;
+      background: rgba(28, 28, 30, 0.78);
+      border: 0.5px solid rgba(255,255,255,.1);
+      box-shadow: 0 16px 48px rgba(0,0,0,.4), 0 0 1px rgba(255,255,255,.08);
+      backdrop-filter: blur(40px) saturate(1.6);
+      -webkit-backdrop-filter: blur(40px) saturate(1.6);
+      overflow: hidden;
+      max-height: calc(100dvh - 130px);
     }
-    #event-recent.on { display: grid; }
+    #event-recent.on { display: flex; }
     #event-recent-title {
-      font-size: .72rem;
-      font-weight: 800;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-      color: rgba(226,232,240,.72);
+      font-size: .65rem; font-weight: 600; letter-spacing: .08em;
+      text-transform: uppercase; color: rgba(255,255,255,.35);
+      padding: 14px 16px 6px;
     }
-    #event-recent-list { display: grid; gap: 8px; }
-    .event-recent-item {
-      display: grid;
-      gap: 6px;
+    #event-recent-list {
+      display: flex; flex-direction: column;
+      overflow-y: auto; max-height: calc(100dvh - 190px);
+      padding: 4px 8px 8px; gap: 2px;
     }
+    .event-recent-item { display: flex; flex-direction: column; }
     .event-recent-btn {
-      display: grid;
-      gap: 3px;
-      width: 100%;
-      text-align: left;
-      cursor: pointer;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(148,163,184,.18);
-      background: rgba(15,23,42,.84);
-      color: #e5eef7;
+      display: flex; align-items: flex-start; gap: 10px;
+      width: 100%; text-align: left; cursor: pointer;
+      padding: 10px; border: none; border-radius: 12px;
+      background: transparent; color: rgba(255,255,255,.88);
+      transition: background .15s;
     }
-    .event-recent-btn:hover {
-      border-color: rgba(96,165,250,.44);
-      background: rgba(20,31,52,.92);
+    .event-recent-btn:hover { background: rgba(255,255,255,.06); }
+    .event-recent-btn.active { background: rgba(10,132,255,.1); }
+    .event-recent-icon {
+      flex-shrink: 0; width: 30px; height: 30px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 8px; background: rgba(255,255,255,.06);
     }
-    .event-recent-btn.active {
-      border-color: rgba(56,189,248,.64);
-      box-shadow: inset 0 0 0 1px rgba(56,189,248,.18);
-    }
+    .event-recent-icon svg { width: 14px; height: 14px; stroke: rgba(255,255,255,.5); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .event-recent-icon.alert { background: rgba(255,69,58,.12); }
+    .event-recent-icon.alert svg { stroke: #ff453a; }
+    .event-recent-icon.success { background: rgba(48,209,88,.1); }
+    .event-recent-icon.success svg { stroke: #30d158; }
+    .event-recent-content { flex: 1; min-width: 0; }
     .event-recent-name {
-      font-size: .82rem;
-      font-weight: 700;
-      line-height: 1.2;
+      font-size: .78rem; font-weight: 600; line-height: 1.25;
+      color: rgba(255,255,255,.88);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .event-recent-msg {
-      font-size: .73rem;
-      color: rgba(226,232,240,.72);
-      line-height: 1.25;
+      font-size: .7rem; color: rgba(255,255,255,.4); line-height: 1.3;
+      margin-top: 1px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .event-recent-note {
-      font-size: .68rem;
-      color: rgba(191,219,254,.82);
-      line-height: 1.2;
+      font-size: .65rem; color: rgba(10,132,255,.7); line-height: 1.2; margin-top: 2px;
     }
-    .event-recent-meta {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .event-recent-time {
-      font-size: .68rem;
-      color: rgba(191,219,254,.72);
-      letter-spacing: .03em;
-    }
+    .event-recent-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+    .event-recent-time { font-size: .62rem; color: rgba(255,255,255,.25); }
     .event-recent-status {
-      justify-self: start;
-      margin-top: 4px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: .65rem;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: #dbeafe;
-      background: rgba(37,99,235,.22);
-      border: 1px solid rgba(96,165,250,.28);
+      padding: 1px 6px; border-radius: 4px;
+      font-size: .58rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      color: rgba(10,132,255,.9); background: rgba(10,132,255,.12);
     }
-    .event-recent-status.dismissed {
-      color: #d1d5db;
-      background: rgba(75,85,99,.24);
-      border-color: rgba(156,163,175,.22);
-    }
-    .event-recent-status.acknowledged {
-      color: #fef3c7;
-      background: rgba(161,98,7,.22);
-      border-color: rgba(245,158,11,.28);
-    }
-    .event-recent-status.snoozed {
-      color: #fde68a;
-      background: rgba(146,64,14,.22);
-      border-color: rgba(251,191,36,.28);
-    }
-    .event-recent-status.resolved {
-      color: #dcfce7;
-      background: rgba(21,128,61,.22);
-      border-color: rgba(74,222,128,.28);
-    }
+    .event-recent-status.dismissed { color: rgba(255,255,255,.3); background: rgba(255,255,255,.05); }
+    .event-recent-status.acknowledged { color: rgba(255,214,10,.85); background: rgba(255,214,10,.1); }
+    .event-recent-status.snoozed { color: rgba(255,159,10,.8); background: rgba(255,159,10,.1); }
+    .event-recent-status.resolved { color: rgba(48,209,88,.85); background: rgba(48,209,88,.1); }
     .event-recent-actions {
-      display: flex;
-      gap: 6px;
-      justify-content: flex-end;
+      display: flex; gap: 4px; padding: 2px 10px 6px; justify-content: flex-end;
     }
     .event-recent-action {
-      cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid rgba(148,163,184,.18);
-      background: rgba(15,23,42,.84);
-      color: rgba(226,232,240,.86);
-      font-size: .67rem;
-      font-weight: 700;
-      letter-spacing: .04em;
+      cursor: pointer; padding: 3px 8px; border-radius: 6px;
+      border: none; background: rgba(255,255,255,.06);
+      color: rgba(255,255,255,.5); font-size: .62rem; font-weight: 500;
+      transition: background .12s;
     }
-    .event-recent-action:hover {
-      border-color: rgba(96,165,250,.44);
-      background: rgba(20,31,52,.92);
-    }
-    .event-recent-action.warn {
-      border-color: rgba(245,158,11,.28);
-      color: #fef3c7;
-    }
-    .event-recent-action.success {
-      border-color: rgba(74,222,128,.28);
-      color: #dcfce7;
-    }
+    .event-recent-action:hover { background: rgba(255,255,255,.12); color: rgba(255,255,255,.75); }
+    .event-recent-action.warn { color: rgba(255,159,10,.8); }
+    .event-recent-action.success { color: rgba(48,209,88,.8); }
     .event-recent-confirm {
-      display: grid;
-      gap: 6px;
-      margin-top: 6px;
-      padding: 10px;
-      border-radius: 12px;
-      background: rgba(15,23,42,.58);
-      border: 1px solid rgba(250,204,21,.16);
+      display: grid; gap: 6px; margin-top: 6px; padding: 10px;
+      border-radius: 12px; background: rgba(255,255,255,.04);
     }
-    .event-recent-confirm-text {
-      color: #e2e8f0;
-      font-size: .74rem;
-      line-height: 1.45;
-    }
-    .event-recent-confirm-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-    }
-
+    .event-recent-confirm-text { color: rgba(255,255,255,.7); font-size: .74rem; line-height: 1.4; }
+    .event-recent-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     /* ── Bottom bar ── */
     #bottom-bar {
       display: flex; align-items: center; gap: 12px; padding: 10px 16px;
@@ -464,10 +369,10 @@
       #btn-mic       { padding: 10px 18px; font-size: 0.84rem; }
       #status-text   { font-size: 0.75rem; }
       #subtitle      { font-size: 0.82rem; max-width: 92%; padding: 7px 12px; }
-      #event-popup   { top: 96px; right: 12px; width: min(48vw, 220px); border-radius: 14px; }
-      #event-recent  { top: 334px; right: 12px; width: min(48vw, 220px); border-radius: 14px; }
-      #event-popup-title { font-size: .76rem; }
-      #event-popup-msg { font-size: .76rem; }
+      #event-popup   { bottom: 72px; left: 10px; width: min(55vw, 260px); border-radius: 16px; }
+      #event-recent  { top: 12px; right: 10px; width: min(42vw, 200px); border-radius: 14px; }
+      #event-popup-title { font-size: .78rem; }
+      #event-popup-msg { font-size: .78rem; }
       #name-badge    { font-size: 0.78rem; padding: 3px 12px; }
       #bottom-bar    { gap: 8px; padding: 8px 12px; }
     }
@@ -503,13 +408,15 @@
   </div>
   <div id="subtitle"></div>
   <div id="event-popup">
+    <div id="event-popup-timer"></div>
     <div id="event-popup-head">
+      <div id="event-popup-icon"><svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
       <div id="event-popup-title">Doorbell</div>
       <button id="event-popup-close" aria-label="Close popup">&times;</button>
     </div>
     <div id="event-popup-msg">Front door live view</div>
-    <div id="event-popup-note"></div>
-    <div id="event-popup-actions"></div>
+<div id="event-popup-note" style="display:none"></div>
+<div id="event-popup-actions" style="display:none"></div>
     <img id="event-popup-feed" alt="Live camera feed">
     <div id="event-popup-gallery"></div>
   </div>
@@ -1660,10 +1567,12 @@ function hideVisualEvent() {
   clearPendingSurfaceAction();
   $eventPopupActions.classList.remove('on');
   $eventPopupActions.replaceChildren();
-  $eventPopup.classList.remove('on');
+  $eventPopup.classList.remove('on', 'alert-pulse');
   $eventPopupFeed.removeAttribute('src');
   $eventPopupGallery.replaceChildren();
   $eventPopupGallery.style.display = 'none';
+  const timerEl = document.getElementById('event-popup-timer');
+  if (timerEl) { timerEl.style.transition = 'none'; timerEl.style.width = '100%'; }
   renderRecentEvents(latestSurfaceState?.recent_events || []);
 }
 function sendSurfaceAction(action, extra = {}) {
@@ -1703,7 +1612,18 @@ function applySurfaceState(snapshot) {
   if (snapshot.avatar_state) handleState(snapshot.avatar_state);
   renderRecentEvents(snapshot.recent_events || []);
   if (snapshot.active_event) {
-    showVisualEvent(snapshot.active_event);
+    // Only show if the event hasn't expired
+    const evt = snapshot.active_event;
+    const evtTime = evt.ts || evt.timestamp;
+    if (evtTime) {
+      const age = Date.now() - new Date(evtTime).getTime();
+      const ttl = evt.expires_in_ms || 30000;
+      if (age > ttl) {
+        hideVisualEvent();
+        return;
+      }
+    }
+    showVisualEvent(evt);
   } else {
     hideVisualEvent();
   }
@@ -1890,9 +1810,19 @@ function renderPopupActions(event) {
   }
   $eventPopupActions.classList.add('on');
 }
-function renderRecentEvents(events) {
+function renderRecentEvents(events) { $eventRecent.classList.remove('on'); return;
+  const now = Date.now();
   const list = Array.isArray(events)
     ? [...events]
+        .filter(e => {
+          // Hide events older than 10 minutes
+          const ts = e.ts || e.timestamp;
+          if (ts) {
+            const age = now - (typeof ts === 'number' ? ts * 1000 : new Date(ts).getTime());
+            if (age > 600000) return false;
+          }
+          return true;
+        })
         .sort((a, b) => {
           const statusDelta = eventStatusPriority(a.status) - eventStatusPriority(b.status);
           if (statusDelta !== 0) return statusDelta;
@@ -1914,13 +1844,33 @@ function renderRecentEvents(events) {
     btn.className = 'event-recent-btn';
     if (activeEventId && event.event_id === activeEventId) btn.classList.add('active');
 
+    // Event icon
+    const icon = document.createElement('div');
+    icon.className = 'event-recent-icon';
+    const evtType = event.event || '';
+    if (evtType === 'doorbell') {
+      icon.classList.add('alert');
+      icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+    } else if (evtType.includes('motion')) {
+      icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
+    } else if (evtType.includes('package')) {
+      icon.classList.add('success');
+      icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>';
+    } else {
+      icon.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    }
+
+    // Content wrapper
+    const content = document.createElement('div');
+    content.className = 'event-recent-content';
+
     const name = document.createElement('div');
     name.className = 'event-recent-name';
     name.textContent = event.title || event.event || 'Recent event';
 
     const msg = document.createElement('div');
     msg.className = 'event-recent-msg';
-    msg.textContent = event.message || (event.camera_entity_id ? 'Live camera event' : 'Tap to reopen');
+    msg.textContent = event.message || (event.camera_entity_id ? 'Camera event' : '');
 
     const note = document.createElement('div');
     note.className = 'event-recent-note';
@@ -1937,18 +1887,20 @@ function renderRecentEvents(events) {
     if (event.status === 'resolved') status.classList.add('resolved');
     status.textContent = event.status === 'dismissed'
       ? 'Dismissed'
-      : (event.status === 'acknowledged' ? 'Acknowledged' : (event.status === 'snoozed' ? 'Snoozed' : (event.status === 'resolved' ? 'Resolved' : 'Active')));
+      : (event.status === 'acknowledged' ? 'Ack' : (event.status === 'snoozed' ? 'Snoozed' : (event.status === 'resolved' ? 'Resolved' : 'Active')));
 
     const when = document.createElement('div');
     when.className = 'event-recent-time';
     when.textContent = formatRelativeEventTime(event.ts);
 
-    btn.appendChild(name);
-    btn.appendChild(msg);
-    if (note.textContent) btn.appendChild(note);
+    content.appendChild(name);
+    if (msg.textContent) content.appendChild(msg);
+    if (note.textContent) content.appendChild(note);
     meta.appendChild(status);
     if (when.textContent) meta.appendChild(when);
-    btn.appendChild(meta);
+    content.appendChild(meta);
+    btn.appendChild(icon);
+    btn.appendChild(content);
     btn.addEventListener('click', () => {
       if (event.event_id) sendSurfaceAction('activate_recent_event', { event_id: event.event_id });
       else showVisualEvent(event);
@@ -2016,6 +1968,23 @@ function showVisualEvent(msg) {
   const imageUrls = [];
   if (msg.image_url) imageUrls.push(msg.image_url);
   if (Array.isArray(msg.image_urls)) imageUrls.push(...msg.image_urls);
+  
+  // Set icon based on event type
+  const iconEl = document.getElementById('event-popup-icon');
+  const isAlert = (msg.event === 'doorbell' || msg.priority === 'alert');
+  if (msg.event === 'doorbell') {
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+  } else if (msg.event === 'motion' || msg.event === 'motion_detected') {
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
+  } else if (msg.event === 'package_delivery') {
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>';
+  } else {
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  }
+  
+  // Alert pulse for urgent events
+  $eventPopup.classList.toggle('alert-pulse', isAlert);
+  
   $eventPopupTitle.textContent = title;
   $eventPopupMsg.textContent = msg.message || '';
   $eventPopupNote.textContent = msg.open_loop_note || '';
@@ -2035,11 +2004,24 @@ function showVisualEvent(msg) {
     $eventPopupGallery.replaceChildren();
     $eventPopupGallery.style.display = 'none';
   }
-  renderPopupActions(msg);
-  $eventPopup.classList.add('on');
-  renderRecentEvents(latestSurfaceState?.recent_events || (msg ? [msg] : []));
+    $eventPopupActions.style.display = 'none';
+    $eventPopup.classList.add('on');
+
+  
+  // Countdown timer bar
+  const duration = Math.max(5000, msg.expires_in_ms || 30000);
+  const timerEl = document.getElementById('event-popup-timer');
+  timerEl.style.transition = 'none';
+  timerEl.style.width = '100%';
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      timerEl.style.transition = `width ${duration}ms linear`;
+      timerEl.style.width = '0%';
+    });
+  });
+  
   clearTimeout(visualEventTimer);
-  visualEventTimer = setTimeout(hideVisualEvent, Math.max(5000, msg.expires_in_ms || 30000));
+  visualEventTimer = setTimeout(hideVisualEvent, duration);
 }
 function setStatus(text, dotClass) {
   $statusTxt.textContent = text;

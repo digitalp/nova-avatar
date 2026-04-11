@@ -65,6 +65,10 @@ _CONFIG_FIELDS = {
     "ELEVENLABS_MODEL":     ("ElevenLabs Model",                             False),
     "AFROTTS_VOICE":        ("AfroTTS Voice",                                False),
     "AFROTTS_SPEED":        ("AfroTTS Speed (0.5-2.0)",                       False),
+    "INTRON_AFRO_TTS_URL":  ("Intron Afro TTS URL",                          False),
+    "INTRON_AFRO_TTS_TIMEOUT_S": ("Intron Afro TTS Timeout Seconds",         False),
+    "INTRON_AFRO_TTS_REFERENCE_WAV": ("Intron Afro TTS Reference WAV",       False),
+    "INTRON_AFRO_TTS_LANGUAGE": ("Intron Afro TTS Language",                 False),
     "PUBLIC_URL":           ("Server Public URL (for audio playback)",       False),
     "CORS_ORIGINS":         ("Allowed CORS Origins (comma-separated URLs)",  False),
     "SPEAKERS":             ("Speakers",                                     False),
@@ -316,7 +320,8 @@ async def save_config(body: ConfigUpdate, request: Request):
     request.app.state.tts_service = new_tts
     _LOGGER.info("admin.tts_reloaded", provider=new_settings.tts_provider)
 
-    if new_settings.tts_provider.lower() == "afrotts":
+    provider = new_settings.tts_provider.lower()
+    if provider == "afrotts":
         async def _warm():
             import asyncio as _asyncio
             loop = _asyncio.get_event_loop()
@@ -326,6 +331,17 @@ async def save_config(body: ConfigUpdate, request: Request):
             except Exception as exc:
                 _LOGGER.warning("admin.afrotts_warm_failed", exc=str(exc))
         asyncio.create_task(_warm())
+    elif provider == "intron_afro_tts":
+        async def _warm_intron():
+            try:
+                ready = await new_tts.is_ready_remote()
+                if ready:
+                    _LOGGER.info("admin.intron_afro_tts_ready")
+                else:
+                    _LOGGER.warning("admin.intron_afro_tts_not_ready")
+            except Exception as exc:
+                _LOGGER.warning("admin.intron_afro_tts_warm_failed", exc=str(exc))
+        asyncio.create_task(_warm_intron())
 
     return {"saved": True}
 
@@ -1450,6 +1466,27 @@ async def list_ollama_models(request: Request):
         _LOGGER.warning("ollama_models.fetch_failed", error=str(exc))
         models = []
     return {"models": models}
+
+
+@router.get("/intron-voices")
+async def list_intron_voices(request: Request):
+    """Return available Intron Afro TTS reference voices from the sidecar."""
+    _require_session(request, min_role="viewer")
+    import httpx as _httpx
+    from avatar_backend.config import get_settings as _gs
+    settings = _gs()
+    base_url = (settings.intron_afro_tts_url or "").rstrip("/")
+    if not base_url:
+        return {"voices": []}
+    try:
+        async with _httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base_url}/v1/voices")
+            resp.raise_for_status()
+            data = resp.json()
+        return {"voices": data.get("voices", []), "default": data.get("default", "")}
+    except Exception as exc:
+        _LOGGER.warning("intron_voices.fetch_failed", error=str(exc))
+        return {"voices": []}
 
 
 # ── Cost history (persistent DB) ──────────────────────────────────────────────

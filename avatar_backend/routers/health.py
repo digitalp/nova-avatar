@@ -69,29 +69,50 @@ def _probe_piper(request: Request) -> str:
         return "unavailable"
 
 
+async def _probe_intron_afro_tts(url: str) -> str:
+    """Check if the Intron Afro TTS sidecar is reachable and loaded."""
+    if not url:
+        return "not_configured"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{url}/health")
+            if resp.status_code == 200:
+                data = resp.json()
+                return "ready" if data.get("loaded") else "loading"
+            return f"http_{resp.status_code}"
+    except httpx.ConnectError:
+        return "unreachable"
+    except httpx.TimeoutException:
+        return "timeout"
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/health")
 async def health_check(request: Request) -> dict:
     settings = get_settings()
 
-    ollama_status, ha_status = await asyncio.gather(
+    ollama_status, ha_status, intron_status = await asyncio.gather(
         _probe_ollama(settings.ollama_url),
         _probe_ha(settings.ha_url, settings.ha_token),
+        _probe_intron_afro_tts(settings.intron_afro_tts_url),
     )
 
     whisper_status = _probe_whisper(request)
     piper_status   = _probe_piper(request)
 
     components = {
-        "ollama":         ollama_status,
-        "whisper":        whisper_status,
-        "piper":          piper_status,
-        "home_assistant": ha_status,
+        "ollama":           ollama_status,
+        "whisper":          whisper_status,
+        "piper":            piper_status,
+        "home_assistant":   ha_status,
+        "intron_afro_tts":  intron_status,
     }
 
     healthy    = {"reachable", "ready", "loading"}
-    all_ok     = all(v in healthy for v in components.values())
+    # intron_afro_tts is optional — don't degrade overall status if it's off
+    core_components = {k: v for k, v in components.items() if k != "intron_afro_tts"}
+    all_ok     = all(v in healthy for v in core_components.values())
     overall    = "ok" if all_ok else "degraded"
 
     issue_autofix = getattr(request.app.state, "issue_autofix_service", None)

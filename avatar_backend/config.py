@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     whisper_model: str = "small"
     piper_voice: str = "en_US-lessac-medium"
 
-    # TTS provider: piper | elevenlabs
+    # TTS provider: piper | elevenlabs | afrotts | intron_afro_tts
     tts_provider: str = "piper"
 
     # ElevenLabs TTS
@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # AfroTTS (local Kokoro engine)
     afrotts_voice: str = "af_heart"   # af_heart af_nicole af_sarah af_sky am_adam am_michael bf_emma bf_isabella bm_george bm_lewis
     afrotts_speed: float = 1.0
+
+    # Intron Afro TTS sidecar (XTTS-based, GPU sidecar)
+    intron_afro_tts_url: str = "http://127.0.0.1:8021"
+    intron_afro_tts_timeout_s: float = 90.0
+    intron_afro_tts_reference_wav: str = ""
+    intron_afro_tts_language: str = "en"
 
     # Public URL of this server (used to serve TTS audio to non-Alexa media players)
     # e.g. http://192.168.0.249:8001  — leave blank to use HA TTS engine instead

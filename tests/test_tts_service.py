@@ -6,10 +6,19 @@ import io
 import json
 import wave
 import pytest
+import httpx
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from avatar_backend.services.tts_service import PiperTTSService, _normalize_tts_text, _silent_wav, _VOICES_DIR, _PIPER_BIN
+from avatar_backend.services.tts_service import (
+    IntronAfroTTSService,
+    PiperTTSService,
+    create_tts_service,
+    _normalize_tts_text,
+    _silent_wav,
+    _VOICES_DIR,
+    _PIPER_BIN,
+)
 
 
 # ── _silent_wav helper ────────────────────────────────────────────────────────
@@ -134,3 +143,39 @@ def test_normalize_tts_text_strips_markdown_and_urls():
     normalized = _normalize_tts_text(text)
 
     assert normalized == "Hello Penn. Visit now. Thanks!"
+
+
+@pytest.mark.asyncio
+async def test_intron_afro_tts_calls_sidecar():
+    svc = IntronAfroTTSService(
+        base_url="http://127.0.0.1:8021",
+        timeout_s=30.0,
+        reference_wav="/models/intron_afro_tts/audios/reference_accent.wav",
+        language="en",
+    )
+    fake_resp = MagicMock(spec=httpx.Response)
+    fake_resp.content = _make_silent_wav_bytes(sample_rate=24000)
+    fake_resp.raise_for_status = MagicMock()
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=fake_resp) as mock_post:
+        wav = await svc.synthesise("Hello from Nova")
+
+    assert wav[:4] == b"RIFF"
+    payload = mock_post.await_args.kwargs["json"]
+    assert payload["text"] == "Hello from Nova"
+    assert payload["language"] == "en"
+    assert payload["reference_wav"] == "/models/intron_afro_tts/audios/reference_accent.wav"
+
+
+def test_create_tts_service_selects_intron_provider():
+    settings = MagicMock(
+        tts_provider="intron_afro_tts",
+        intron_afro_tts_url="http://127.0.0.1:8021",
+        intron_afro_tts_timeout_s=45.0,
+        intron_afro_tts_reference_wav="/models/ref.wav",
+        intron_afro_tts_language="en",
+    )
+
+    svc = create_tts_service(settings)
+
+    assert isinstance(svc, IntronAfroTTSService)

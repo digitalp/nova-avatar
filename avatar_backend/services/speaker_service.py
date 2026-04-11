@@ -138,14 +138,15 @@ class SpeakerService:
         text: str,
         audio_url: str,
         *,
+        mp3_url: str | None = None,
         target_areas: list[str] | None = None,
         area_aware: bool = False,
     ) -> None:
         """Play synthesised audio on all speakers.
 
         Non-Alexa (Sonos, etc.) → media_player.play_media with Nova server URL.
-        Alexa/Echo → notify.alexa_media TTS. Echo devices do not support Nova's
-        direct media URL playback path, so preserve compatibility there.
+        Alexa/Echo → SSML <audio> tag with Alexa-compatible MP3 if mp3_url is
+        provided, otherwise fall back to Alexa native TTS (text only).
         """
         speakers = await self._resolve_speakers(
             target_areas=target_areas or [],
@@ -157,9 +158,12 @@ class SpeakerService:
         tasks = []
         for entity_id, alexa in speakers:
             if alexa:
-                tasks.append(self._speak_on(entity_id, text, True))
+                if mp3_url:
+                    tasks.append(self._alexa_ssml_audio(entity_id, mp3_url))
+                else:
+                    tasks.append(self._speak_on(entity_id, text, True))
             else:
-                tasks.append(self._play_media(entity_id, audio_url))
+                tasks.append(self._play_media_with_tts_fallback(entity_id, audio_url, text))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for (entity_id, _), result in zip(speakers, results):
@@ -392,6 +396,29 @@ class SpeakerService:
                 await self._tts_speak(client, entity_id, text)
         _LOGGER.info("speaker.spoke", entity_id=entity_id, alexa=alexa)
 
+    async def _play_media_with_tts_fallback(
+        self,
+        entity_id: str,
+        audio_url: str,
+        text: str,
+    ) -> None:
+        """Try play_media first; on 5xx fall back to tts.speak so Sonos transient
+        errors don't silently drop the announcement."""
+        try:
+            await self._play_media(entity_id, audio_url)
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "HTTP 5" in msg:
+                _LOGGER.warning(
+                    "speaker.play_media_5xx_fallback",
+                    entity_id=entity_id,
+                    exc=msg[:120],
+                )
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    await self._tts_speak(client, entity_id, text)
+            else:
+                raise
+
     async def _play_media(
         self,
         client_or_entity: str,
@@ -432,6 +459,40 @@ class SpeakerService:
                 f"Alexa notify/{svc} returned HTTP {resp.status_code}: "
                 f"{resp.text[:120]}"
             )
+
+    async def _alexa_ssml_audio(self, entity_id: str, mp3_url: str) -> None:
+        """Play custom audio on Echo via SSML <audio> tag.
+
+        The Alexa Media Player integration's send_tts accepts SSML.  When the
+        message contains an <audio src="..."/> tag, Amazon's servers fetch the
+        MP3 and play it on the Echo — giving us Nova's actual synthesised voice
+        instead of Alexa's built-in TTS.
+
+        Requirements for the MP3 URL:
+        - Must be reachable from Amazon's cloud (public HTTPS preferred, but
+          the Alexa Media Player integration may proxy via HA's public URL).
+        - MP3 format: stereo, 48 kbps, 24 kHz, no Xing header.
+        """
+        svc = _notify_service_name(entity_id)
+        ssml = f"<speak><audio src='{mp3_url}' /></speak>"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self._ha_url}/api/services/notify/{svc}",
+                headers=self._headers,
+                json={"message": ssml, "data": {"type": "tts"}},
+            )
+        if resp.status_code not in (200, 201):
+            # Fall back to plain text TTS if SSML fails
+            _LOGGER.warning(
+                "speaker.ssml_audio_failed",
+                entity_id=entity_id,
+                status=resp.status_code,
+                detail=resp.text[:120],
+            )
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                await self._alexa_notify(client, entity_id, "Audio playback failed.")
+            return
+        _LOGGER.info("speaker.ssml_audio", entity_id=entity_id, url=mp3_url)
 
     async def _tts_speak(
         self,

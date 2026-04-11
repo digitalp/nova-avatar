@@ -475,7 +475,20 @@ class RealtimeVoiceService:
                                 cache.pop(k, None)
                             cache[token] = (wav_bytes, expiry)
                             audio_url = f"{public_url}/tts/audio/{token}"
-                            speaker_task = asyncio.create_task(ctx.speaker.speak_wav(reply_text, audio_url, area_aware=True))
+
+                            # Convert WAV to Alexa-compatible MP3 for Echo SSML playback
+                            mp3_url = None
+                            try:
+                                from avatar_backend.routers.announce import _wav_to_alexa_mp3
+                                mp3_bytes = await _wav_to_alexa_mp3(wav_bytes)
+                                if mp3_bytes:
+                                    mp3_token = uuid.uuid4().hex
+                                    cache[f"mp3:{mp3_token}"] = (mp3_bytes, time.time() + 120)
+                                    mp3_url = f"{public_url}/tts/audio_mp3/{mp3_token}"
+                            except Exception:
+                                pass
+
+                            speaker_task = asyncio.create_task(ctx.speaker.speak_wav(reply_text, audio_url, mp3_url=mp3_url, area_aware=True))
                         else:
                             speaker_task = asyncio.create_task(ctx.speaker.speak(reply_text, area_aware=True))
 

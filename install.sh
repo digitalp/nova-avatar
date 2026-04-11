@@ -330,6 +330,12 @@ ELEVENLABS_MODEL=eleven_monolingual_v1
 AFROTTS_VOICE=af_heart
 AFROTTS_SPEED=1.0
 
+# Intron Afro TTS sidecar (set TTS_PROVIDER=intron_afro_tts to use)
+INTRON_AFRO_TTS_URL=http://127.0.0.1:8021
+INTRON_AFRO_TTS_TIMEOUT_S=90
+INTRON_AFRO_TTS_REFERENCE_WAV=
+INTRON_AFRO_TTS_LANGUAGE=en
+
 # Speakers (comma-separated HA media_player entity IDs, prefix echo devices with alexa:)
 SPEAKERS=${INPUT_SPEAKERS:-}
 
