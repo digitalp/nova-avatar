@@ -2177,3 +2177,54 @@ async def install_edgetpu_compiler(request: Request):
     except Exception as exc:
         return {"ok": False, "message": f"Installation failed: {exc}"}
 
+
+# ── Heating Shadow ────────────────────────────────────────────────────────────
+
+@router.get("/heating-shadow/history")
+async def get_heating_shadow_history(request: Request, limit: int = 40):
+    """Return recent heating shadow decision log entries for the admin panel."""
+    _require_session(request)
+    log = getattr(request.app.state, "decision_log", None)
+    if log is None:
+        return {"entries": []}
+    kinds = {
+        "heating_shadow_eval_start",
+        "heating_shadow_tool_call",
+        "heating_shadow_round_silent",
+        "heating_shadow_max_rounds",
+        "heating_shadow_eval_error",
+        "heating_shadow_comparison",
+    }
+    all_entries = log.recent(500)
+    filtered = [e for e in all_entries if e.get("kind") in kinds][-limit:]
+    return {"entries": filtered}
+
+
+@router.post("/heating-shadow/force")
+async def force_heating_shadow(request: Request, scenario: str = "winter"):
+    """
+    Trigger a shadow-only heating evaluation with an injected scenario.
+    scenario: 'winter' (default) or 'spring'.
+    Writes are intercepted — nothing is applied to HA.
+    """
+    _require_session(request, min_role="admin")
+    proactive = getattr(request.app.state, "proactive", None)
+    if proactive is None:
+        return {"ok": False, "message": "Proactive service not available"}
+    if not hasattr(proactive, "run_heating_shadow_force"):
+        return {"ok": False, "message": "Shadow force not supported by this proactive version"}
+    try:
+        records = await proactive.run_heating_shadow_force(scenario=scenario)
+        writes = [r for r in records if r["is_write"]]
+        reads = [r for r in records if not r["is_write"]]
+        return {
+            "ok": True,
+            "scenario": scenario,
+            "total_tool_calls": len(records),
+            "write_calls_intercepted": len(writes),
+            "read_calls_executed": len(reads),
+            "writes": writes,
+        }
+    except Exception as exc:
+        return {"ok": False, "message": str(exc)}
+

@@ -421,6 +421,14 @@ body {
 .announce-log-query { font-size: 12px; color: var(--text3); font-style: italic; margin-bottom: 3px; }
 .announce-log-query::before { content: '▶ '; font-style: normal; opacity: 0.5; }
 .announce-log-text { font-size: 13px; color: var(--text); line-height: 1.5; }
+.shadow-eval-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.shadow-eval-row:last-child { border-bottom: none; }
+.shadow-agree { color: #4ade80; font-weight: 600; }
+.shadow-diverge { color: #f97316; font-weight: 600; }
+.shadow-silent { color: var(--text3); }
+.shadow-tool-row { font-size: 11px; font-family: monospace; color: var(--text2); padding: 2px 0 2px 12px; }
+.shadow-tool-write { color: #facc15; }
+.shadow-tool-read { color: var(--text3); }
 
 /* ── Forms ───────────────────────────────────────────────────────────────────── */
 .field { margin-bottom: var(--sp-4); }
@@ -3023,6 +3031,25 @@ textarea:focus-visible {
         </div>
       </div>
 
+      <!-- Heating Shadow Monitor -->
+      <div class="card mt-4">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span>♨ Heating Shadow Monitor</span>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="btn btn-outline btn-sm" onclick="loadHeatingShadow()" style="font-size:11px;">Refresh</button>
+            <button class="btn btn-outline btn-sm" onclick="forceHeatingShadow('winter')" style="font-size:11px;">▶ Run Winter Test</button>
+            <button class="btn btn-outline btn-sm" onclick="forceHeatingShadow('spring')" style="font-size:11px;">▶ Run Spring Test</button>
+          </div>
+        </div>
+        <p class="text-sm text-muted mb-3">
+          Ollama (<span id="shadow-model-label" style="font-family:monospace;">—</span>) shadow evaluations vs Gemini primary.
+          Writes are intercepted — never applied. Green = agreement, orange = diverged.
+        </p>
+        <div id="heating-shadow-list" style="max-height:500px;overflow-y:auto;">
+          <div class="text-sm text-muted" style="padding:8px 0;">Loading…</div>
+        </div>
+      </div>
+
       <!-- Wake Word Training -->
       <div class="card mt-4">
         <div class="card-title">Wake Word Model</div>
@@ -3438,7 +3465,7 @@ function navigate(el) {
   if (sec === 'speakers')  loadSpeakerConfig();
   if (sec === 'pylog')     initPylog();
   if (sec === 'motion')    loadMotionClips();
-  if (sec === 'tools')   { loadWakeStatus(); loadAnnouncementLog(); }
+  if (sec === 'tools')   { loadWakeStatus(); loadAnnouncementLog(); loadHeatingShadow(); }
 }
 
 function refreshSection() {
@@ -5454,10 +5481,14 @@ const _kindMeta = {
   chat_response:   { label:'💬 CHAT',    bg:'rgba(34,211,238,.12)', color:'#22d3ee' },
   motion_announce: { label:'📷 MOTION',  bg:'rgba(245,158,11,.15)', color:'#f59e0b' },
   weather_announce:{ label:'🌤 WEATHER', bg:'rgba(56,189,248,.12)', color:'#38bdf8' },
-  heating_shadow_eval_start: { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
-  heating_shadow_action:     { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
-  heating_shadow_eval_silent:{ label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
-  heating_shadow_eval_error: { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_eval_start:    { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_action:        { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_eval_silent:   { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_eval_error:    { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_tool_call:     { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_round_silent:  { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_max_rounds:    { label:'♨ SHADOW', bg:'rgba(250,204,21,.12)', color:'#facc15' },
+  heating_shadow_comparison:    { label:'♨ SHADOW ⚖', bg:'rgba(250,204,21,.18)', color:'#facc15' },
   auto_fix_issue_attempt: { label:'🛠 AUTO-FIX', bg:'rgba(250,204,21,.12)', color:'#facc15' },
   auto_fix_issue_resolved:{ label:'✓ FIXED',    bg:'rgba(74,222,128,.12)', color:'#4ade80' },
 };
@@ -6430,6 +6461,111 @@ async function clearAnnouncementLog() {
     toast('Announcement log cleared');
   } catch(e) {
     alert('Failed to clear: ' + (e.message || e));
+  }
+}
+
+// ── Heating Shadow Monitor ────────────────────────────────────────────────────
+
+async function loadHeatingShadow() {
+  const el = document.getElementById('heating-shadow-list');
+  if (!el) return;
+  try {
+    const d = await api('GET', '/admin/heating-shadow/history?limit=80');
+    const entries = d.entries || [];
+    if (!entries.length) {
+      el.innerHTML = '<div class="text-sm text-muted" style="padding:8px 0;">No shadow evaluations yet. Shadow runs automatically every 30 min alongside the primary heating eval.</div>';
+      return;
+    }
+
+    // Group entries into evaluation runs by pairing eval_start → comparison
+    const runs = [];
+    let current = null;
+    for (const e of entries) {
+      if (e.kind === 'heating_shadow_eval_start') {
+        current = { start: e, tools: [], comparison: null };
+        runs.push(current);
+      } else if (current) {
+        if (e.kind === 'heating_shadow_tool_call') current.tools.push(e);
+        else if (e.kind === 'heating_shadow_comparison') { current.comparison = e; current = null; }
+        else if (['heating_shadow_round_silent','heating_shadow_eval_error','heating_shadow_max_rounds'].includes(e.kind)) {
+          current.endEvent = e;
+        }
+      }
+    }
+
+    // Update model label from first start entry
+    const firstStart = entries.find(e => e.kind === 'heating_shadow_eval_start');
+    if (firstStart?.llm_model) {
+      const lbl = document.getElementById('shadow-model-label');
+      if (lbl) lbl.textContent = firstStart.llm_model;
+    }
+
+    el.innerHTML = runs.slice().reverse().map(run => {
+      const cmp = run.comparison;
+      const agreement = cmp?.agreement || (run.endEvent?.kind === 'heating_shadow_eval_error' ? 'error' : 'pending');
+      const agreeLabel = {
+        both_silent:   '<span class="shadow-agree">✓ Both silent</span>',
+        both_acted:    '<span class="shadow-agree">✓ Both acted</span>',
+        shadow_only:   '<span class="shadow-diverge">⚠ Shadow acted, primary silent</span>',
+        primary_only:  '<span class="shadow-diverge">⚠ Primary acted, shadow silent</span>',
+        error:         '<span style="color:var(--danger)">✗ Error</span>',
+        pending:       '<span class="shadow-silent">… pending</span>',
+      }[agreement] || `<span>${_esc(agreement)}</span>`;
+
+      const writes = run.tools.filter(t => t.is_write);
+      const reads  = run.tools.filter(t => !t.is_write);
+      const season = run.start?.season || '—';
+      const ts     = run.start?.ts || '';
+      const shadowOnly = run.start?.shadow_only ? ' <span style="color:#60a5fa;font-size:10px;">[manual]</span>' : '';
+
+      const toolRows = run.tools.map(t => {
+        const cls = t.is_write ? 'shadow-tool-write' : 'shadow-tool-read';
+        const icon = t.is_write ? '✎' : '↳';
+        const entity = t.args?.entity_id || '';
+        const argsStr = Object.entries(t.args||{}).map(([k,v])=>`${k}=${v}`).join(', ');
+        return `<div class="shadow-tool-row ${cls}">${icon} r${t.round} ${_esc(t.tool)}(${_esc(argsStr)})${entity ? ` <em>${_esc(entity)}</em>` : ''}${t.is_write ? ' <span style="opacity:.5">[intercepted]</span>' : ''}</div>`;
+      }).join('');
+
+      const entityDiff = cmp ? (() => {
+        const parts = [];
+        if (cmp.entity_overlap?.length) parts.push(`<span style="color:#4ade80">match: ${cmp.entity_overlap.join(', ')}</span>`);
+        if (cmp.entity_shadow_only?.length) parts.push(`<span style="color:#f97316">shadow-only: ${cmp.entity_shadow_only.join(', ')}</span>`);
+        if (cmp.entity_primary_only?.length) parts.push(`<span style="color:#60a5fa">primary-only: ${cmp.entity_primary_only.join(', ')}</span>`);
+        return parts.length ? `<div style="font-size:11px;margin-top:4px;">${parts.join(' · ')}</div>` : '';
+      })() : '';
+
+      return `<div class="shadow-eval-row">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:4px;">
+          <div>${agreeLabel}${shadowOnly} <span class="text-xs text-muted" style="margin-left:6px;">${_esc(season)}</span></div>
+          <span class="text-xs text-muted">${_esc(ts)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">
+          ${writes.length} write${writes.length!==1?'s':''} intercepted · ${reads.length} read${reads.length!==1?'s':''} executed · ${run.tools.length} total calls
+        </div>
+        ${entityDiff}
+        ${toolRows ? `<details style="margin-top:4px;"><summary style="font-size:11px;cursor:pointer;color:var(--text3);">Show tool calls (${run.tools.length})</summary>${toolRows}</details>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div class="text-sm" style="color:var(--danger);padding:8px 0;">Failed to load: ${_esc(e.message||String(e))}</div>`;
+  }
+}
+
+async function forceHeatingShadow(scenario) {
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+  try {
+    const d = await api('POST', `/admin/heating-shadow/force?scenario=${encodeURIComponent(scenario)}`);
+    if (d.ok) {
+      toast(`Shadow ${scenario} test done — ${d.write_calls_intercepted} writes intercepted, ${d.read_calls_executed} reads executed`);
+      await loadHeatingShadow();
+    } else {
+      alert('Shadow test failed: ' + (d.message || 'unknown error'));
+    }
+  } catch(e) {
+    alert('Error: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = scenario === 'winter' ? '▶ Run Winter Test' : '▶ Run Spring Test'; }
   }
 }
 

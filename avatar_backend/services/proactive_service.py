@@ -1099,7 +1099,7 @@ class ProactiveService:
                 time=now_str,
                 **self._active_llm_fields(),
             )
-        await self._run_heating_shadow(messages, season=season, now_str=now_str)
+        shadow_calls = await self._run_heating_shadow(messages, season=season, now_str=now_str)
 
         all_tool_calls: list[str] = []
         performed_action = False
@@ -1187,23 +1187,136 @@ class ProactiveService:
                 break
 
         _LOGGER.info("heating.eval_done")
+        self._log_shadow_comparison(
+            shadow_calls=shadow_calls,
+            primary_tool_calls=all_tool_calls,
+            primary_performed_action=performed_action,
+        )
 
-    async def _run_heating_shadow(self, messages: list[dict], *, season: str, now_str: str) -> None:
-        """Run a local-only heating evaluation pass without executing tools."""
+    async def _run_heating_shadow(
+        self,
+        messages: list[dict],
+        *,
+        season: str,
+        now_str: str,
+        shadow_only: bool = False,
+    ) -> list[dict]:
+        """
+        Full multi-round local shadow evaluation using Ollama.
+
+        Read tools (get_entity_state, get_entities) execute for real so Ollama
+        receives actual sensor data.  Write tools (call_ha_service) are
+        intercepted — logged but never applied to HA.
+
+        Returns a list of per-tool-call records for comparison with the primary.
+        """
         if not hasattr(self._llm, "chat_local"):
-            return
+            return []
 
-        _LOGGER.info("heating.shadow_eval_start")
+        _MAX_SHADOW_ROUNDS = 6
+        shadow_messages = list(messages)   # isolated copy — never mutates primary
+        shadow_records: list[dict] = []
+
+        _LOGGER.info("heating.shadow_eval_start", season=season, shadow_only=shadow_only)
         if self._decision_log:
             self._decision_log.record(
                 "heating_shadow_eval_start",
                 season=season,
                 time=now_str,
+                shadow_only=shadow_only,
                 **self._local_llm_fields(),
             )
 
         try:
-            text, tool_calls = await self._llm.chat_local(list(messages), use_tools=True)
+            for round_num in range(_MAX_SHADOW_ROUNDS):
+                text, tool_calls = await self._llm.chat_local(shadow_messages, use_tools=True)
+
+                if not tool_calls:
+                    reason = (text or "").strip()[:200] or "no action suggested"
+                    _LOGGER.info("heating.shadow_round_silent", round=round_num, reason=reason)
+                    if self._decision_log:
+                        self._decision_log.record(
+                            "heating_shadow_round_silent",
+                            round=round_num,
+                            reason=reason,
+                            **self._local_llm_fields(),
+                        )
+                    break
+
+                raw_tcs = [
+                    {
+                        "id": f"shtool_{round_num}_{i}",
+                        "type": "function",
+                        "function": {"name": tc.function_name, "arguments": tc.arguments},
+                    }
+                    for i, tc in enumerate(tool_calls)
+                ]
+                shadow_messages.append({
+                    "role": "assistant",
+                    "content": text or "",
+                    "tool_calls": raw_tcs,
+                })
+
+                for i, tc in enumerate(tool_calls):
+                    is_write = _is_heating_action_tool(tc.function_name, tc.arguments)
+                    rec: dict = {
+                        "round": round_num,
+                        "tool": tc.function_name,
+                        "args": {k: str(v)[:80] for k, v in tc.arguments.items()},
+                        "is_write": is_write,
+                    }
+
+                    if is_write:
+                        # Intercept: log intent but never apply to HA
+                        tool_result_content = "Done (shadow — not executed)"
+                        rec["result"] = tool_result_content
+                        rec["executed"] = False
+                        _LOGGER.info(
+                            "heating.shadow_tool_intercepted",
+                            round=round_num,
+                            tool=tc.function_name,
+                            args=tc.arguments,
+                        )
+                    else:
+                        # Read tools: execute for real so Ollama gets live data
+                        try:
+                            result = await self._ha.execute_tool_call(tc)
+                            tool_result_content = result.message or ""
+                            rec["result"] = tool_result_content[:200]
+                            rec["executed"] = True
+                        except Exception as exc:
+                            tool_result_content = f"Error: {_format_exc(exc)}"
+                            rec["result"] = tool_result_content[:200]
+                            rec["executed"] = False
+
+                    shadow_records.append(rec)
+                    if self._decision_log:
+                        self._decision_log.record(
+                            "heating_shadow_tool_call",
+                            round=round_num,
+                            tool=tc.function_name,
+                            args=rec["args"],
+                            is_write=is_write,
+                            result=rec["result"],
+                            executed=rec["executed"],
+                            **self._local_llm_fields(),
+                        )
+
+                    shadow_messages.append({
+                        "role": "tool",
+                        "tool_call_id": f"shtool_{round_num}_{i}",
+                        "content": tool_result_content,
+                    })
+
+                if round_num == _MAX_SHADOW_ROUNDS - 1:
+                    _LOGGER.warning("heating.shadow_max_rounds", rounds=_MAX_SHADOW_ROUNDS)
+                    if self._decision_log:
+                        self._decision_log.record(
+                            "heating_shadow_max_rounds",
+                            rounds=_MAX_SHADOW_ROUNDS,
+                            **self._local_llm_fields(),
+                        )
+
         except Exception as exc:
             formatted_exc = _format_exc(exc)
             _LOGGER.warning("heating.shadow_eval_failed", exc=formatted_exc[:200])
@@ -1213,35 +1326,109 @@ class ProactiveService:
                     reason=formatted_exc[:200],
                     **self._local_llm_fields(),
                 )
-            return
 
-        if tool_calls:
-            summaries = [
-                f"{tc.function_name}({tc.arguments})"
-                for tc in tool_calls
-            ]
-            _LOGGER.info("heating.shadow_tool_calls", count=len(tool_calls))
-            if self._decision_log:
-                for tc in tool_calls:
-                    self._decision_log.record(
-                        "heating_shadow_tool_call",
-                        tool=tc.function_name,
-                        args={k: str(v)[:80] for k, v in tc.arguments.items()},
-                        **self._local_llm_fields(),
-                    )
-                self._decision_log.record(
-                    "heating_shadow_action",
-                    message=(text or "").strip()[:300],
-                    tool_calls=summaries,
-                    **self._local_llm_fields(),
-                )
-            return
+        return shadow_records
 
-        reason = text.strip()[:200] if text else "no local action suggested"
-        _LOGGER.info("heating.shadow_eval_silent", reason=reason)
+    def _log_shadow_comparison(
+        self,
+        *,
+        shadow_calls: list[dict],
+        primary_tool_calls: list[str],
+        primary_performed_action: bool,
+    ) -> None:
+        """Compare shadow (Ollama) vs primary (Gemini) and log the diff."""
+        shadow_writes = [r for r in shadow_calls if r["is_write"]]
+        shadow_acted = bool(shadow_writes)
+
+        if shadow_acted and primary_performed_action:
+            agreement = "both_acted"
+        elif not shadow_acted and not primary_performed_action:
+            agreement = "both_silent"
+        elif shadow_acted and not primary_performed_action:
+            agreement = "shadow_only"
+        else:
+            agreement = "primary_only"
+
+        # Extract entity_ids from shadow writes
+        shadow_entities = sorted({
+            r["args"].get("entity_id", "")
+            for r in shadow_writes
+            if r["args"].get("entity_id")
+        })
+
+        # Extract entity_ids from primary summaries (format: "call_ha_service({...}) → ...")
+        primary_entities: list[str] = []
+        for summary in primary_tool_calls:
+            if "entity_id" in summary:
+                import re as _re
+                m = _re.search(r"'entity_id':\s*'([^']+)'", summary)
+                if m:
+                    primary_entities.append(m.group(1))
+        primary_entities = sorted(set(primary_entities))
+
+        entity_overlap = sorted(set(shadow_entities) & set(primary_entities))
+        entity_shadow_only = sorted(set(shadow_entities) - set(primary_entities))
+        entity_primary_only = sorted(set(primary_entities) - set(shadow_entities))
+
+        _LOGGER.info(
+            "heating.shadow_comparison",
+            agreement=agreement,
+            shadow_writes=len(shadow_writes),
+            primary_writes=len(primary_tool_calls),
+        )
         if self._decision_log:
             self._decision_log.record(
-                "heating_shadow_eval_silent",
-                reason=reason,
+                "heating_shadow_comparison",
+                agreement=agreement,
+                shadow_writes=[f"{r['tool']}({r['args']})" for r in shadow_writes],
+                primary_calls=primary_tool_calls[:12],
+                shadow_entities=shadow_entities,
+                primary_entities=primary_entities,
+                entity_overlap=entity_overlap,
+                entity_shadow_only=entity_shadow_only,
+                entity_primary_only=entity_primary_only,
                 **self._local_llm_fields(),
             )
+
+    async def run_heating_shadow_force(
+        self,
+        *,
+        scenario: str = "winter",
+    ) -> list[dict]:
+        """
+        Admin-triggered shadow-only evaluation.  Never touches HA writes.
+        Use scenario='winter' to inject a cold-weather test note so Ollama
+        reasons about a heating-on scenario even in summer.
+        """
+        import datetime as _dt
+        now_str = _dt.datetime.now().strftime("%A, %d %B %Y %H:%M")
+
+        scenario_notes = {
+            "winter": (
+                "[TEST — winter scenario] Assume it is a cold winter morning. "
+                "Outdoor temperature is 3 °C. All rooms are 1–2 °C below comfort targets. "
+                "Presence is detected in living room and main bedroom. "
+                "Evaluate whether heating should be adjusted."
+            ),
+            "spring": (
+                "[TEST — spring/summer scenario] Outdoor temperature is 17 °C. "
+                "All rooms are at or above comfort targets. "
+                "Evaluate whether heating should remain off or eco."
+            ),
+        }
+        note = scenario_notes.get(scenario, scenario_notes["winter"])
+        season = "autumn/winter" if scenario == "winter" else "spring/summer"
+
+        task_msg = (
+            f"[Shadow-only heating evaluation — {now_str}, {season}] "
+            f"{note} "
+            "Read current sensor states, apply heating decision rules, and report what you would do. "
+            "Be concise."
+        )
+        messages = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user",   "content": task_msg},
+        ]
+        return await self._run_heating_shadow(
+            messages, season=season, now_str=now_str, shadow_only=True
+        )
