@@ -41,6 +41,7 @@ from avatar_backend.services.proactive_service import ProactiveService
 from avatar_backend.services.open_loop_automation_service import OpenLoopAutomationService
 from avatar_backend.services.open_loop_workflow_service import OpenLoopWorkflowService
 from avatar_backend.services.sensor_watch_service import SensorWatchService
+from avatar_backend.services.coral_wake_detector import CoralWakeDetector
 from avatar_backend.services.issue_autofix_service import IssueAutoFixService
 from avatar_backend.services.metrics_db import MetricsDB
 from avatar_backend.services.motion_clip_service import MotionClipService
@@ -183,6 +184,10 @@ async def lifespan(app: FastAPI):
     app.state.audio_cache = {}  # token → (wav_bytes, expiry) for one-shot audio serving
     app.state.recent_event_contexts = {}
     app.state.stt_service = STTService(model_name=settings.whisper_model)
+    from avatar_backend.routers.voice import _is_wake_word
+    app.state.coral_wake_detector = CoralWakeDetector.build(
+        app.state.stt_service, _is_wake_word
+    )
     app.state.tts_service = create_tts_service(settings)
     logger.info("tts_service.configured", provider=settings.tts_provider)
     app.state.ws_manager  = ConnectionManager()

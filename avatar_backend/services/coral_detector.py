@@ -20,12 +20,16 @@ import structlog
 
 _LOGGER = structlog.get_logger()
 
-# COCO classes that are considered "worth investigating" — everything else
-# (e.g. background, sports ball, potted plant) skips the LLM call.
+# COCO classes that trigger archiving and the Ollama vision call.
+# Restricted to people and plate-bearing vehicles — animals and sports objects
+# are intentionally excluded so only security-relevant motion is archived.
 _CLASSES_OF_INTEREST = {
-    "person", "bicycle", "car", "motorcycle", "bus", "truck",
-    "dog", "cat", "horse", "sheep", "cow", "bird",
+    "person", "car", "truck", "motorcycle", "bicycle", "bus",
 }
+
+# Subset of _CLASSES_OF_INTEREST that may carry a number plate.
+# Used to annotate clip metadata so Find Anything can surface plate detections.
+_PLATE_BEARING_CLASSES = {"car", "truck", "motorcycle", "bus"}
 
 _EDGETPU_LIB = "/usr/lib/x86_64-linux-gnu/libedgetpu.so.1"
 _DEFAULT_MODEL = Path(__file__).parent.parent.parent / "models" / "coral" / "ssd_mobilenet_v2_edgetpu.tflite"
@@ -60,7 +64,7 @@ class CoralMotionDetector:
     """
 
     class Result:
-        __slots__ = ("skip", "detections", "inference_ms", "reason")
+        __slots__ = ("skip", "detections", "inference_ms", "reason", "has_plate_bearing")
 
         def __init__(
             self,
@@ -69,15 +73,18 @@ class CoralMotionDetector:
             detections: list[str],
             inference_ms: float,
             reason: str,
+            has_plate_bearing: bool = False,
         ) -> None:
             self.skip = skip
             self.detections = detections
             self.inference_ms = inference_ms
             self.reason = reason
+            self.has_plate_bearing = has_plate_bearing
 
         def __repr__(self) -> str:
             return (
                 f"CoralResult(skip={self.skip}, detections={self.detections}, "
+                f"plate_bearing={self.has_plate_bearing}, "
                 f"{self.inference_ms:.1f}ms, reason={self.reason!r})"
             )
 
@@ -222,6 +229,7 @@ class CoralMotionDetector:
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         detections: list[str] = []
+        has_plate_bearing = False
         for i in range(count):
             score = float(scores[i])
             if score < _SCORE_THRESHOLD:
@@ -229,12 +237,15 @@ class CoralMotionDetector:
             label = self._labels.get(int(classes[i]) + 1, "unknown").lower()
             if label in _CLASSES_OF_INTEREST:
                 detections.append(f"{label}({score:.0%})")
+                if label in _PLATE_BEARING_CLASSES:
+                    has_plate_bearing = True
 
         if detections:
             _LOGGER.info(
                 "coral.detection",
                 camera=camera_id,
                 detections=detections,
+                has_plate_bearing=has_plate_bearing,
                 inference_ms=round(elapsed_ms, 1),
             )
             return CoralMotionDetector.Result(
@@ -242,6 +253,7 @@ class CoralMotionDetector:
                 detections=detections,
                 inference_ms=elapsed_ms,
                 reason="detected",
+                has_plate_bearing=has_plate_bearing,
             )
 
         _LOGGER.info(

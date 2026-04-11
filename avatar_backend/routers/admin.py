@@ -1541,3 +1541,191 @@ async def get_metrics_history(request: Request, hours: int = 24):
         return {"averages": []}
     hours = min(max(hours, 1), 168)  # cap at 1 week
     return {"averages": db.hourly_averages(hours)}
+
+# ── Coral Wake Word ───────────────────────────────────────────────────────────
+
+@router.get("/coral/wake-status")
+async def coral_wake_status(request: Request):
+    """Return current Coral wake detector status."""
+    if not _get_session(request):
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    detector = getattr(request.app.state, "coral_wake_detector", None)
+    model_dir = Path(install_dir()) / "models" / "coral"
+    model_path = model_dir / "nova_wakeword_edgetpu.tflite"
+    verifier_path = model_dir / "nova_verifier.pkl"
+    return {
+        "coral_available": detector.coral_available if detector else False,
+        "vad_available": detector.vad_available if detector else False,
+        "verifier_available": detector.verifier_available if detector else False,
+        "coral_model_exists": model_path.exists(),
+        "verifier_model_exists": verifier_path.exists(),
+        "pipeline_stages": detector.describe_pipeline() if detector else [],
+    }
+
+
+@router.post("/coral/train-wakeword")
+async def train_wakeword(request: Request):
+    """Stream-train a wake word verifier model using Piper TTS synthetic samples.
+
+    Generates audio samples of the configured wake word, extracts audio features,
+    and trains a simple cosine-similarity verifier (~2ms inference).
+    Yields SSE progress events.
+    """
+    _require_session(request, min_role="admin")
+    import json as _json_ww
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    wake_word = str(body.get("wake_word", "Nova")).strip() or "Nova"
+
+    async def _generate():
+        def _emit(stage: str, progress: int, message: str):
+            payload = {"stage": stage, "progress": progress, "message": message}
+            return f"data: {_json_ww.dumps(payload)}\n\n"
+
+        yield _emit("init", 0, f"Training wake word model for '{wake_word}'...")
+
+        model_dir = Path(install_dir()) / "models" / "coral"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        verifier_path = model_dir / "nova_verifier.pkl"
+
+        # Stage 1: Generate synthetic audio samples using Piper TTS
+        yield _emit("generate", 5, f"Generating synthetic '{wake_word}' audio samples via Piper TTS...")
+
+        tts = getattr(request.app.state, "tts_service", None)
+        if tts is None:
+            yield _emit("error", 0, "TTS service not available — check Piper configuration")
+            return
+
+        import numpy as np
+        import wave as _wave
+        import io as _io
+
+        # Generate variations of the wake word
+        phrases = [
+            wake_word,
+            wake_word.lower(),
+            f"Hey {wake_word}",
+            f"hey {wake_word}",
+            f"{wake_word}!",
+            f"{wake_word}?",
+            f"{wake_word}.",
+            f"Hey {wake_word}!",
+            f"OK {wake_word}",
+            f"ok {wake_word}",
+        ]
+        wav_samples = []
+        for i, phrase in enumerate(phrases):
+            try:
+                wav_bytes, _ = await tts.synthesise_with_timing(phrase)
+                wav_samples.append(wav_bytes)
+                pct = 5 + int((i / len(phrases)) * 35)
+                yield _emit("generate", pct, f"Generated sample {i+1}/{len(phrases)}: '{phrase}'")
+            except Exception as exc:
+                yield _emit("warn", 5, f"Skipped '{phrase}': {exc}")
+
+        if len(wav_samples) < 3:
+            yield _emit("error", 0, f"Only {len(wav_samples)} samples generated — need at least 3. Check TTS service.")
+            return
+
+        yield _emit("generate", 40, f"Generated {len(wav_samples)} audio samples")
+
+        # Stage 2: Extract audio features (simple MFCC-like approach, no openWakeWord dependency)
+        yield _emit("embed", 45, "Extracting audio features from samples...")
+
+        try:
+            positive_features = []
+            for idx, wav_data in enumerate(wav_samples):
+                # Convert WAV bytes to float32 PCM
+                with _io.BytesIO(wav_data) as buf:
+                    with _wave.open(buf, "rb") as wf:
+                        sr = wf.getframerate()
+                        frames = wf.readframes(wf.getnframes())
+                        audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+
+                # Resample to 16kHz if needed
+                if sr != 16000 and sr > 0:
+                    ratio = 16000 / sr
+                    new_len = int(len(audio) * ratio)
+                    indices = np.linspace(0, len(audio) - 1, new_len).astype(int)
+                    audio = audio[indices]
+
+                # Normalize to 1 second (16000 samples)
+                target_len = 16000
+                if len(audio) < target_len:
+                    audio = np.pad(audio, (0, target_len - len(audio)))
+                else:
+                    audio = audio[:target_len]
+
+                # Extract simple spectral features (FFT magnitude bins)
+                fft = np.abs(np.fft.rfft(audio))
+                # Downsample to 128 bins
+                bin_size = len(fft) // 128
+                features = np.array([fft[i*bin_size:(i+1)*bin_size].mean() for i in range(128)])
+                # Normalize
+                norm = np.linalg.norm(features)
+                if norm > 0:
+                    features = features / norm
+                positive_features.append(features)
+
+                pct = 45 + int((idx / len(wav_samples)) * 25)
+                yield _emit("embed", pct, f"Processed sample {idx+1}/{len(wav_samples)}")
+
+            positive_features = np.array(positive_features)
+            yield _emit("embed", 70, f"Extracted features from {len(positive_features)} samples")
+        except Exception as exc:
+            yield _emit("error", 0, f"Feature extraction failed: {exc}")
+            return
+
+        # Stage 3: Build verifier model (centroid + threshold)
+        yield _emit("train", 75, "Building verifier model...")
+
+        try:
+            import pickle
+
+            # Compute centroid of positive samples
+            centroid = positive_features.mean(axis=0)
+            centroid_norm = np.linalg.norm(centroid)
+            if centroid_norm > 0:
+                centroid = centroid / centroid_norm
+
+            # Compute similarity scores for positive samples
+            similarities = np.array([np.dot(f, centroid) for f in positive_features])
+            mean_sim = float(similarities.mean())
+            min_sim = float(similarities.min())
+
+            # Set threshold at 70% of the minimum positive similarity
+            threshold = max(0.3, min_sim * 0.7)
+
+            verifier_data = {
+                "wake_word": wake_word,
+                "centroid": centroid.tolist(),
+                "threshold": threshold,
+                "mean_similarity": mean_sim,
+                "min_similarity": min_sim,
+                "num_samples": len(positive_features),
+                "feature_dim": 128,
+                "trained_at": __import__("datetime").datetime.now().isoformat(),
+            }
+            with open(verifier_path, "wb") as f:
+                pickle.dump(verifier_data, f)
+
+            yield _emit("train", 90, f"Verifier saved — threshold={threshold:.3f}, mean_sim={mean_sim:.3f}")
+        except Exception as exc:
+            yield _emit("error", 0, f"Training failed: {exc}")
+            return
+
+        # Stage 4: Reload detector
+        yield _emit("reload", 95, "Reloading wake word detector...")
+        detector = getattr(request.app.state, "coral_wake_detector", None)
+        if detector:
+            detector.reload_verifier()
+            yield _emit("reload", 98, "Detector reloaded with new verifier")
+
+        yield _emit("done", 100, f"Wake word model for '{wake_word}' trained successfully! {len(wav_samples)} samples, threshold={threshold:.3f}")
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
+

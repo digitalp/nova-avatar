@@ -544,8 +544,12 @@ class ProactiveService:
 
         # ── Coral Edge TPU pre-filter ─────────────────────────────────────────
         # Fetch one frame and run fast on-device object detection.
-        # If nothing of interest is found, skip the expensive Ollama vision call
-        # and archive a clip with a "no detection" description.
+        # If nothing of interest is found (no person/vehicle), drop the event —
+        # we don't archive clips for background motion (wind, lighting, animals).
+        # Only clips confirmed by Coral (person / plate-bearing vehicle) proceed
+        # to the Ollama vision call and are saved to Find Anything.
+        _coral_detections: list[str] = []
+        _coral_has_plate: bool = False
         if self._coral.enabled:
             try:
                 frame = await self._ha.fetch_camera_image(camera_id)
@@ -560,18 +564,20 @@ class ProactiveService:
                                 reason=coral_result.reason,
                                 **self._gemini_llm_fields(),
                             )
-                        self._motion_clip_service.schedule_capture(
-                            camera_entity_id=camera_id,
-                            trigger_entity_id=entity_id,
-                            location=friendly,
-                            description="Motion detected — no person or vehicle found by Coral.",
-                            extra={"source": "coral_filtered"},
+                        _LOGGER.info(
+                            "coral.filtered_no_archive",
+                            camera=camera_id,
+                            inference_ms=round(coral_result.inference_ms, 1),
+                            detail="no person or vehicle — clip not archived",
                         )
                         return
+                    _coral_detections = coral_result.detections
+                    _coral_has_plate = coral_result.has_plate_bearing
                     _LOGGER.info(
                         "coral.passed_to_vision",
                         camera=camera_id,
-                        detections=coral_result.detections,
+                        detections=_coral_detections,
+                        has_plate_bearing=_coral_has_plate,
                         inference_ms=round(coral_result.inference_ms, 1),
                     )
             except Exception as exc:
@@ -633,6 +639,8 @@ class ProactiveService:
         extra = {
             "delivery": is_delivery,
             "delivery_company": delivery_company,
+            "coral_detections": _coral_detections,
+            "coral_has_plate": _coral_has_plate,
         }
         if result.get("canonical_event") is not None:
             extra["canonical_event"] = result["canonical_event"]

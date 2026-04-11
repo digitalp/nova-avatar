@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisc
 from fastapi.responses import JSONResponse
 
 from avatar_backend.middleware.auth import verify_api_key, verify_api_key_ws, issue_ws_token
+from avatar_backend.services.coral_wake_detector import CoralWakeDetector, WakeResult
 from avatar_backend.services.realtime_voice_service import (
     RealtimeVoiceService,
     VoiceTurnContext,
@@ -150,17 +151,34 @@ def _is_wake_word(transcript: str) -> bool:
 @router.post("/stt/wake", dependencies=[Depends(verify_api_key)])
 async def check_wake_word(request: Request):
     """
-    Accepts raw audio bytes, runs Whisper STT, returns whether 'nova' was said.
+    3-stage wake word detection:
+      1. Coral Edge TPU TFLite model (if nova_wakeword_edgetpu.tflite present, ~1ms)
+      2. Silero VAD gate — silent chunks are dropped without calling Whisper (~14ms)
+      3. Whisper transcribe_wake fallback — only fires on speech-containing audio
+
     Used by Fully Kiosk Browser and other WebView clients that lack the
     Web Speech Recognition API.
     """
     body = await request.body()
     stt: STTService = request.app.state.stt_service
-    try:
-        transcript = await stt.transcribe_wake(body)
-    except Exception as exc:
-        _LOGGER.warning("stt.wake_check_error", exc=str(exc))
-        return JSONResponse({"wake": False, "transcript": ""})
-    wake = _is_wake_word(transcript)
-    _LOGGER.info("stt.wake_check", transcript=transcript[:60], wake=wake)
-    return JSONResponse({"wake": wake, "transcript": transcript})
+    detector: CoralWakeDetector = getattr(
+        request.app.state, "coral_wake_detector", None
+    )
+    if detector is None:
+        # Fallback: direct Whisper (original behaviour if detector not wired up)
+        try:
+            transcript = await stt.transcribe_wake(body)
+        except Exception as exc:
+            _LOGGER.warning("stt.wake_check_error", exc=str(exc))
+            return JSONResponse({"wake": False, "transcript": ""})
+        wake = _is_wake_word(transcript)
+        _LOGGER.info("stt.wake_check", transcript=transcript[:60], wake=wake)
+        return JSONResponse({"wake": wake, "transcript": transcript, "method": "whisper_direct"})
+
+    result: WakeResult = await detector.detect(body)
+    return JSONResponse({
+        "wake":       result.wake,
+        "transcript": result.transcript,
+        "method":     result.method,
+        "elapsed_ms": round(result.elapsed_ms, 1),
+    })

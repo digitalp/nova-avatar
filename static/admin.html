@@ -1279,6 +1279,8 @@ tr:hover td { background: var(--accent-dim); color: var(--text); }
 .motion-chip.search { background: rgba(10,132,255,.12); color: rgba(10,132,255,.90); border-color: rgba(10,132,255,.20); }
 .motion-chip.good { background: rgba(48,209,88,.10); color: rgba(48,209,88,.85); border-color: rgba(48,209,88,.18); }
 .motion-chip.info { background: rgba(10,132,255,.10); color: rgba(10,132,255,.80); border-color: rgba(10,132,255,.15); }
+.motion-chip.coral { background: rgba(255,159,10,.12); color: rgba(255,159,10,.90); border-color: rgba(255,159,10,.25); }
+.motion-chip.coral-plate { background: rgba(255,69,58,.12); color: rgba(255,69,58,.90); border-color: rgba(255,69,58,.25); }
 
 .motion-card-desc {
   font-size: 12px;
@@ -2087,6 +2089,8 @@ textarea:focus-visible {
 [data-theme="light"] .motion-chip.search { background: rgba(108,92,231,.08); color: #5a4bd1; border-color: rgba(108,92,231,.2); }
 [data-theme="light"] .motion-chip.good { background: rgba(0,168,132,.08); color: #0a7558; border-color: rgba(0,168,132,.18); }
 [data-theme="light"] .motion-chip.info { background: rgba(108,92,231,.08); color: #5a4bd1; border-color: rgba(108,92,231,.15); }
+[data-theme="light"] .motion-chip.coral { background: rgba(230,125,0,.08); color: #b85c00; border-color: rgba(230,125,0,.2); }
+[data-theme="light"] .motion-chip.coral-plate { background: rgba(200,30,20,.08); color: #b01010; border-color: rgba(200,30,20,.2); }
 
 /* Motion empty state in light mode */
 [data-theme="light"] .motion-empty { color: var(--text3); border-color: var(--border); }
@@ -2984,6 +2988,36 @@ textarea:focus-visible {
         <button class="btn btn-primary" onclick="testAnnounce()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
           Send Announcement
+        </button>
+      </div>
+
+      <!-- Wake Word Training -->
+      <div class="card mt-4">
+        <div class="card-title">Wake Word Model</div>
+        <p class="text-sm text-muted mb-3">Nova uses a 3-stage wake word detection pipeline to listen for "Nova" efficiently:</p>
+        <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:14px;padding:12px;background:var(--surface2);border-radius:10px;">
+          <strong>Stage 1 — Coral Edge TPU</strong> (~1ms) — Runs a dedicated keyword model on the TPU. Requires a trained TFLite model.<br>
+          <strong>Stage 2 — Silero VAD</strong> (~14ms) — Filters out silence. Only speech-containing audio reaches Whisper.<br>
+          <strong>Stage 3 — Whisper STT</strong> (~150ms) — Full transcription fallback. Only fires when VAD detects speech.<br><br>
+          <strong>How to train:</strong> Click "Train Wake Word Model" below. Nova will use Piper TTS to generate synthetic "Nova" audio samples, extract audio embeddings, and train a lightweight verifier model (~2ms inference). The verifier slots in between VAD and Whisper to further reduce false wakes. No microphone recording needed — training is fully automatic.
+        </div>
+        <div id="wake-status" class="mb-3" style="font-size:13px;color:var(--text3);padding:10px;background:var(--surface2);border-radius:8px;">Click "Tools" in the sidebar to load status...</div>
+        <div class="field-row mb-3">
+          <div class="field">
+            <label for="wake-word-input">Wake Word</label>
+            <input type="text" id="wake-word-input" placeholder="Nova" value="Nova" style="max-width:200px;">
+            <span class="text-xs text-muted">The word or phrase Nova listens for</span>
+          </div>
+        </div>
+        <div id="wake-progress" style="display:none;margin-bottom:12px;">
+          <div style="height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;">
+            <div id="wake-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#60a5fa);transition:width .3s;border-radius:3px;"></div>
+          </div>
+          <div id="wake-progress-text" class="text-xs text-muted mt-1"></div>
+        </div>
+        <button class="btn btn-primary" id="wake-train-btn" onclick="trainWakeWord()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+          Train Wake Word Model
         </button>
       </div>
     </div>
@@ -4173,6 +4207,8 @@ function renderMotionClips() {
     const duration = clip.duration_s ? `${clip.duration_s}s` : '—';
     const canonicalType = String(clip.canonical_event_type || '');
     const source = String(clip.event_source || '');
+    const coralDetections = Array.isArray(clip.extra?.coral_detections) ? clip.extra.coral_detections : [];
+    const coralHasPlate = Boolean(clip.extra?.coral_has_plate);
     card.innerHTML = `
       <div class="motion-card-media">
         ${hasVideo ? `<video data-src="${clip.video_url}" preload="none" muted playsinline ></video>` : '<div class="motion-card-fallback">Clip unavailable</div>'}
@@ -4196,6 +4232,8 @@ function renderMotionClips() {
           ${canonicalType ? `<div class="motion-chip info">${_esc(canonicalType.replaceAll('_', ' '))}</div>` : ''}
           ${source ? `<div class="motion-chip">${_esc(source.replaceAll('_', ' '))}</div>` : ''}
           ${_motionSearchMode === 'ai' ? '<div class="motion-chip search">AI match</div>' : ''}
+          ${coralDetections.map(d => `<div class="motion-chip coral" title="Coral TPU detection">${_esc(d)}</div>`).join('')}
+          ${coralHasPlate ? '<div class="motion-chip coral-plate" title="Plate-bearing vehicle detected">🚘 plate</div>' : ''}
         </div>
         <div class="motion-card-desc">${_motionHighlight(clip.description || 'No AI description available.')}</div>
         ${note ? `<div class="motion-card-note">${_esc(note)}</div>` : ''}
@@ -4417,6 +4455,10 @@ function _eventDataRows(item) {
   if (data.admin_note) rows.push(['Admin Note', data.admin_note]);
   const extra = data.extra || {};
   if (extra.open_loop_note && !item.open_loop_note) rows.push(['Open Loop', extra.open_loop_note]);
+  if (Array.isArray(extra.coral_detections) && extra.coral_detections.length > 0) {
+    rows.push(['Coral TPU', extra.coral_detections.join(', ')]);
+  }
+  if (extra.coral_has_plate) rows.push(['Plate-bearing', 'vehicle detected by Coral TPU']);
   return rows;
 }
 
@@ -6211,6 +6253,89 @@ async function resetAvatarBg() {
 
 // Load background settings when avatar section loads
 const _origLoadAvatarSettings = typeof loadAvatarSettings === 'function' ? loadAvatarSettings : null;
+
+// ── Wake Word Training ────────────────────────────────────────────────────────
+
+async function loadWakeStatus() {
+  const el = document.getElementById('wake-status');
+  if (!el) return;
+  try {
+    const d = await api('GET', '/coral/wake-status');
+    const stages = (d.pipeline_stages || []).join(' → ');
+    el.innerHTML = [
+      `<strong>Pipeline:</strong> ${stages || 'not initialized'}`,
+      `Coral TPU: ${d.coral_available ? '✅ Active' : '❌ Not available'}`,
+      `VAD Gate: ${d.vad_available ? '✅ Active' : '❌ Not available'}`,
+      `Verifier: ${d.verifier_model_exists ? '✅ Trained' : '⚠ Not trained'}`,
+      `Coral Model: ${d.coral_model_exists ? '✅ Present' : '⚠ Not present (placeholder)'}`,
+    ].join('<br>');
+  } catch (e) {
+    el.textContent = 'Failed to load wake word status';
+  }
+}
+
+async function trainWakeWord() {
+  const btn = document.getElementById('wake-train-btn');
+  const progress = document.getElementById('wake-progress');
+  const bar = document.getElementById('wake-progress-bar');
+  const text = document.getElementById('wake-progress-text');
+  const wakeWord = (document.getElementById('wake-word-input')?.value || 'Nova').trim();
+  if (!wakeWord) { toast('Enter a wake word first', 'err'); return; }
+  btn.disabled = true;
+  progress.style.display = '';
+  bar.style.width = '0%';
+  text.textContent = `Training "${wakeWord}"...`;
+
+  try {
+    const resp = await fetch('/admin/coral/train-wakeword', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wake_word: wakeWord }),
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const d = JSON.parse(line.slice(6));
+          bar.style.width = d.progress + '%';
+          text.textContent = d.message || '';
+          if (d.stage === 'done') {
+            toast(d.message, 'ok');
+            await loadWakeStatus();
+          } else if (d.stage === 'error') {
+            toast(d.message, 'err');
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    toast('Training failed: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Load wake status when Tools section is shown
+// Use MutationObserver to detect when tools section becomes visible
+setTimeout(() => {
+  const toolsSection = document.getElementById('section-tools');
+  if (toolsSection) {
+    const observer = new MutationObserver(() => {
+      if (toolsSection.classList.contains('active')) loadWakeStatus();
+    });
+    observer.observe(toolsSection, { attributes: true, attributeFilter: ['class'] });
+  }
+}, 500);
 
 </script>
 </body>
