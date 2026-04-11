@@ -149,16 +149,18 @@ body {
   gap: var(--sp-3);
 }
 .nova-icon {
-  width: 36px; height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #22d3ee 100%);
+  width: 38px; height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 700; color: var(--text);
-  box-shadow: 0 0 16px rgba(129,140,248,.4);
   flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(108,92,231,.35);
+  transition: box-shadow var(--duration-normal), transform var(--duration-fast);
 }
-.nova-title { font-size: 16px; font-weight: 700; letter-spacing: -.3px; color: var(--text); }
-.nova-sub   { font-size: 11px; color: var(--text3); margin-top: 1px; }
+.nova-icon:hover { transform: scale(1.05); box-shadow: 0 6px 20px rgba(108,92,231,.45); }
+.nova-icon svg { width: 20px; height: 20px; }
+.nova-title { font-size: 17px; font-weight: 800; letter-spacing: -.4px; color: var(--text); }
+.nova-sub   { font-size: 10px; color: var(--text3); margin-top: 2px; letter-spacing: .02em; font-weight: 500; }
 
 #sidebar nav {
   flex: 1;
@@ -2176,7 +2178,7 @@ textarea:focus-visible {
 <div id="sidebar">
   <div id="sidebar-header">
     <div class="nova-logo">
-      <div class="nova-icon">N</div>
+      <div class="nova-icon"><svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="white" opacity=".9"/><circle cx="12" cy="12" r="3" fill="white" opacity=".6"/></svg></div>
       <div>
         <div class="nova-title">Nova Admin</div>
         <div class="nova-sub">AI Server Control Panel</div>
@@ -2301,7 +2303,7 @@ textarea:focus-visible {
     <!-- ══════════════ DASHBOARD ══════════════ -->
     <div id="section-dashboard" class="section active">
       <div class="page-header">
-        <div class="page-title" style="font-size:var(--text-2xl);font-weight:var(--fw-bold);letter-spacing:-.03em;">Welcome back 👋</div>
+        <div class="page-title" style="font-size:var(--text-2xl);font-weight:var(--fw-bold);letter-spacing:-.03em;">Welcome back</div>
         <div class="page-sub">Here's what's happening with your Nova system</div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-4);margin-bottom:var(--sp-6);">
