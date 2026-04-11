@@ -52,9 +52,14 @@ def _is_heating_action_tool(function_name: str, arguments: dict | None) -> bool:
 # When a motion sensor fires, Nova fetches the associated camera and describes what it sees.
 # Duplicate sensors for the same camera share the same camera cooldown.
 _LEGACY_MOTION_CAMERA_MAP: dict[str, str] = {
-    # Driveway camera — both general motion and AI-person triggers
+    # Driveway camera (Outdoor 2) — both general motion and AI-person triggers
     "binary_sensor.rlc_1224a_motion": "camera.rlc_1224a_fluent",
     "binary_sensor.rlc_1224a_person": "camera.rlc_1224a_fluent",
+    # Outdoor 1 camera
+    "binary_sensor.rlc_410w_motion": "camera.rlc_410w_fluent",
+    # Doorbell — person and visitor detections archive clips to Find Anything
+    "binary_sensor.reolink_video_doorbell_poe_person": "camera.reolink_video_doorbell_poe_fluent",
+    "binary_sensor.reolink_video_doorbell_poe_visitor": "camera.reolink_video_doorbell_poe_fluent",
 }
 
 # binary_sensor device_classes that represent motion/presence.
@@ -86,8 +91,33 @@ _DRIVEWAY_IMAGE_PROMPT = (
     "Only include the DELIVERY line if you are confident a delivery is taking place."
 )
 
+_OUTDOOR1_IMAGE_PROMPT = (
+    "This is a security camera snapshot of the rear garden / outdoor area. "
+    "Only alert if you see a person, an unfamiliar vehicle, an animal, or unusual activity. "
+    "If motion was caused solely by plants moving in the wind, lighting changes, or has no obvious cause, "
+    "reply with exactly: NO_MOTION\n"
+    "Otherwise describe what you see in 1-2 sentences. "
+    "Do NOT mention age, race, gender or personal attributes."
+)
+
+_DOORBELL_IMAGE_PROMPT = (
+    "This is a security camera snapshot of the front door. "
+    "Describe who or what triggered the doorbell or motion sensor. "
+    "If nothing meaningful is visible or motion has no obvious cause, "
+    "reply with exactly: NO_MOTION\n"
+    "Otherwise describe what you see in 1-2 sentences. "
+    "Do NOT mention age, race, gender or personal attributes. "
+    "If you can see someone making a delivery (carrying a parcel, delivery uniform, or liveried van), "
+    "append a new line with EXACTLY:\n"
+    "DELIVERY: <company>\n"
+    "where <company> is one of: DHL, Royal Mail, Amazon, or Unknown. "
+    "Only include the DELIVERY line if you are confident a delivery is taking place."
+)
+
 _LEGACY_CAMERA_VISION_PROMPTS: dict[str, str] = {
     "camera.rlc_1224a_fluent": _DRIVEWAY_IMAGE_PROMPT,
+    "camera.rlc_410w_fluent": _OUTDOOR1_IMAGE_PROMPT,
+    "camera.reolink_video_doorbell_poe_fluent": _DOORBELL_IMAGE_PROMPT,
 }
 
 # Entity IDs to completely ignore — handled by dedicated HA automations or
@@ -95,10 +125,9 @@ _LEGACY_CAMERA_VISION_PROMPTS: dict[str, str] = {
 # Reolink AI detection sensors have no device_class so they bypass the
 # _MOTION_DEVICE_CLASSES filter; list them explicitly here instead.
 _LEGACY_EXCLUDE_ENTITIES: set[str] = {
-    # Doorbell AI detections — handled by /announce/doorbell automation
-    "binary_sensor.reolink_video_doorbell_poe_person",
+    # Doorbell ancillary detections — vehicle/face/package handled separately;
+    # person and visitor are now wired to the camera vision path above.
     "binary_sensor.reolink_video_doorbell_poe_vehicle",
-    "binary_sensor.reolink_video_doorbell_poe_visitor",
     "binary_sensor.reolink_video_doorbell_poe_face",
     "binary_sensor.reolink_video_doorbell_poe_package",
     # Outdoor cam 2 (driveway) — handled via _MOTION_CAMERA_MAP / vision path

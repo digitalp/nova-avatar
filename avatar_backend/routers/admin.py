@@ -574,11 +574,20 @@ def _serialize_event_history_item(item: dict) -> dict:
     return payload
 
 
+# Cache of clip_id -> bool so ffprobe only runs once per clip per process lifetime.
+_playable_cache: dict[int, bool] = {}
+
+
 # L4 security fix: async subprocess to avoid blocking the event loop
 async def _motion_clip_is_playable(request: Request, clip: dict) -> bool:
+    clip_id = clip.get("id")
+    if clip_id is not None and clip_id in _playable_cache:
+        return _playable_cache[clip_id]
     svc = request.app.state.motion_clip_service
     path = svc.clip_path_for(clip)
     if not path or not path.exists():
+        if clip_id is not None:
+            _playable_cache[clip_id] = False
         return False
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -592,10 +601,21 @@ async def _motion_clip_is_playable(request: Request, clip: dict) -> bool:
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
         if proc.returncode != 0:
+            if clip_id is not None:
+                _playable_cache[clip_id] = False
             return False
-        return float((stdout or b"0").decode("utf-8", "ignore").strip() or "0") > 0.5
+        result = float((stdout or b"0").decode("utf-8", "ignore").strip() or "0") > 0.5
+        if clip_id is not None:
+            _playable_cache[clip_id] = result
+        return result
     except Exception:
         return False
+
+
+async def _filter_playable(request: Request, clips: list[dict]) -> list[dict]:
+    """Run all playability checks concurrently instead of sequentially."""
+    flags = await asyncio.gather(*[_motion_clip_is_playable(request, c) for c in clips])
+    return [c for c, ok in zip(clips, flags) if ok]
 
 
 @router.get("/motion-clips")
@@ -618,7 +638,7 @@ async def list_motion_clips(
         camera_entity_id=camera_entity_id,
         canonical_event_type=canonical_event_type,
     )
-    clips = [clip for clip in clips if await _motion_clip_is_playable(request, clip)]
+    clips = await _filter_playable(request, clips)
     return {"clips": [_serialize_motion_clip(clip) for clip in clips]}
 
 
@@ -634,7 +654,7 @@ async def search_motion_clips(body: MotionClipSearchBody, request: Request):
         camera_entity_id=body.camera_entity_id,
         canonical_event_type=body.canonical_event_type,
     )
-    clips = [clip for clip in result.get("clips", []) if await _motion_clip_is_playable(request, clip)]
+    clips = await _filter_playable(request, result.get("clips", []))
     return {
         "mode": result.get("mode", "recent"),
         "clips": [_serialize_motion_clip(clip) for clip in clips],
@@ -733,7 +753,7 @@ async def get_event_history(
 
     if db is not None:
         motion_clips = db.recent_motion_clips(limit=max(1, min(limit * 3, 120)))
-        motion_clips = [clip for clip in motion_clips if await _motion_clip_is_playable(request, clip)]
+        motion_clips = await _filter_playable(request, motion_clips)
         for clip in motion_clips:
             payload = _serialize_motion_clip(clip)
             rows.append(
