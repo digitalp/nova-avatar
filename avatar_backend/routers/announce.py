@@ -749,7 +749,7 @@ async def media_fun_fact_handler(body: MediaFunFactRequest, request: Request):
     )
 
     try:
-        fun_fact = (await llm.generate_text(prompt, timeout_s=30.0)).strip()
+        fun_fact = (await llm.generate_text_grounded(prompt, timeout_s=30.0)).strip()
     except Exception as exc:
         _LOGGER.warning("media_fun_fact.llm_failed", title=title, exc=str(exc))
         raise HTTPException(status_code=503, detail=f"LLM failed: {exc}")

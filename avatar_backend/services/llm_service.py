@@ -514,6 +514,33 @@ class _GeminiBackend:
              purpose="proactive")
         return text
 
+    async def generate_text_with_search(self, prompt: str, timeout_s: float = 30.0) -> str:
+        """Call Gemini with Google Search grounding enabled for web-sourced answers."""
+        payload: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.4},
+            "tools": [{"google_search": {}}],
+        }
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models"
+            f"/{self._model}:generateContent"
+        )
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s)) as client:
+            resp = await client.post(url, json=payload,
+                                     headers={"Content-Type": "application/json",
+                                              "X-goog-api-key": self._api_key})
+            resp.raise_for_status()
+        _d = resp.json()
+        parts = (_d.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+        text = " ".join(p.get("text", "") for p in parts if "text" in p).strip()
+        _um = _d.get("usageMetadata", {})
+        _log("google", self._model, t0, text, [],
+             input_tokens=_um.get("promptTokenCount", 0),
+             output_tokens=_um.get("candidatesTokenCount", 0),
+             purpose="media_fun_fact")
+        return text
+
     @property
     def model_name(self) -> str:
         return self._model
@@ -995,6 +1022,23 @@ class LLMService:
             purpose=purpose,
             fallback_timeout_s=fallback_timeout_s,
         )
+
+    async def generate_text_grounded(self, prompt: str, timeout_s: float = 30.0) -> str:
+        """Generate text using Gemini with Google Search grounding (web access).
+
+        Falls back to standard generate_text if the operational backend is not
+        Gemini or does not support search grounding.
+        """
+        backend = self._operational_backend
+        if backend is not None and hasattr(backend, "generate_text_with_search"):
+            try:
+                return await backend.generate_text_with_search(prompt, timeout_s=timeout_s)
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+                logger.warning(
+                    "llm.grounded_failed_using_fallback",
+                    reason=_format_exc_reason(exc),
+                )
+        return await self.generate_text(prompt, timeout_s=timeout_s)
 
     async def _chat_local_resilient(
         self,
