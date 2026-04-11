@@ -854,6 +854,7 @@ let latestSurfaceState = null;
 let pendingSurfaceConfirmation = null;
 let pendingTurnContext = null;
 let reconnectDelay = 1000;
+let _pingInterval  = null;
 let handledServerRestart = false;
 let isBusy         = false;    // Nova is thinking/speaking
 let visualEventTimer = null;
@@ -1120,17 +1121,25 @@ async function connectWs() {
       headers: { 'X-API-Key': API_KEY },
     });
     if (!r.ok) {
-      setStatus(r.status === 401 ? 'Avatar auth failed' : 'Avatar token request failed', '');
+      if (r.status === 401) {
+        setStatus('Avatar auth failed', '');
+        return; // auth failures are permanent — do not retry
+      }
+      setStatus('Reconnecting…', '');
+      setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
       return;
     }
     const d = await r.json();
     if (!d?.token) {
-      setStatus('Avatar token response was invalid', '');
+      setStatus('Reconnecting…', '');
+      setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
       return;
     }
     wsUrl += `&token=${encodeURIComponent(d.token)}`;
   } catch (_) {
-    setStatus('Avatar backend unreachable', '');
+    // Backend unreachable (still booting after restart) — keep retrying
+    setStatus('Reconnecting…', '');
+    setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
     return;
   }
   ws = new WebSocket(wsUrl);
@@ -1256,7 +1265,9 @@ async function connectWs() {
     setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
   };
   ws.onerror = () => ws.close();
-  setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type:'ping'})); }, 25000);
+  // Single persistent ping interval — clear any previous one before creating
+  if (_pingInterval) { clearInterval(_pingInterval); }
+  _pingInterval = setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type:'ping'})); }, 25000);
 }
 
 // ── State handler ─────────────────────────────────────────────────────────────
