@@ -258,7 +258,7 @@ async def lifespan(app: FastAPI):
         from types import SimpleNamespace
         fake_request = SimpleNamespace(app=app)
         await announce_handler(
-            AnnounceRequest(message=message, priority=priority),
+            AnnounceRequest(message=message, priority=priority, source="proactive"),
             fake_request,
         )
 
@@ -325,6 +325,29 @@ async def lifespan(app: FastAPI):
     sensor_watch = getattr(app.state, 'sensor_watch', None)
     if sensor_watch:
         sensor_watch.set_decision_log(decision_log)
+
+    # Auto-detect Cloudflare tunnel URL on startup
+    try:
+        from avatar_backend.routers.admin import _read_tunnel_url, _update_env_value
+        tunnel_url = None
+        # Retry up to 15s — cloudflared may still be starting
+        for _attempt in range(5):
+            tunnel_url = await _read_tunnel_url()
+            if tunnel_url:
+                break
+            await asyncio.sleep(3)
+        if tunnel_url:
+            current_public = settings.public_url or ""
+            if current_public != tunnel_url:
+                _update_env_value("PUBLIC_URL", tunnel_url)
+                get_settings.cache_clear()
+                logger.info("tunnel.auto_updated", old=current_public, new=tunnel_url)
+            else:
+                logger.info("tunnel.url_current", url=tunnel_url)
+        else:
+            logger.info("tunnel.not_detected", detail="No Cloudflare tunnel found — Alexa will use native TTS")
+    except Exception as exc:
+        logger.debug("tunnel.auto_detect_skipped", exc=str(exc))
 
     logger.info("avatar_backend.ready")
     yield

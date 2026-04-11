@@ -413,6 +413,12 @@ body {
 .btn-danger:hover:not(:disabled) { background: rgba(255,69,58,.25); color: #ff453a; border-color: rgba(255,69,58,.5); }
 .motion-archive-toolbar { display: flex; gap: 8px; align-items: center; padding: 0 0 14px 0; flex-wrap: wrap; }
 .motion-card.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+.announce-log-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.announce-log-row:last-child { border-bottom: none; }
+.announce-log-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
+.announce-log-time { font-size: 11px; color: var(--text3); margin-left: auto; }
+.announce-log-areas { font-size: 11px; color: var(--text3); }
+.announce-log-text { font-size: 13px; color: var(--text); line-height: 1.5; }
 
 /* ── Forms ───────────────────────────────────────────────────────────────────── */
 .field { margin-bottom: var(--sp-4); }
@@ -3003,17 +3009,31 @@ textarea:focus-visible {
         </button>
       </div>
 
+      <!-- Announcement Log -->
+      <div class="card mt-4">
+        <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Announcement Log</span>
+          <button class="btn btn-outline btn-sm" onclick="clearAnnouncementLog()" style="font-size:11px;">Clear Log</button>
+        </div>
+        <p class="text-sm text-muted mb-3">Every announcement Nova has spoken, newest first.</p>
+        <div id="announce-log-list" style="max-height:420px;overflow-y:auto;">
+          <div class="text-sm text-muted" style="padding:8px 0;">Loading…</div>
+        </div>
+      </div>
+
       <!-- Wake Word Training -->
       <div class="card mt-4">
         <div class="card-title">Wake Word Model</div>
-        <p class="text-sm text-muted mb-3">Nova uses a 3-stage wake word detection pipeline to listen for "Nova" efficiently:</p>
+        <p class="text-sm text-muted mb-3">Nova uses a 4-stage wake word detection pipeline to listen for "Nova" efficiently:</p>
         <div style="font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:14px;padding:12px;background:var(--surface2);border-radius:10px;">
-          <strong>Stage 1 — Coral Edge TPU</strong> (~1ms) — Runs a dedicated keyword model on the TPU. Requires a trained TFLite model.<br>
-          <strong>Stage 2 — Silero VAD</strong> (~14ms) — Filters out silence. Only speech-containing audio reaches Whisper.<br>
-          <strong>Stage 3 — Whisper STT</strong> (~150ms) — Full transcription fallback. Only fires when VAD detects speech.<br><br>
-          <strong>How to train:</strong> Click "Train Wake Word Model" below. Nova will use Piper TTS to generate synthetic "Nova" audio samples, extract audio embeddings, and train a lightweight verifier model (~2ms inference). The verifier slots in between VAD and Whisper to further reduce false wakes. No microphone recording needed — training is fully automatic.
+          <strong>Stage 1 — Coral Edge TPU</strong> (~1-3ms) — Runs a dedicated keyword classifier on the TPU. Requires edgetpu_compiler.<br>
+          <strong>Stage 1b — CPU TFLite</strong> (~3-8ms) — Same classifier on CPU. Used when Edge TPU model is not available.<br>
+          <strong>Stage 2 — Verifier</strong> (~2ms) — Cosine-similarity check against trained centroid. Fast pre-filter.<br>
+          <strong>Stage 3 — Silero VAD</strong> (~14ms) — Filters out silence. Only speech-containing audio reaches Whisper.<br>
+          <strong>Stage 4 — Whisper STT</strong> (~150ms) — Full transcription fallback. Only fires when VAD detects speech.<br><br>
+          <strong>How to train:</strong> Click "Train Wake Word Model" below. Nova generates synthetic audio via Piper TTS, trains a cosine-similarity verifier and a TFLite classifier, and optionally compiles for Edge TPU if the compiler is installed. No microphone needed — fully automatic.
         </div>
-        <div id="wake-status" class="mb-3" style="font-size:13px;color:var(--text3);padding:10px;background:var(--surface2);border-radius:8px;">Click "Tools" in the sidebar to load status...</div>
+        <div id="wake-status" class="mb-3" style="font-size:13px;color:var(--text3);padding:10px;background:var(--surface2);border-radius:8px;">Loading wake word status...</div>
         <div class="field-row mb-3">
           <div class="field">
             <label for="wake-word-input">Wake Word</label>
@@ -3027,10 +3047,15 @@ textarea:focus-visible {
           </div>
           <div id="wake-progress-text" class="text-xs text-muted mt-1"></div>
         </div>
-        <button class="btn btn-primary" id="wake-train-btn" onclick="trainWakeWord()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
-          Train Wake Word Model
-        </button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary" id="wake-train-btn" onclick="trainWakeWord()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+            Train Wake Word Model
+          </button>
+          <button class="btn btn-secondary" id="wake-install-compiler-btn" onclick="installEdgeTPUCompiler()" style="display:none;">
+            Install Edge TPU Compiler
+          </button>
+        </div>
       </div>
     </div>
 
@@ -6346,23 +6371,116 @@ async function resetAvatarBg() {
 // Load background settings when avatar section loads
 const _origLoadAvatarSettings = typeof loadAvatarSettings === 'function' ? loadAvatarSettings : null;
 
+// ── Announcement Log ─────────────────────────────────────────────────────────
+
+const _SOURCE_LABELS = {
+  announce: 'Manual',
+  proactive: 'Proactive',
+  doorbell: 'Doorbell',
+  media_fun_fact: 'Media Fun Fact',
+};
+
+function _fmtAnnounceTs(ts) {
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+  } catch { return ts || '—'; }
+}
+
+async function loadAnnouncementLog() {
+  const el = document.getElementById('announce-log-list');
+  if (!el) return;
+  try {
+    const d = await api('GET', '/admin/announcements?limit=200');
+    const items = d.announcements || [];
+    if (!items.length) {
+      el.innerHTML = '<div class="text-sm text-muted" style="padding:8px 0;">No announcements logged yet.</div>';
+      return;
+    }
+    el.innerHTML = items.map(a => {
+      const label = _SOURCE_LABELS[a.source] || a.source || 'Unknown';
+      const areas = Array.isArray(a.target_areas) && a.target_areas.length ? a.target_areas.join(', ') : 'All';
+      const priClass = a.priority === 'alert' ? 'coral-plate' : 'good';
+      return `<div class="announce-log-row">
+        <div class="announce-log-meta">
+          <span class="motion-chip ${priClass}" style="font-size:10px;padding:2px 7px;">${_esc(a.priority)}</span>
+          <span class="motion-chip" style="font-size:10px;padding:2px 7px;">${_esc(label)}</span>
+          <span class="announce-log-areas">${_esc(areas)}</span>
+          <span class="announce-log-time">${_esc(_fmtAnnounceTs(a.ts))}</span>
+        </div>
+        <div class="announce-log-text">${_esc(a.text)}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div class="text-sm" style="color:var(--danger,#ff453a);padding:8px 0;">Failed to load announcement log: ${_esc(e.message || String(e))}</div>`;
+  }
+}
+
+async function clearAnnouncementLog() {
+  if (!confirm('Clear all announcement history?')) return;
+  try {
+    await api('DELETE', '/admin/announcements');
+    await loadAnnouncementLog();
+    toast('Announcement log cleared');
+  } catch(e) {
+    alert('Failed to clear: ' + (e.message || e));
+  }
+}
+
 // ── Wake Word Training ────────────────────────────────────────────────────────
 
 async function loadWakeStatus() {
   const el = document.getElementById('wake-status');
   if (!el) return;
   try {
-    const d = await api('GET', '/coral/wake-status');
+    const d = await api('GET', '/admin/coral/wake-status');
     const stages = (d.pipeline_stages || []).join(' → ');
-    el.innerHTML = [
+    const lines = [
       `<strong>Pipeline:</strong> ${stages || 'not initialized'}`,
-      `Coral TPU: ${d.coral_available ? '✅ Active' : '❌ Not available'}`,
-      `VAD Gate: ${d.vad_available ? '✅ Active' : '❌ Not available'}`,
-      `Verifier: ${d.verifier_model_exists ? '✅ Trained' : '⚠ Not trained'}`,
-      `Coral Model: ${d.coral_model_exists ? '✅ Present' : '⚠ Not present (placeholder)'}`,
-    ].join('<br>');
+      `Coral TPU: ${d.coral_available ? '✅ Active (~1-3ms)' : '❌ Not available'}`,
+    ];
+    // Show the best available classifier — only one should be active
+    if (d.cpu_tflite_available) {
+      lines.push(`CPU TFLite: ✅ Active (~3-8ms)`);
+    }
+    if (d.numpy_model_available) {
+      lines.push(`Numpy Classifier: ✅ Active (~3-5ms)`);
+    }
+    lines.push(`Verifier: ${d.verifier_available ? '✅ Active' : (d.verifier_model_exists ? '✅ Trained' : '⚠ Not trained')}`);
+    lines.push(`VAD Gate: ${d.vad_available ? '✅ Active' : '❌ Not available'}`);
+    lines.push(`Whisper Fallback: ✅ Ready`);
+    lines.push(`Edge TPU Model: ${d.coral_model_exists ? '✅ Present' : '⚠ Not present'}`);
+    lines.push(`Edge TPU Compiler: ${d.edgetpu_compiler_available ? '✅ Installed' : '⚠ Not installed (optional)'}`);
+    const compilerBtn = document.getElementById('wake-install-compiler-btn');
+    if (compilerBtn) compilerBtn.style.display = d.edgetpu_compiler_available ? 'none' : '';
+    el.innerHTML = lines.join('<br>');
   } catch (e) {
-    el.textContent = 'Failed to load wake word status';
+    if (!el._retries) el._retries = 0;
+    if (++el._retries < 3) setTimeout(loadWakeStatus, 2000);
+    else el.textContent = 'Could not load wake word status.';
+  }
+}
+
+async function installEdgeTPUCompiler() {
+  const btn = document.getElementById('wake-install-compiler-btn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Installing...';
+  try {
+    const d = await api('POST', '/admin/coral/install-edgetpu-compiler');
+    if (d.ok) {
+      toast('Edge TPU compiler installed! Re-train to compile for TPU.', 'ok');
+    } else {
+      toast(d.message || 'Installation failed', 'err');
+    }
+    await loadWakeStatus();
+  } catch (e) {
+    toast('Installation failed: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Install Edge TPU Compiler';
   }
 }
 
@@ -6423,7 +6541,10 @@ setTimeout(() => {
   const toolsSection = document.getElementById('section-tools');
   if (toolsSection) {
     const observer = new MutationObserver(() => {
-      if (toolsSection.classList.contains('active')) loadWakeStatus();
+      if (toolsSection.classList.contains('active')) {
+        loadWakeStatus();
+        loadAnnouncementLog();
+      }
     });
     observer.observe(toolsSection, { attributes: true, attributeFilter: ['class'] });
   }

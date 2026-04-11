@@ -40,8 +40,37 @@ from avatar_backend.services.event_service import publish_visual_event
 from avatar_backend.services.speaker_service import SpeakerService
 from avatar_backend.services.tts_service import TTSService
 from avatar_backend.services.ws_manager import ConnectionManager
+from avatar_backend.runtime_paths import data_dir
 
 _LOGGER = structlog.get_logger()
+
+_ANNOUNCE_LOG: "Path | None" = None
+
+def _announce_log_path() -> "Path":
+    global _ANNOUNCE_LOG
+    if _ANNOUNCE_LOG is None:
+        from pathlib import Path as _Path
+        p = data_dir() / "announcements.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _ANNOUNCE_LOG = p
+    return _ANNOUNCE_LOG
+
+def _log_announcement(text: str, priority: str, target_areas: list, source: str = "announce") -> None:
+    """Append a single JSON line to the announcement log (fire-and-forget)."""
+    import json as _json
+    from datetime import datetime, timezone
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "text": text,
+        "priority": priority,
+        "target_areas": target_areas,
+        "source": source,
+    }
+    try:
+        with open(_announce_log_path(), "a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(entry) + "\n")
+    except Exception as exc:
+        _LOGGER.warning("announce.log_write_failed", exc=str(exc))
 
 router = APIRouter()
 _STREAM_TIMEOUT = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
@@ -52,6 +81,7 @@ class AnnounceRequest(BaseModel):
     message:  str = Field(..., min_length=1, max_length=2000)
     priority: Literal["normal", "alert"] = "normal"
     target_areas: list[str] = Field(default_factory=list)
+    source: str = "announce"  # caller tag recorded in announcement log
 
 
 class AnnounceResponse(BaseModel):
@@ -84,6 +114,7 @@ async def announce_handler(body: AnnounceRequest, request: Request):
     text = body.message.strip()
     target_areas = [str(area).strip() for area in body.target_areas if str(area).strip()]
     _LOGGER.info("announce.received", chars=len(text), priority=body.priority, target_areas=target_areas)
+    _log_announcement(text, body.priority, target_areas, source=getattr(body, "source", "announce"))
 
     # 1. Show alert or speaking state on avatar card
     initial_state = "alert" if body.priority == "alert" else "speaking"
@@ -369,7 +400,7 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
 
     # 2. Announce via the standard announce flow
     announce_resp = await announce_handler(
-        AnnounceRequest(message=message, priority="alert"),
+        AnnounceRequest(message=message, priority="alert", source="doorbell"),
         request,
     )
 
@@ -760,7 +791,7 @@ async def media_fun_fact_handler(body: MediaFunFactRequest, request: Request):
     _LOGGER.info("media_fun_fact.generated", title=title, chars=len(fun_fact))
 
     announce_resp = await announce_handler(
-        AnnounceRequest(message=fun_fact, priority="normal", target_areas=target_areas),
+        AnnounceRequest(message=fun_fact, priority="normal", target_areas=target_areas, source="media_fun_fact"),
         request,
     )
 

@@ -703,6 +703,45 @@ async def _filter_playable(request: Request, clips: list[dict]) -> list[dict]:
     return [c for c, ok in zip(clips, flags) if ok]
 
 
+@router.get("/announcements")
+async def list_announcements(request: Request, limit: int = 200):
+    """Return recent announcements from the JSONL log file, newest first."""
+    _require_session(request, min_role="viewer")
+    import json as _json
+    from avatar_backend.runtime_paths import data_dir
+    log_path = data_dir() / "announcements.jsonl"
+    entries: list[dict] = []
+    if log_path.exists():
+        try:
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(_json.loads(line))
+                except Exception:
+                    pass
+                if len(entries) >= limit:
+                    break
+        except Exception as exc:
+            _LOGGER.warning("admin.announcements_read_failed", exc=str(exc))
+    return {"announcements": entries, "total": len(entries)}
+
+
+@router.delete("/announcements")
+async def clear_announcements(request: Request):
+    """Truncate the announcement log."""
+    _require_session(request, min_role="admin")
+    from avatar_backend.runtime_paths import data_dir
+    log_path = data_dir() / "announcements.jsonl"
+    try:
+        log_path.write_text("", encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"cleared": True}
+
+
 @router.get("/motion-clips")
 async def list_motion_clips(
     request: Request,
@@ -1688,25 +1727,41 @@ async def coral_wake_status(request: Request):
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
     detector = getattr(request.app.state, "coral_wake_detector", None)
     model_dir = Path(install_dir()) / "models" / "coral"
-    model_path = model_dir / "nova_wakeword_edgetpu.tflite"
+    edgetpu_path = model_dir / "nova_wakeword_edgetpu.tflite"
+    cpu_path = model_dir / "nova_wakeword.tflite"
     verifier_path = model_dir / "nova_verifier.pkl"
     return {
         "coral_available": detector.coral_available if detector else False,
+        "cpu_tflite_available": detector.cpu_tflite_available if detector else False,
+        "numpy_model_available": detector.numpy_model_available if detector else False,
         "vad_available": detector.vad_available if detector else False,
         "verifier_available": detector.verifier_available if detector else False,
-        "coral_model_exists": model_path.exists(),
+        "coral_model_exists": edgetpu_path.exists(),
+        "cpu_model_exists": cpu_path.exists(),
         "verifier_model_exists": verifier_path.exists(),
         "pipeline_stages": detector.describe_pipeline() if detector else [],
+        "edgetpu_compiler_available": _check_edgetpu_compiler(),
     }
+
+
+def _check_edgetpu_compiler() -> bool:
+    """Check if edgetpu_compiler is installed."""
+    import shutil
+    return shutil.which("edgetpu_compiler") is not None
 
 
 @router.post("/coral/train-wakeword")
 async def train_wakeword(request: Request):
-    """Stream-train a wake word verifier model using Piper TTS synthetic samples.
+    """Stream-train wake word models: verifier + TFLite (+ Edge TPU if compiler available).
 
-    Generates audio samples of the configured wake word, extracts audio features,
-    and trains a simple cosine-similarity verifier (~2ms inference).
-    Yields SSE progress events.
+    Pipeline:
+    1. Generate synthetic audio via Piper TTS
+    2. Generate negative (non-wake) samples
+    3. Extract spectral features
+    4. Train cosine-similarity verifier (~2ms)
+    5. Build & quantize TFLite classification model (~3-8ms CPU)
+    6. If edgetpu_compiler available, compile for Edge TPU (~1-3ms)
+    7. Reload detector with new models
     """
     _require_session(request, min_role="admin")
     import json as _json_ww
@@ -1723,13 +1778,15 @@ async def train_wakeword(request: Request):
             payload = {"stage": stage, "progress": progress, "message": message}
             return f"data: {_json_ww.dumps(payload)}\n\n"
 
-        yield _emit("init", 0, f"Training wake word model for '{wake_word}'...")
+        yield _emit("init", 0, f"Training wake word models for '{wake_word}'...")
 
         model_dir = Path(install_dir()) / "models" / "coral"
         model_dir.mkdir(parents=True, exist_ok=True)
         verifier_path = model_dir / "nova_verifier.pkl"
+        tflite_path = model_dir / "nova_wakeword.tflite"
+        edgetpu_path = model_dir / "nova_wakeword_edgetpu.tflite"
 
-        # Stage 1: Generate synthetic audio samples using Piper TTS
+        # ── Stage 1: Generate positive audio samples ──────────────────────────
         yield _emit("generate", 5, f"Generating synthetic '{wake_word}' audio samples via Piper TTS...")
 
         tts = getattr(request.app.state, "tts_service", None)
@@ -1741,8 +1798,7 @@ async def train_wakeword(request: Request):
         import wave as _wave
         import io as _io
 
-        # Generate variations of the wake word
-        phrases = [
+        positive_phrases = [
             wake_word,
             wake_word.lower(),
             f"Hey {wake_word}",
@@ -1753,116 +1809,371 @@ async def train_wakeword(request: Request):
             f"Hey {wake_word}!",
             f"OK {wake_word}",
             f"ok {wake_word}",
+            f"Excuse me {wake_word}",
+            f"{wake_word}, hello",
         ]
-        wav_samples = []
-        for i, phrase in enumerate(phrases):
+        negative_phrases = [
+            "Hello there",
+            "What time is it",
+            "Turn on the lights",
+            "Good morning",
+            "Play some music",
+            "Set a timer",
+            "How is the weather",
+            "Open the door",
+            "Thank you very much",
+            "I need help",
+            "What is happening",
+            "Stop playing",
+        ]
+
+        def _wav_to_pcm16k(wav_data: bytes) -> np.ndarray:
+            with _io.BytesIO(wav_data) as buf:
+                with _wave.open(buf, "rb") as wf:
+                    sr = wf.getframerate()
+                    frames = wf.readframes(wf.getnframes())
+                    audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            if sr != 16000 and sr > 0:
+                ratio = 16000 / sr
+                new_len = int(len(audio) * ratio)
+                indices = np.linspace(0, len(audio) - 1, new_len).astype(int)
+                audio = audio[indices]
+            target_len = 16000  # 1 second at 16kHz
+            if len(audio) < target_len:
+                audio = np.pad(audio, (0, target_len - len(audio)))
+            else:
+                audio = audio[:target_len]
+            return audio
+
+        def _extract_features(audio: np.ndarray) -> np.ndarray:
+            fft = np.abs(np.fft.rfft(audio))
+            bin_size = max(1, len(fft) // 128)
+            features = np.array([fft[i * bin_size:(i + 1) * bin_size].mean() for i in range(128)])
+            norm = np.linalg.norm(features)
+            if norm > 0:
+                features = features / norm
+            return features
+
+        positive_audio = []
+        positive_features = []
+        total_phrases = len(positive_phrases) + len(negative_phrases)
+
+        for i, phrase in enumerate(positive_phrases):
             try:
                 wav_bytes, _ = await tts.synthesise_with_timing(phrase)
-                wav_samples.append(wav_bytes)
-                pct = 5 + int((i / len(phrases)) * 35)
-                yield _emit("generate", pct, f"Generated sample {i+1}/{len(phrases)}: '{phrase}'")
+                audio = _wav_to_pcm16k(wav_bytes)
+                positive_audio.append(audio)
+                positive_features.append(_extract_features(audio))
+                pct = 5 + int((i / total_phrases) * 30)
+                yield _emit("generate", pct, f"Positive {i+1}/{len(positive_phrases)}: '{phrase}'")
             except Exception as exc:
                 yield _emit("warn", 5, f"Skipped '{phrase}': {exc}")
 
-        if len(wav_samples) < 3:
-            yield _emit("error", 0, f"Only {len(wav_samples)} samples generated — need at least 3. Check TTS service.")
+        if len(positive_audio) < 3:
+            yield _emit("error", 0, f"Only {len(positive_audio)} positive samples — need at least 3")
             return
 
-        yield _emit("generate", 40, f"Generated {len(wav_samples)} audio samples")
+        # ── Stage 2: Generate negative audio samples ──────────────────────────
+        yield _emit("generate", 35, "Generating negative (non-wake) samples...")
 
-        # Stage 2: Extract audio features (simple MFCC-like approach, no openWakeWord dependency)
-        yield _emit("embed", 45, "Extracting audio features from samples...")
+        negative_audio = []
+        negative_features = []
+        for i, phrase in enumerate(negative_phrases):
+            try:
+                wav_bytes, _ = await tts.synthesise_with_timing(phrase)
+                audio = _wav_to_pcm16k(wav_bytes)
+                negative_audio.append(audio)
+                negative_features.append(_extract_features(audio))
+                pct = 35 + int((i / len(negative_phrases)) * 10)
+                yield _emit("generate", pct, f"Negative {i+1}/{len(negative_phrases)}: '{phrase}'")
+            except Exception as exc:
+                yield _emit("warn", 35, f"Skipped negative '{phrase}': {exc}")
 
-        try:
-            positive_features = []
-            for idx, wav_data in enumerate(wav_samples):
-                # Convert WAV bytes to float32 PCM
-                with _io.BytesIO(wav_data) as buf:
-                    with _wave.open(buf, "rb") as wf:
-                        sr = wf.getframerate()
-                        frames = wf.readframes(wf.getnframes())
-                        audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+        # Add silence as negative
+        silence = np.zeros(16000, dtype=np.float32)
+        negative_audio.append(silence)
+        negative_features.append(_extract_features(silence))
+        # Add noise as negative
+        noise = np.random.randn(16000).astype(np.float32) * 0.01
+        negative_audio.append(noise)
+        negative_features.append(_extract_features(noise))
 
-                # Resample to 16kHz if needed
-                if sr != 16000 and sr > 0:
-                    ratio = 16000 / sr
-                    new_len = int(len(audio) * ratio)
-                    indices = np.linspace(0, len(audio) - 1, new_len).astype(int)
-                    audio = audio[indices]
+        yield _emit("generate", 45, f"Generated {len(positive_audio)} positive + {len(negative_audio)} negative samples")
 
-                # Normalize to 1 second (16000 samples)
-                target_len = 16000
-                if len(audio) < target_len:
-                    audio = np.pad(audio, (0, target_len - len(audio)))
-                else:
-                    audio = audio[:target_len]
+        positive_features = np.array(positive_features, dtype=np.float32)
+        negative_features = np.array(negative_features, dtype=np.float32)
 
-                # Extract simple spectral features (FFT magnitude bins)
-                fft = np.abs(np.fft.rfft(audio))
-                # Downsample to 128 bins
-                bin_size = len(fft) // 128
-                features = np.array([fft[i*bin_size:(i+1)*bin_size].mean() for i in range(128)])
-                # Normalize
-                norm = np.linalg.norm(features)
-                if norm > 0:
-                    features = features / norm
-                positive_features.append(features)
-
-                pct = 45 + int((idx / len(wav_samples)) * 25)
-                yield _emit("embed", pct, f"Processed sample {idx+1}/{len(wav_samples)}")
-
-            positive_features = np.array(positive_features)
-            yield _emit("embed", 70, f"Extracted features from {len(positive_features)} samples")
-        except Exception as exc:
-            yield _emit("error", 0, f"Feature extraction failed: {exc}")
-            return
-
-        # Stage 3: Build verifier model (centroid + threshold)
-        yield _emit("train", 75, "Building verifier model...")
+        # ── Stage 3: Train verifier (centroid + threshold) ────────────────────
+        yield _emit("train_verifier", 48, "Building cosine-similarity verifier...")
 
         try:
             import pickle
 
-            # Compute centroid of positive samples
             centroid = positive_features.mean(axis=0)
             centroid_norm = np.linalg.norm(centroid)
             if centroid_norm > 0:
                 centroid = centroid / centroid_norm
 
-            # Compute similarity scores for positive samples
-            similarities = np.array([np.dot(f, centroid) for f in positive_features])
-            mean_sim = float(similarities.mean())
-            min_sim = float(similarities.min())
+            pos_sims = np.array([np.dot(f, centroid) for f in positive_features])
+            neg_sims = np.array([np.dot(f, centroid) for f in negative_features])
+            mean_pos = float(pos_sims.mean())
+            min_pos = float(pos_sims.min())
+            max_neg = float(neg_sims.max())
 
-            # Set threshold at 70% of the minimum positive similarity
-            threshold = max(0.3, min_sim * 0.7)
+            # Threshold: midpoint between worst positive and best negative
+            threshold = max(0.3, (min_pos + max_neg) / 2.0)
 
             verifier_data = {
                 "wake_word": wake_word,
                 "centroid": centroid.tolist(),
                 "threshold": threshold,
-                "mean_similarity": mean_sim,
-                "min_similarity": min_sim,
-                "num_samples": len(positive_features),
+                "mean_similarity": mean_pos,
+                "min_similarity": min_pos,
+                "max_negative_similarity": max_neg,
+                "num_positive": len(positive_features),
+                "num_negative": len(negative_features),
                 "feature_dim": 128,
                 "trained_at": __import__("datetime").datetime.now().isoformat(),
             }
             with open(verifier_path, "wb") as f:
                 pickle.dump(verifier_data, f)
 
-            yield _emit("train", 90, f"Verifier saved — threshold={threshold:.3f}, mean_sim={mean_sim:.3f}")
+            yield _emit("train_verifier", 55, f"Verifier saved — threshold={threshold:.3f}, pos_mean={mean_pos:.3f}, neg_max={max_neg:.3f}")
         except Exception as exc:
-            yield _emit("error", 0, f"Training failed: {exc}")
+            yield _emit("error", 0, f"Verifier training failed: {exc}")
             return
 
-        # Stage 4: Reload detector
-        yield _emit("reload", 95, "Reloading wake word detector...")
+        # ── Stage 4: Build TFLite classification model ────────────────────────
+        yield _emit("train_tflite", 58, "Building TFLite keyword classification model...")
+
+        tflite_built = False
+        try:
+            # Build a simple 2-layer dense classifier using raw numpy weights
+            # Input: 128 features → Dense(64, relu) → Dense(2, softmax)
+            # Then convert to TFLite with full int8 quantization
+
+            X = np.vstack([positive_features, negative_features])
+            y = np.array([1] * len(positive_features) + [0] * len(negative_features), dtype=np.float32)
+
+            # Simple logistic regression via gradient descent (no TF dependency)
+            # Architecture: input(128) → hidden(64, relu) → output(2, softmax)
+            np.random.seed(42)
+            W1 = np.random.randn(128, 64).astype(np.float32) * 0.1
+            b1 = np.zeros(64, dtype=np.float32)
+            W2 = np.random.randn(64, 2).astype(np.float32) * 0.1
+            b2 = np.zeros(2, dtype=np.float32)
+
+            def _relu(x):
+                return np.maximum(0, x)
+
+            def _softmax(x):
+                e = np.exp(x - x.max(axis=-1, keepdims=True))
+                return e / e.sum(axis=-1, keepdims=True)
+
+            lr = 0.05
+            n_epochs = 200
+            n_samples = len(X)
+
+            yield _emit("train_tflite", 60, f"Training classifier: {n_samples} samples, {n_epochs} epochs...")
+
+            for epoch in range(n_epochs):
+                # Forward pass
+                h = _relu(X @ W1 + b1)
+                logits = h @ W2 + b2
+                probs = _softmax(logits)
+
+                # One-hot encode labels
+                y_onehot = np.zeros((n_samples, 2), dtype=np.float32)
+                y_onehot[np.arange(n_samples), y.astype(int)] = 1.0
+
+                # Backward pass (cross-entropy gradient)
+                d_logits = (probs - y_onehot) / n_samples
+                dW2 = h.T @ d_logits
+                db2 = d_logits.sum(axis=0)
+                d_h = d_logits @ W2.T
+                d_h[X @ W1 + b1 <= 0] = 0  # relu gradient
+                dW1 = X.T @ d_h
+                db1 = d_h.sum(axis=0)
+
+                W1 -= lr * dW1
+                b1 -= lr * db1
+                W2 -= lr * dW2
+                b2 -= lr * db2
+
+                if epoch % 50 == 0:
+                    preds = probs.argmax(axis=1)
+                    acc = (preds == y.astype(int)).mean()
+                    pct = 60 + int((epoch / n_epochs) * 15)
+                    yield _emit("train_tflite", pct, f"Epoch {epoch}/{n_epochs} — accuracy: {acc:.1%}")
+
+            # Final accuracy
+            h_final = _relu(X @ W1 + b1)
+            probs_final = _softmax(h_final @ W2 + b2)
+            preds_final = probs_final.argmax(axis=1)
+            final_acc = (preds_final == y.astype(int)).mean()
+            yield _emit("train_tflite", 76, f"Training complete — accuracy: {final_acc:.1%}")
+
+            # ── Convert to TFLite with int8 quantization ──────────────────────
+            yield _emit("quantize", 78, "Quantizing model to int8 TFLite...")
+
+            tflite_bytes = _build_quantized_tflite(W1, b1, W2, b2, X)
+            if tflite_bytes is not None:
+                tflite_path.write_bytes(tflite_bytes)
+                tflite_built = True
+                yield _emit("quantize", 82, f"TFLite model saved ({len(tflite_bytes)} bytes)")
+            else:
+                # No TensorFlow — save numpy weights for the numpy model path
+                if _save_numpy_model(model_dir, W1, b1, W2, b2):
+                    yield _emit("quantize", 82, "Saved numpy model (TensorFlow not available for TFLite conversion)")
+                else:
+                    yield _emit("warn", 78, "Could not save model — verifier will be used instead")
+
+        except Exception as exc:
+            yield _emit("warn", 58, f"TFLite training failed (verifier still works): {exc}")
+
+        # ── Stage 5: Edge TPU compilation (if compiler available) ─────────────
+        edgetpu_compiled = False
+        if tflite_built and _check_edgetpu_compiler():
+            yield _emit("edgetpu", 84, "Compiling for Edge TPU...")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "edgetpu_compiler",
+                    "-s",  # show operations
+                    "-o", str(model_dir),
+                    str(tflite_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+                output = (stdout or b"").decode("utf-8", "ignore")
+                # edgetpu_compiler outputs to <name>_edgetpu.tflite
+                compiled_path = model_dir / "nova_wakeword_edgetpu.tflite"
+                if compiled_path.exists():
+                    edgetpu_compiled = True
+                    yield _emit("edgetpu", 90, "Edge TPU model compiled successfully!")
+                else:
+                    yield _emit("warn", 84, f"Edge TPU compilation produced no output: {output[:200]}")
+            except Exception as exc:
+                yield _emit("warn", 84, f"Edge TPU compilation failed: {exc}")
+        elif tflite_built:
+            yield _emit("info", 84, "edgetpu_compiler not installed — CPU TFLite model will be used (~3-8ms)")
+
+        # Always save numpy model as guaranteed fallback
+        _save_numpy_model(model_dir, W1, b1, W2, b2)
+
+        # ── Stage 6: Reload detector ──────────────────────────────────────────
+        yield _emit("reload", 92, "Reloading wake word detector...")
         detector = getattr(request.app.state, "coral_wake_detector", None)
         if detector:
             detector.reload_verifier()
-            yield _emit("reload", 98, "Detector reloaded with new verifier")
+            detector.reload_tflite()
+            yield _emit("reload", 98, "Detector reloaded with new models")
 
-        yield _emit("done", 100, f"Wake word model for '{wake_word}' trained successfully! {len(wav_samples)} samples, threshold={threshold:.3f}")
+        # Summary
+        models_built = ["verifier", "numpy_classifier"]
+        if tflite_built:
+            models_built.append("cpu_tflite")
+        if edgetpu_compiled:
+            models_built.append("edgetpu_tflite")
+        summary = (
+            f"Wake word '{wake_word}' trained! "
+            f"Models: {', '.join(models_built)}. "
+            f"{len(positive_audio)} positive + {len(negative_audio)} negative samples. "
+            f"Verifier threshold={threshold:.3f}, classifier accuracy={final_acc:.1%}"
+        )
+        yield _emit("done", 100, summary)
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
+def _build_quantized_tflite(W1, b1, W2, b2, calibration_data) -> bytes | None:
+    """Build a TFLite model from numpy weights.
+
+    Tries TensorFlow first for proper TFLite conversion.
+    Falls back to saving a numpy model archive that the detector can load directly.
+    """
+    import numpy as np
+
+    # Try TensorFlow first (best TFLite support, enables Edge TPU compilation)
+    try:
+        import tensorflow as tf
+
+        model = tf.keras.Sequential([
+            tf.keras.layers.InputLayer(input_shape=(128,)),
+            tf.keras.layers.Dense(64, activation="relu"),
+            tf.keras.layers.Dense(2, activation="softmax"),
+        ])
+        model.layers[0].set_weights([W1, b1])
+        model.layers[1].set_weights([W2, b2])
+
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+        def _representative_dataset():
+            for sample in calibration_data:
+                yield [sample.reshape(1, 128).astype(np.float32)]
+
+        converter.representative_dataset = _representative_dataset
+        try:
+            converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+            converter.inference_input_type = tf.int8
+            converter.inference_output_type = tf.int8
+            return converter.convert()
+        except Exception:
+            # Fall back to default quantization
+            converter2 = tf.lite.TFLiteConverter.from_keras_model(model)
+            converter2.optimizations = [tf.lite.Optimize.DEFAULT]
+            return converter2.convert()
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # No TensorFlow — save as numpy model archive instead.
+    # The detector will load this via _try_load_numpy_model().
+    return None
+
+
+def _save_numpy_model(model_dir, W1, b1, W2, b2) -> bool:
+    """Save trained weights as a numpy archive for the detector to load."""
+    import numpy as np
+    try:
+        path = model_dir / "nova_wakeword_weights.npz"
+        np.savez(path, W1=W1, b1=b1, W2=W2, b2=b2)
+        return True
+    except Exception:
+        return False
+
+
+@router.post("/coral/install-edgetpu-compiler")
+async def install_edgetpu_compiler(request: Request):
+    """Install the Edge TPU compiler on the system."""
+    _require_session(request, min_role="admin")
+
+    if _check_edgetpu_compiler():
+        return {"ok": True, "message": "edgetpu_compiler is already installed"}
+
+    try:
+        # Add Google Coral apt repo and install
+        commands = [
+            'curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -',
+            'echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list',
+            'sudo apt-get update -qq',
+            'sudo apt-get install -y -qq edgetpu-compiler',
+        ]
+        for cmd in commands:
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=60)
+
+        installed = _check_edgetpu_compiler()
+        return {
+            "ok": installed,
+            "message": "edgetpu_compiler installed successfully" if installed else "Installation completed but compiler not found",
+        }
+    except Exception as exc:
+        return {"ok": False, "message": f"Installation failed: {exc}"}
 
