@@ -123,6 +123,33 @@ class HAProxy:
                     success=False,
                     message="get_entities requires a 'domain' argument.",
                 )
+            # Intercept weather domain — always redirect to the preferred entity
+            if domain == "weather":
+                return ToolResult(
+                    success=True,
+                    message=(
+                        "Use get_entity_state('weather.met_office_ince_in_makerfield') for all weather questions. "
+                        "It has current conditions, temperature, humidity, wind, and forecast data. "
+                        "Do NOT list multiple weather sources — just call get_entity_state with this entity."
+                    ),
+                )
+            # Intercept sensor/binary_sensor for common questions
+            if domain in ("sensor", "binary_sensor"):
+                return ToolResult(
+                    success=True,
+                    message=(
+                        "Do NOT browse sensors. Use get_entity_state with the EXACT entity_id:\n"
+                        "  Outdoor temp: weather.met_office_ince_in_makerfield (attribute: temperature)\n"
+                        "  Living room temp: sensor.living_room_sensor_temperature\n"
+                        "  Main bedroom temp: sensor.main_bedroom_temp_temperature\n"
+                        "  Kids bedroom temp: sensor.bedroom_sensor_temperature\n"
+                        "  Total power: sensor.total_power_consumption\n"
+                        "  Daily power cost: sensor.daily_power_cost\n"
+                        "  Car status: sensor.ko66ewx_lock\n"
+                        "  Fuel level: sensor.ko66ewx_fuel_level\n"
+                        "Call get_entity_state with the specific entity_id that answers the user's question."
+                    ),
+                )
             return await self.get_entities(domain)
 
         if tool_call.function_name == "get_entity_state":
@@ -205,7 +232,7 @@ class HAProxy:
     # Domains that have too many entities to dump wholesale — the LLM must
     # use get_entity_state for specific value reads, not browse the whole domain.
     _LARGE_DOMAINS: frozenset = frozenset({"sensor", "binary_sensor", "automation", "input_boolean"})
-    _LARGE_DOMAIN_CAP: int = 30
+    _LARGE_DOMAIN_CAP: int = 15
 
     async def get_entities(self, domain: str) -> ToolResult:
         """
@@ -261,8 +288,9 @@ class HAProxy:
         if truncated:
             header += (
                 f" (showing {self._LARGE_DOMAIN_CAP} of {total} — "
-                f"use get_entity_state with a specific entity_id for value lookups, "
-                f"not get_entities)"
+                f"DO NOT summarize this list. Use get_entity_state with the EXACT entity_id "
+                f"from the system prompt to answer the user's question. "
+                f"For weather/outdoor temperature use weather.met_office_ince_in_makerfield)"
             )
         return ToolResult(
             success=True,
@@ -325,7 +353,50 @@ class HAProxy:
         msg = f"{friendly} ({entity_id}): {state_str}"
         if extras:
             msg += "\nAttributes:\n  " + "\n  ".join(extras)
+
+        # Enrich weather entities with forecast data (HA doesn't include it in state)
+        if entity_id.startswith("weather."):
+            forecast_text = await self._fetch_weather_forecast(entity_id)
+            if forecast_text:
+                msg += f"\n{forecast_text}"
+
         return ToolResult(success=True, message=msg)
+
+    async def _fetch_weather_forecast(self, entity_id: str) -> str:
+        """Fetch daily forecast from HA weather.get_forecasts service."""
+        try:
+            url = f"{self._ha_url}/api/services/weather/get_forecasts?return_response"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(
+                    url,
+                    headers=self._headers,
+                    json={"entity_id": entity_id, "type": "daily"},
+                )
+            if resp.status_code != 200:
+                return ""
+            data = resp.json()
+            forecasts = data.get("service_response", {}).get(entity_id, {}).get("forecast", [])
+            if not forecasts:
+                return ""
+            lines = ["Daily forecast:"]
+            for fc in forecasts[:3]:  # next 3 days
+                date = fc.get("datetime", "")[:10]
+                cond = fc.get("condition", "")
+                temp_high = fc.get("temperature", "")
+                temp_low = fc.get("templow", "")
+                precip = fc.get("precipitation_probability", "")
+                wind = fc.get("wind_speed", "")
+                line = f"  {date}: {cond}, high {temp_high}°C"
+                if temp_low:
+                    line += f", low {temp_low}°C"
+                if precip:
+                    line += f", {precip}% rain chance"
+                if wind:
+                    line += f", wind {wind} km/h"
+                lines.append(line)
+            return "\n".join(lines)
+        except Exception:
+            return ""
 
     async def call_service(
         self,
