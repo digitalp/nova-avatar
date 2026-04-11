@@ -3197,6 +3197,22 @@ async function loadAvatarSettings() {
     selectSkin(d.skin_tone ?? 0);
     _activeAvatarUrl = d.avatar_url || '';
     document.getElementById('avatar-url').value = _activeAvatarUrl.startsWith('/static/') ? '' : _activeAvatarUrl;
+    // Restore background settings into the form
+    if (d.bg_type) {
+      const radio = document.querySelector('input[name="bg-type"][value="' + d.bg_type + '"]');
+      if (radio) { radio.checked = true; if (typeof onBgTypeChange === 'function') onBgTypeChange(); }
+    }
+    if (d.bg_color) {
+      const ci = document.getElementById('bg-color-input');
+      const cp = document.getElementById('bg-color-picker');
+      if (ci) ci.value = d.bg_color;
+      if (cp) cp.value = d.bg_color;
+    }
+    if (d.bg_image_url) {
+      const ii = document.getElementById('bg-image-input');
+      if (ii) ii.value = d.bg_image_url;
+      if (typeof updateBgImagePreview === 'function') updateBgImagePreview();
+    }
   } catch(e) { selectSkin(0); }
   await loadAvatarLibrary();
 }

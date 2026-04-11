@@ -139,16 +139,21 @@ async def announce_handler(body: AnnounceRequest, request: Request):
                 audio_url = f"{public_url}/tts/audio/{token}"
 
                 # Convert WAV to Alexa-compatible MP3 for Echo devices
+                # Only use SSML audio if PUBLIC_URL is HTTPS (reachable by Amazon's cloud).
+                # Local HTTP URLs cause "trouble accessing skill" errors on Echo devices.
                 mp3_url = None
-                try:
-                    mp3_bytes = await _wav_to_alexa_mp3(wav_bytes)
-                    if mp3_bytes:
-                        mp3_token = uuid.uuid4().hex
-                        cache[f"mp3:{mp3_token}"] = (mp3_bytes, time.time() + _MP3_CACHE_TTL)
-                        mp3_url = f"{public_url}/tts/audio_mp3/{mp3_token}"
-                        _LOGGER.info("announce.mp3_ready", mp3_bytes=len(mp3_bytes), url=mp3_url)
-                except Exception as exc:
-                    _LOGGER.warning("announce.mp3_convert_failed", exc=str(exc))
+                if public_url.startswith("https://"):
+                    try:
+                        mp3_bytes = await _wav_to_alexa_mp3(wav_bytes)
+                        if mp3_bytes:
+                            mp3_token = uuid.uuid4().hex
+                            cache[f"mp3:{mp3_token}"] = (mp3_bytes, time.time() + _MP3_CACHE_TTL)
+                            mp3_url = f"{public_url}/tts/audio_mp3/{mp3_token}"
+                            _LOGGER.info("announce.mp3_ready", mp3_bytes=len(mp3_bytes), url=mp3_url)
+                    except Exception as exc:
+                        _LOGGER.warning("announce.mp3_convert_failed", exc=str(exc))
+                else:
+                    _LOGGER.debug("announce.mp3_skipped_no_https", public_url=public_url)
 
                 speaker_task = asyncio.create_task(
                     speaker.speak_wav(text, audio_url, mp3_url=mp3_url, target_areas=target_areas, area_aware=True)

@@ -618,6 +618,69 @@ WhisperModel('${INPUT_WHISPER_MODEL}', device='cpu', compute_type='int8')
 print('Done.')
 " && success "Whisper model ready" || warn "Whisper model will download on first voice request."
 
+# ── Cloudflare Tunnel (optional — enables Alexa custom voice) ──────────────────
+header "Cloudflare Tunnel (optional)"
+echo ""
+echo -e "  ${CYAN}A public HTTPS URL is needed for Alexa Echo devices to play Nova's${RESET}"
+echo -e "  ${CYAN}custom voice. Without it, Echo devices use Alexa's built-in TTS.${RESET}"
+echo ""
+ask "Set up Cloudflare quick tunnel for Alexa custom voice? [y/N]:"
+read -r SETUP_TUNNEL
+if [[ "${SETUP_TUNNEL,,}" == "y" ]]; then
+  if ! command -v cloudflared &>/dev/null; then
+    info "Installing cloudflared…"
+    curl -sL --output /tmp/cloudflared.deb \
+      https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+    dpkg -i /tmp/cloudflared.deb && rm -f /tmp/cloudflared.deb
+    success "cloudflared installed"
+  else
+    success "cloudflared already installed"
+  fi
+
+  # Create systemd service for the tunnel
+  cat > /etc/systemd/system/cloudflared-nova.service << TUNNEL_EOF
+[Unit]
+Description=Cloudflare Quick Tunnel for Nova AI
+After=network-online.target ${SERVICE_NAME}.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared tunnel --url http://localhost:${INPUT_PORT}
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared-nova
+
+[Install]
+WantedBy=multi-user.target
+TUNNEL_EOF
+
+  systemctl daemon-reload
+  systemctl enable cloudflared-nova
+  systemctl restart cloudflared-nova
+
+  # Wait for tunnel URL
+  sleep 5
+  TUNNEL_URL=$(journalctl -u cloudflared-nova --no-pager -n 20 | grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1)
+  if [[ -n "$TUNNEL_URL" ]]; then
+    # Update PUBLIC_URL in .env
+    sed -i "s|^PUBLIC_URL=.*|PUBLIC_URL=${TUNNEL_URL}|" "${INSTALL_DIR}/.env"
+    success "Tunnel active: ${TUNNEL_URL}"
+    echo ""
+    echo -e "  ${YELLOW}Note: Quick tunnel URLs change on restart.${RESET}"
+    echo -e "  ${YELLOW}After a reboot, check the new URL with:${RESET}"
+    echo -e "  ${BOLD}  journalctl -u cloudflared-nova | grep trycloudflare${RESET}"
+    echo -e "  ${YELLOW}Then update PUBLIC_URL in the admin panel.${RESET}"
+    echo ""
+  else
+    warn "Tunnel started but URL not yet available. Check: journalctl -u cloudflared-nova -f"
+  fi
+else
+  info "Skipped — Echo devices will use Alexa's built-in TTS voice."
+fi
+
 # ── systemd service ────────────────────────────────────────────────────────────
 header "systemd service"
 

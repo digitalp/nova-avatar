@@ -36,6 +36,18 @@ def _format_exc(exc: BaseException) -> str:
     message = str(exc).strip()
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
+
+def _is_heating_action_tool(function_name: str, arguments: dict | None) -> bool:
+    if function_name != "call_ha_service":
+        return False
+    if not isinstance(arguments, dict):
+        return False
+    domain = str(arguments.get("domain", "")).strip().lower()
+    service = str(arguments.get("service", "")).strip().lower()
+    if not domain or not service:
+        return False
+    return not (domain == "weather" and service == "get_state")
+
 # Motion sensor → camera mapping.
 # When a motion sensor fires, Nova fetches the associated camera and describes what it sees.
 # Duplicate sensors for the same camera share the same camera cooldown.
@@ -994,13 +1006,20 @@ class ProactiveService:
         await self._run_heating_shadow(messages, season=season, now_str=now_str)
 
         all_tool_calls: list[str] = []
+        performed_action = False
 
         for round_num in range(_MAX_ROUNDS):
             text, tool_calls = await self._llm.chat(messages, use_tools=True)
 
             if not tool_calls:
                 # LLM gave a final text response
-                if text and text.strip() and "nothing changed" not in text.lower() and "no change" not in text.lower():
+                if (
+                    performed_action
+                    and text
+                    and text.strip()
+                    and "nothing changed" not in text.lower()
+                    and "no change" not in text.lower()
+                ):
                     _LOGGER.info("heating.eval_announce", message=text[:120])
                     if self._decision_log:
                         self._decision_log.record(
@@ -1015,8 +1034,13 @@ class ProactiveService:
                     if self._decision_log:
                         self._decision_log.record(
                             "heating_eval_silent",
-                            reason=text.strip()[:200] if text else "no change needed",
+                            reason=(
+                                text.strip()[:200]
+                                if (text and performed_action)
+                                else "no heating action executed"
+                            ),
                             tool_calls=all_tool_calls,
+                            performed_action=performed_action,
                             **self._active_llm_fields(),
                         )
                 break
@@ -1032,6 +1056,10 @@ class ProactiveService:
             # Execute each tool call
             for i, tc in enumerate(tool_calls):
                 result = await self._ha.execute_tool_call(tc)
+                performed_action = performed_action or _is_heating_action_tool(
+                    tc.function_name,
+                    tc.arguments,
+                )
                 summary = f"{tc.function_name}({tc.arguments}) → {(result.message or '')[:80]}"
                 all_tool_calls.append(summary)
                 _LOGGER.info(
