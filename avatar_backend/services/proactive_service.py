@@ -1403,27 +1403,28 @@ class ProactiveService:
         import datetime as _dt
         now_str = _dt.datetime.now().strftime("%A, %d %B %Y %H:%M")
 
-        scenario_notes = {
-            "winter": (
-                "[TEST — winter scenario] Assume it is a cold winter morning. "
-                "Outdoor temperature is 3 °C. All rooms are 1–2 °C below comfort targets. "
-                "Presence is detected in living room and main bedroom. "
-                "Evaluate whether heating should be adjusted."
-            ),
-            "spring": (
-                "[TEST — spring/summer scenario] Outdoor temperature is 17 °C. "
-                "All rooms are at or above comfort targets. "
-                "Evaluate whether heating should remain off or eco."
-            ),
+        # Scenario context sets the season and outdoor temperature only —
+        # room temperatures are intentionally omitted so Ollama must read
+        # the actual sensors via get_entity_state rather than short-circuiting.
+        scenario_ctx = {
+            "winter": {
+                "season": "autumn/winter",
+                "hint": "It is a cold winter morning. Outdoor temperature is 3 °C.",
+            },
+            "spring": {
+                "season": "spring/summer",
+                "hint": "It is a warm spring day. Outdoor temperature is 17 °C.",
+            },
         }
-        note = scenario_notes.get(scenario, scenario_notes["winter"])
-        season = "autumn/winter" if scenario == "winter" else "spring/summer"
+        ctx = scenario_ctx.get(scenario, scenario_ctx["winter"])
+        season = ctx["season"]
 
         task_msg = (
             f"[Shadow-only heating evaluation — {now_str}, {season}] "
-            f"{note} "
-            "Read current sensor states, apply heating decision rules, and report what you would do. "
-            "Be concise."
+            f"{ctx['hint']} "
+            "Read all room temperature sensors and current presence using get_entity_state, "
+            "then apply the heating decision rules from your system prompt and state what "
+            "actions you would take. Be concise."
         )
         messages = [
             {"role": "system", "content": self._system_prompt},
