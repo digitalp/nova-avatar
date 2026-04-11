@@ -2907,11 +2907,6 @@ textarea:focus-visible {
     </div>
 
 
-    <!-- ══════════════ SYSTEM METRICS ══════════════ -->
-    <!-- Live gauges -->
-      <!-- History charts -->
-      </div>
-
     <!-- ══════════════ TOOLS ══════════════ -->
     <div id="section-tools" class="section">
       <div class="page-header">
@@ -4105,7 +4100,7 @@ function renderMotionClips() {
     const source = String(clip.event_source || '');
     card.innerHTML = `
       <div class="motion-card-media">
-        ${hasVideo ? `<video src="${clip.video_url}" preload="metadata" muted playsinline></video>` : '<div class="motion-card-fallback">Clip unavailable</div>'}
+        ${hasVideo ? `<video data-src="${clip.video_url}" preload="none" muted playsinline ></video>` : '<div class="motion-card-fallback">Clip unavailable</div>'}
         <div class="motion-card-overlay">
           <div class="motion-card-badge ${badgeClass}">${badgeLabel}</div>
           <div class="motion-card-age">${_esc(_motionRelative(clip.ts))}</div>
@@ -4141,6 +4136,11 @@ function renderMotionClips() {
     if (video) {
       video.onclick = () => openMotionModal(clip);
       video.addEventListener('mouseenter', () => {
+        // Lazy-load on hover if not yet loaded
+        if (video.dataset.src && !video.src) {
+          video.src = video.dataset.src;
+          video.preload = 'metadata';
+        }
         video.muted = true;
         video.play().catch(() => {});
       });
@@ -4153,6 +4153,7 @@ function renderMotionClips() {
     });
     grid.appendChild(group);
   });
+  _observeVideos(grid);
 }
 
 function openMotionModal(clip) {
@@ -6038,6 +6039,28 @@ function _updateDashCharts(s) {
     }
     _dashGpuChart.update('none');
   }
+}
+
+
+// ── Lazy Video Loading (IntersectionObserver) ───────────────────────────────
+const _videoObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const video = entry.target;
+      if (video.dataset.src && !video.src) {
+        video.src = video.dataset.src;
+        video.preload = 'metadata';
+      }
+      _videoObserver.unobserve(video);
+    }
+  });
+}, { rootMargin: '200px 0px', threshold: 0.01 });
+
+function _observeVideos(container) {
+  if (!container) return;
+  container.querySelectorAll('video[data-src]').forEach(v => {
+    if (!v.src) _videoObserver.observe(v);
+  });
 }
 
 </script>
