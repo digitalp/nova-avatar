@@ -65,6 +65,7 @@ AI Server
 - Python 3.10+
 - Docker (for local Ollama LLM — not required when using a cloud provider)
 - NVIDIA GPU recommended for Ollama (runs on CPU too, but slower)
+- The one-touch installer now configures NVIDIA Container Toolkit automatically when a compatible GPU is present, so the Docker Ollama container can use the GPU
 - ~8 GB RAM minimum, 16 GB recommended
 
 ### Home Assistant
@@ -87,7 +88,8 @@ The installer will:
 - Prompt for your API key, HA URL/token, LLM provider, voice, and speakers
 - Download Piper TTS binary and voice model
 - Pre-download the Whisper STT model
-- Start Ollama via Docker and pull the LLM model (if using local LLM)
+- Configure Docker's NVIDIA runtime automatically when a GPU is present
+- Start the GPU-backed Ollama Docker container and pull the LLM model (if using local LLM)
 - Create a Python virtualenv and install dependencies
 - Install and start a `systemd` service
 
@@ -398,7 +400,7 @@ nova-avatar/
 # Pull latest changes
 git -C /opt/avatar-server pull
 
-# Apply update (restarts service automatically)
+# Apply update (resyncs Docker compose, refreshes Ollama / Intron sidecars, restarts service automatically)
 sudo /opt/avatar-server/install.sh --update
 ```
 

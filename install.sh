@@ -30,6 +30,56 @@ default_timezone() {
   timedatectl show --property=Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo "UTC"
 }
 
+docker_compose_cmd() {
+  if command -v docker-compose &>/dev/null; then
+    echo "docker-compose"
+  else
+    echo "docker compose"
+  fi
+}
+
+configure_nvidia_docker_runtime() {
+  local runtimes=""
+  runtimes="$(docker info --format '{{json .Runtimes}}' 2>/dev/null || true)"
+  if grep -q '"nvidia"' <<<"${runtimes}"; then
+    success "Docker NVIDIA runtime already configured"
+    return 0
+  fi
+
+  info "Installing NVIDIA Container Toolkit for Docker GPU containers…"
+  apt-get update -qq
+  apt-get install -y -qq ca-certificates curl gnupg
+
+  install -m 0755 -d /etc/apt/keyrings
+  if [[ ! -f /etc/apt/keyrings/nvidia-container-toolkit-keyring.gpg ]]; then
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+      | gpg --dearmor -o /etc/apt/keyrings/nvidia-container-toolkit-keyring.gpg
+  fi
+
+  local distro
+  distro="$(
+    . /etc/os-release
+    echo "${ID}${VERSION_ID}"
+  )"
+
+  curl -fsSL "https://nvidia.github.io/libnvidia-container/${distro}/libnvidia-container.list" \
+    | sed 's#deb https://#deb [signed-by=/etc/apt/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+    > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+  apt-get update -qq
+  apt-get install -y -qq nvidia-container-toolkit
+  nvidia-ctk runtime configure --runtime=docker
+  systemctl restart docker
+  sleep 2
+
+  runtimes="$(docker info --format '{{json .Runtimes}}' 2>/dev/null || true)"
+  if grep -q '"nvidia"' <<<"${runtimes}"; then
+    success "Docker NVIDIA runtime configured"
+  else
+    error "Docker NVIDIA runtime configuration failed"
+  fi
+}
+
 # ── Update-only mode ──────────────────────────────────────────────────────────
 UPDATE_ONLY=false
 [[ "${1:-}" == "--update" ]] && UPDATE_ONLY=true
@@ -52,9 +102,27 @@ if $UPDATE_ONLY; then
     "${SCRIPT_DIR}/avatar_backend" "${SCRIPT_DIR}/static" \
     "${SCRIPT_DIR}/intron_afro_tts_sidecar" \
     "${SCRIPT_DIR}/requirements.txt" \
+    "${SCRIPT_DIR}/docker-compose.yml" \
+    "${SCRIPT_DIR}/scripts" \
+    "${SCRIPT_DIR}/install.sh" \
     "${INSTALL_DIR}/"
   info "Installing/updating Python dependencies…"
   "${INSTALL_DIR}/.venv/bin/pip" install -q -r "${INSTALL_DIR}/requirements.txt"
+  if command -v docker &>/dev/null && [[ -f "${INSTALL_DIR}/docker-compose.yml" ]]; then
+    if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then
+      configure_nvidia_docker_runtime
+    fi
+    DC="$(docker_compose_cmd)"
+    cd "${INSTALL_DIR}"
+    if docker ps -a --format '{{.Names}}' | grep -qx 'avatar_ollama'; then
+      info "Refreshing Ollama container configuration…"
+      $DC up -d ollama || warn "Could not refresh Ollama container"
+    fi
+    if docker ps -a --format '{{.Names}}' | grep -qx 'avatar_intron_afro_tts'; then
+      info "Refreshing Intron Afro TTS sidecar…"
+      $DC up -d --build intron_afro_tts || warn "Could not refresh Intron Afro TTS sidecar"
+    fi
+  fi
   info "Ensuring gemma2:9b is available (sensor watch + fallback)…"
   docker exec avatar_ollama ollama pull gemma2:9b 2>/dev/null || true
   info "Restarting service…"
@@ -445,18 +513,15 @@ fi
 if [[ "$INPUT_LLM_PROVIDER" == "ollama" ]]; then
   header "Ollama (Docker)"
   if $DOCKER_OK; then
-    # Build docker-compose command
-    DC="docker compose"
-    command -v docker-compose &>/dev/null && DC="docker-compose"
+    DC="$(docker_compose_cmd)"
+
+    if $GPU_FOUND; then
+      configure_nvidia_docker_runtime
+    fi
 
     info "Starting Ollama container…"
     cd "${INSTALL_DIR}"
-    if $GPU_FOUND; then
-      sudo -u "${SERVICE_USER}" $DC up -d ollama
-    else
-      # Remove GPU reservation for CPU-only
-      sudo -u "${SERVICE_USER}" $DC -f <(sed '/deploy:/,/capabilities:/d' docker-compose.yml) up -d ollama
-    fi
+    sudo -u "${SERVICE_USER}" $DC up -d ollama
 
     info "Waiting for Ollama to be ready…"
     for i in $(seq 1 30); do
@@ -487,8 +552,8 @@ if $DOCKER_OK && $GPU_FOUND; then
     rsync -a "${SCRIPT_DIR}/intron_afro_tts_sidecar" "${INSTALL_DIR}/"
     chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}/intron_afro_tts_sidecar"
 
-    DC="docker compose"
-    command -v docker-compose &>/dev/null && DC="docker-compose"
+    DC="$(docker_compose_cmd)"
+    configure_nvidia_docker_runtime
 
     info "Building Intron Afro TTS container (first build downloads ~4 GB)…"
     cd "${INSTALL_DIR}"
