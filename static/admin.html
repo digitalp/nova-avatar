@@ -3241,14 +3241,20 @@ async function loadAvatarLibrary() {
 
 async function selectAvatarFile(url) {
   _activeAvatarUrl = url;
-  await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: url });
+  const _bgT = document.querySelector('input[name="bg-type"]:checked')?.value || 'color';
+  const _bgC = document.getElementById('bg-color-input')?.value || '';
+  const _bgI = document.getElementById('bg-image-input')?.value || '';
+  await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: url, bg_type: _bgT, bg_color: _bgC, bg_image_url: _bgI });
   document.getElementById('avatar-url').value = '';
   await loadAvatarLibrary();
   toast('Avatar selected — reload the avatar page to apply');
 }
 
 async function saveSkinTone() {
-  await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: _activeAvatarUrl });
+  const bgType = document.querySelector('input[name="bg-type"]:checked')?.value || 'color';
+  const bgColor = document.getElementById('bg-color-input')?.value || '';
+  const bgImageUrl = document.getElementById('bg-image-input')?.value || '';
+  await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: _activeAvatarUrl, bg_type: bgType, bg_color: bgColor, bg_image_url: bgImageUrl });
   toast('Skin tone saved');
 }
 
@@ -3265,7 +3271,10 @@ async function clearExternalUrl() {
   document.getElementById('avatar-url').value = '';
   const defaultUrl = '/static/avatars/brunette.glb';
   _activeAvatarUrl = defaultUrl;
-  await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: defaultUrl });
+  const ___bgT = document.querySelector('input[name="bg-type"]:checked')?.value || 'color';
+  const ___bgC = document.getElementById('bg-color-input')?.value || '';
+  const ___bgI = document.getElementById('bg-image-input')?.value || '';
+  await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: defaultUrl, bg_type: ___bgT, bg_color: ___bgC, bg_image_url: ___bgI });
   await loadAvatarLibrary();
   toast('Reverted to library selection');
 }
@@ -3299,7 +3308,10 @@ async function deleteAvatar(filename) {
     await api('DELETE', '/admin/avatars/' + filename);
     if (_activeAvatarUrl === '/static/avatars/' + filename) {
       _activeAvatarUrl = '/static/avatars/brunette.glb';
-      await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: _activeAvatarUrl });
+      const __bgT = document.querySelector('input[name="bg-type"]:checked')?.value || 'color';
+  const __bgC = document.getElementById('bg-color-input')?.value || '';
+  const __bgI = document.getElementById('bg-image-input')?.value || '';
+  await api('POST', '/admin/avatar-settings', { skin_tone: _currentSkinTone, avatar_url: _activeAvatarUrl, bg_type: __bgT, bg_color: __bgC, bg_image_url: __bgI });
     }
     toast('Deleted ' + filename);
     await loadAvatarLibrary();
