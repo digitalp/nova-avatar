@@ -202,12 +202,23 @@ class HAProxy:
 
         return await self.call_service(domain, service, entity_id, service_data)
 
+    # Domains that have too many entities to dump wholesale — the LLM must
+    # use get_entity_state for specific value reads, not browse the whole domain.
+    _LARGE_DOMAINS: frozenset = frozenset({"sensor", "binary_sensor", "automation", "input_boolean"})
+    _LARGE_DOMAIN_CAP: int = 30
+
     async def get_entities(self, domain: str) -> ToolResult:
         """
         Return all HA entities for *domain* with their current state.
         Used by the LLM to discover real entity IDs before calling a service.
+        For large domains (sensor, binary_sensor) results are capped to avoid
+        the LLM summarising hundreds of unrelated readings.
         """
         logger.info("ha_proxy.get_entities", domain=domain)
+
+        if domain in self._LARGE_DOMAINS:
+            logger.warning("ha_proxy.get_entities_large_domain", domain=domain)
+
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(
@@ -232,6 +243,12 @@ class HAProxy:
                 message=f"No available entities found for domain '{domain}'.",
             )
 
+        total = len(entities)
+        truncated = False
+        if domain in self._LARGE_DOMAINS and total > self._LARGE_DOMAIN_CAP:
+            entities = entities[:self._LARGE_DOMAIN_CAP]
+            truncated = True
+
         lines = []
         for s in entities:
             unit = s["attributes"].get("unit_of_measurement", "")
@@ -239,9 +256,17 @@ class HAProxy:
             lines.append(
                 f"{s['entity_id']} | {s['attributes'].get('friendly_name', '')} | {state_str}"
             )
+
+        header = f"Available {domain} entities"
+        if truncated:
+            header += (
+                f" (showing {self._LARGE_DOMAIN_CAP} of {total} — "
+                f"use get_entity_state with a specific entity_id for value lookups, "
+                f"not get_entities)"
+            )
         return ToolResult(
             success=True,
-            message=f"Available {domain} entities:\n" + "\n".join(lines),
+            message=f"{header}:\n" + "\n".join(lines),
         )
 
     async def _get_single_entity_state(self, entity_id: str) -> ToolResult:

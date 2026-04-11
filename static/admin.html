@@ -418,6 +418,8 @@ body {
 .announce-log-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
 .announce-log-time { font-size: 11px; color: var(--text3); margin-left: auto; }
 .announce-log-areas { font-size: 11px; color: var(--text3); }
+.announce-log-query { font-size: 12px; color: var(--text3); font-style: italic; margin-bottom: 3px; }
+.announce-log-query::before { content: '▶ '; font-style: normal; opacity: 0.5; }
 .announce-log-text { font-size: 13px; color: var(--text); line-height: 1.5; }
 
 /* ── Forms ───────────────────────────────────────────────────────────────────── */
@@ -6404,6 +6406,7 @@ async function loadAnnouncementLog() {
       const label = _SOURCE_LABELS[a.source] || a.source || 'Unknown';
       const areas = Array.isArray(a.target_areas) && a.target_areas.length ? a.target_areas.join(', ') : 'All';
       const priClass = a.priority === 'alert' ? 'coral-plate' : 'good';
+      const queryHtml = a.query ? `<div class="announce-log-query">${_esc(a.query)}</div>` : '';
       return `<div class="announce-log-row">
         <div class="announce-log-meta">
           <span class="motion-chip ${priClass}" style="font-size:10px;padding:2px 7px;">${_esc(a.priority)}</span>
@@ -6411,7 +6414,7 @@ async function loadAnnouncementLog() {
           <span class="announce-log-areas">${_esc(areas)}</span>
           <span class="announce-log-time">${_esc(_fmtAnnounceTs(a.ts))}</span>
         </div>
-        <div class="announce-log-text">${_esc(a.text)}</div>
+        ${queryHtml}<div class="announce-log-text">${_esc(a.text)}</div>
       </div>`;
     }).join('');
   } catch(e) {

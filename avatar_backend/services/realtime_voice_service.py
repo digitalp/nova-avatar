@@ -461,7 +461,7 @@ class RealtimeVoiceService:
                     wav_bytes, word_timings = await adapter.synthesise_reply(ctx, reply_text)
                     try:
                         from avatar_backend.routers.announce import _log_announcement
-                        _log_announcement(reply_text, "normal", [], source="voice")
+                        _log_announcement(reply_text, "normal", [], source="voice", query=transcript)
                     except Exception:
                         pass
                     if session_key and not await self._is_current_turn(session_key, turn_id):

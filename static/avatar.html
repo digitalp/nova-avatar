@@ -1277,6 +1277,7 @@ function handleState(state) {
       } else {
         wakeSupported ? setStatus('Say "Nova" to talk', 'dot-waking') : setStatus('Ready', 'dot-online');
         if (!wakeActive && !wakeVadActive) setTimeout(startWakeWord, 300);
+        else restartWakeWordListener(300);
       }
     }
   } else if (state === 'thinking') {
@@ -1580,7 +1581,7 @@ async function startWakeWordVAD() {
   _clearWakeVadHealthTimer();
   wakeVadHealthTimer = setTimeout(() => {
     if (wakeVadActive && !wakeVadChecking && !recording && !isBusy) restartWakeWordListener(150);
-  }, 45000);
+  }, 90000);
   $pill.classList.add('on');
   setStatus('Say "Nova" to talk', 'dot-waking');
   $btnMic.textContent = '🎙 Or Hold to Talk';
@@ -1661,12 +1662,20 @@ async function startWakeWordVAD() {
         const data = await res.json();
         wakeConfirmed = !!data.wake;
         const transcript = String(data.transcript || '').trim();
+        const method = String(data.method || '').trim();
         if (wakeConfirmed) {
           _resetWakeVadCounters();
         } else {
-          wakeVadFalseChecks += 1;
-          if (!transcript) wakeVadEmptyChecks += 1;
-          else wakeVadEmptyChecks = 0;
+          // Pre-filter stages (coral, verifier, numpy) return no transcript —
+          // don't count those as "empty" checks since they're valid fast rejections.
+          const isPreFilter = method === 'coral' || method === 'tflite_cpu'
+            || method === 'numpy_classifier' || method === 'verifier';
+          if (!isPreFilter) {
+            wakeVadFalseChecks += 1;
+            if (!transcript) wakeVadEmptyChecks += 1;
+            else wakeVadEmptyChecks = 0;
+          }
+          // Pre-filter rejections don't count toward the restart limit
         }
       }
     } catch (_) {}
@@ -1682,7 +1691,7 @@ async function startWakeWordVAD() {
       setStatus('Say "Nova" to talk', 'dot-waking');
       wakeVadCooldown = true;
       setTimeout(() => { wakeVadCooldown = false; }, WAKE_VAD_FALSE_CHECK_COOLDOWN_MS);
-      if (wakeVadFalseChecks >= 6 || wakeVadEmptyChecks >= 4) {
+      if (wakeVadFalseChecks >= 12 || wakeVadEmptyChecks >= 8) {
         clearInterval(energyTimer);
         restartWakeWordListener(150);
         wakeVadChecking = false;

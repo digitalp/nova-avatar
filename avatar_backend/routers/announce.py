@@ -55,7 +55,7 @@ def _announce_log_path() -> "Path":
         _ANNOUNCE_LOG = p
     return _ANNOUNCE_LOG
 
-def _log_announcement(text: str, priority: str, target_areas: list, source: str = "announce") -> None:
+def _log_announcement(text: str, priority: str, target_areas: list, source: str = "announce", query: str | None = None) -> None:
     """Append a single JSON line to the announcement log (fire-and-forget)."""
     import json as _json
     from datetime import datetime, timezone
@@ -66,6 +66,8 @@ def _log_announcement(text: str, priority: str, target_areas: list, source: str 
         "target_areas": target_areas,
         "source": source,
     }
+    if query:
+        entry["query"] = query.strip()
     try:
         with open(_announce_log_path(), "a", encoding="utf-8") as fh:
             fh.write(_json.dumps(entry) + "\n")

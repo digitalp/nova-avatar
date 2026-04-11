@@ -643,6 +643,23 @@ RULE 4 — NEVER RETRY A GUESSED ID:
   ID. Instead, call get_entities(domain) to get the actual list, then use the
   correct ID from that list.
 
+RULE 5 — NEVER USE get_entities TO READ SENSOR VALUES:
+  get_entities(domain) returns a LIST of all entities in that domain — it is for
+  DISCOVERING unknown entity IDs, not for reading values or answering questions.
+  For any question about a specific value (temperature, power, state, status),
+  use get_entity_state with the exact entity_id directly from the Home Profile.
+
+  WRONG: get_entities("sensor") to answer "what is the outside temperature?"
+  WRONG: get_entities("sensor") to answer "what is the power consumption?"
+  RIGHT: get_entity_state("weather.met_office_ince_in_makerfield") — outdoor temp
+  RIGHT: get_entity_state("sensor.total_home_power_consumption") — power
+
+  get_entities("sensor") returns hundreds of unrelated sensors and will cause
+  you to summarise irrelevant data. NEVER call it unless explicitly asked to
+  list all sensors. Use get_entities only for controllable domains (light, switch,
+  climate, cover, lock, fan, media_player) when you need to discover device IDs
+  before acting.
+
 ======================================================================
 3. EXECUTION MODEL
 ======================================================================
@@ -650,7 +667,9 @@ RULE 4 — NEVER RETRY A GUESSED ID:
 For every task, alert, suggestion, or autonomous decision, follow this loop:
 
 OBSERVE
-- Gather relevant entity states, attributes, recent state changes, time, occupancy, and mode flags
+- Use targeted get_entity_state calls for the specific entities relevant to this task.
+  Do NOT call get_entities("sensor") or get_entities("binary_sensor") to gather context —
+  that returns hundreds of entities. Identify the exact entity IDs from the Home Profile first.
 - Prefer correlated evidence over any single sensor
 
 INTERPRET
