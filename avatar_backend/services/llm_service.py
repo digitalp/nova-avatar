@@ -733,7 +733,7 @@ class _OllamaFallbackBackend:
             payload["tools"] = HA_TOOLS
 
         t0 = time.monotonic()
-        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
             resp = await client.post(f"{self._base_url}/api/chat", json=payload)
             resp.raise_for_status()
 
