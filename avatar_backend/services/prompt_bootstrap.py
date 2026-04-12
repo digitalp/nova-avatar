@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass
+import asyncio
 import json
 import re
-from typing import Iterable
+import ssl
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any, Iterable
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
@@ -261,30 +263,79 @@ def extract_known_entity_ids(prompt_text: str) -> set[str]:
     return set(re.findall(r"\b\w+\.\w[\w_]*", prompt_text))
 
 
-def summarise_new_entities(states: list[dict], known: set[str], limit_per_group: int = 40) -> str:
-    groups: dict[str, list[str]] = defaultdict(list)
+@dataclass
+class NewEntityInfo:
+    entity_id: str
+    friendly_name: str
+    domain: str
+    state: str
+    device_class: str
+    unit: str
+    area: str          # area name, empty string if unknown
+    group: str         # logical group label (e.g. "Climate and comfort")
+
+
+def discover_new_entities(
+    states: list[dict],
+    known: set[str],
+    area_by_entity: dict[str, str] | None = None,
+) -> list[NewEntityInfo]:
+    """
+    Return structured info for each HA entity not yet in the system prompt.
+    Skips unavailable/unknown states and infrastructure noise.
+    Enriches each entry with its HA area name when available.
+    """
+    result: list[NewEntityInfo] = []
+    area_map = area_by_entity or {}
     for state in states:
         entity_id = str(state.get("entity_id", ""))
         if entity_id in known:
             continue
         if not _should_include_entity(state):
             continue
-        domain = entity_id.split(".", 1)[0]
-        line = f"  {entity_id}"
-        attrs = state.get("attributes") or {}
-        friendly_name = str(attrs.get("friendly_name", "")).strip()
-        if friendly_name and friendly_name != entity_id:
-            line += f" | {friendly_name}"
-        current_state = str(state.get("state", "")).strip()
-        if current_state:
-            line += f" | {current_state}"
-        unit = str(attrs.get("unit_of_measurement", "")).strip()
-        if unit:
-            line += f" {unit}"
+        attrs       = state.get("attributes") or {}
+        domain      = entity_id.split(".", 1)[0]
+        friendly    = str(attrs.get("friendly_name", "")).strip()
+        cur_state   = str(state.get("state", "")).strip()
+        unit        = str(attrs.get("unit_of_measurement", "")).strip()
         device_class = str(attrs.get("device_class", "")).strip()
-        if device_class:
-            line += f" [{device_class}]"
-        groups[domain].append(line)
+        area        = area_map.get(entity_id, "")
+        group       = _classify_group(state)
+        result.append(NewEntityInfo(
+            entity_id=entity_id,
+            friendly_name=friendly,
+            domain=domain,
+            state=cur_state,
+            device_class=device_class,
+            unit=unit,
+            area=area,
+            group=group,
+        ))
+    return result
+
+
+def summarise_new_entities(
+    states: list[dict],
+    known: set[str],
+    limit_per_group: int = 40,
+    area_by_entity: dict[str, str] | None = None,
+) -> str:
+    """Build a text block listing new entities for LLM integration."""
+    entities = discover_new_entities(states, known, area_by_entity)
+    groups: dict[str, list[str]] = defaultdict(list)
+    for e in entities:
+        line = f"  {e.entity_id}"
+        if e.friendly_name and e.friendly_name != e.entity_id:
+            line += f" | {e.friendly_name}"
+        if e.state:
+            line += f" | {e.state}"
+            if e.unit:
+                line += f" {e.unit}"
+        if e.device_class:
+            line += f" [{e.device_class}]"
+        if e.area:
+            line += f" — {e.area}"
+        groups[e.domain].append(line)
 
     if not groups:
         return ""
@@ -295,6 +346,57 @@ def summarise_new_entities(states: list[dict], known: set[str], limit_per_group:
         parts.append(f"{domain} ({len(entries)}):")
         parts.extend(entries[:limit_per_group])
     return "\n".join(parts)
+
+
+async def fetch_area_mapping(ha_url: str, ha_token: str) -> dict[str, str]:
+    """
+    Returns a dict of entity_id → area_name by querying HA WebSocket registries.
+    Area is resolved via: entity.area_id > entity.device_id → device.area_id → area.name
+    Returns empty dict on any failure (non-fatal).
+    """
+    ws_url = ha_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/websocket"
+    try:
+        import websockets  # type: ignore
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+
+        async def _ws_list(msg_id: int, msg_type: str) -> list[dict]:
+            async with websockets.connect(ws_url, ssl=ssl_ctx, max_size=20 * 1024 * 1024) as ws:
+                await ws.recv()
+                await ws.send(json.dumps({"type": "auth", "access_token": ha_token}))
+                await ws.recv()
+                await ws.send(json.dumps({"id": msg_id, "type": msg_type}))
+                resp = json.loads(await ws.recv())
+                return resp.get("result") or []
+
+        areas_raw, entities_raw, devices_raw = await asyncio.gather(
+            _ws_list(1, "config/area_registry/list"),
+            _ws_list(2, "config/entity_registry/list"),
+            _ws_list(3, "config/device_registry/list"),
+        )
+
+        area_name: dict[str, str] = {a["area_id"]: a["name"] for a in areas_raw if a.get("area_id")}
+        device_area: dict[str, str] = {
+            d["id"]: area_name[d["area_id"]]
+            for d in devices_raw
+            if d.get("id") and d.get("area_id") and d["area_id"] in area_name
+        }
+        result: dict[str, str] = {}
+        for e in entities_raw:
+            eid = e.get("entity_id", "")
+            if not eid:
+                continue
+            # entity-level area takes precedence over device-level area
+            if e.get("area_id") and e["area_id"] in area_name:
+                result[eid] = area_name[e["area_id"]]
+            elif e.get("device_id") and e["device_id"] in device_area:
+                result[eid] = device_area[e["device_id"]]
+        return result
+    except Exception as exc:
+        import structlog
+        structlog.get_logger().warning("prompt_bootstrap.area_fetch_failed", exc=str(exc))
+        return {}
 
 
 def _replace_home_profile_section(template_text: str, rendered_section: str) -> str:

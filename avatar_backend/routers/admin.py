@@ -1367,8 +1367,149 @@ class SyncPromptResponse(BaseModel):
     summary:            str
 
 
+@router.get("/sync-prompt/preview")
+async def sync_prompt_preview(request: Request):
+    """
+    Discover new HA entities not yet in the system prompt.
+    Returns structured entity list enriched with area + state — no LLM call, no prompt changes.
+    """
+    _require_session(request, min_role="admin")
+    import httpx as _httpx
+    from avatar_backend.services.prompt_bootstrap import fetch_area_mapping, discover_new_entities
+
+    ha = request.app.state.ha_proxy
+    try:
+        async with _httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{ha._ha_url}/api/states",
+                headers={"Authorization": ha._headers["Authorization"]},
+            )
+            resp.raise_for_status()
+            all_states: list[dict] = resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not fetch HA states: {exc}")
+
+    current_prompt = _PROMPT_FILE.read_text() if _PROMPT_FILE.exists() else ""
+    known = extract_known_entity_ids(current_prompt)
+    area_by_entity = await fetch_area_mapping(ha._ha_url, ha._headers["Authorization"].split(" ", 1)[1])
+    entities = discover_new_entities(all_states, known, area_by_entity)
+
+    # Collect unique area names for dropdown
+    all_areas = sorted({e.area for e in entities if e.area})
+
+    return {
+        "total": len(entities),
+        "available_areas": all_areas,
+        "entities": [
+            {
+                "entity_id":    e.entity_id,
+                "friendly_name": e.friendly_name,
+                "domain":       e.domain,
+                "state":        e.state,
+                "device_class": e.device_class,
+                "unit":         e.unit,
+                "area":         e.area,
+                "group":        e.group,
+            }
+            for e in entities
+        ],
+    }
+
+
+class ApplySyncBody(BaseModel):
+    entity_ids: list[str]
+    area_overrides: dict[str, str] = {}  # entity_id → area name override
+
+
+@router.post("/sync-prompt/apply")
+async def sync_prompt_apply(body: ApplySyncBody, request: Request):
+    """
+    Integrate a user-selected subset of new entities into the system prompt via LLM.
+    """
+    _require_session(request, min_role="admin")
+    import httpx as _httpx
+    from avatar_backend.services.prompt_bootstrap import fetch_area_mapping, discover_new_entities
+
+    if not body.entity_ids:
+        raise HTTPException(status_code=400, detail="No entity IDs provided.")
+
+    ha  = request.app.state.ha_proxy
+    llm = request.app.state.llm_service
+
+    try:
+        async with _httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{ha._ha_url}/api/states",
+                headers={"Authorization": ha._headers["Authorization"]},
+            )
+            resp.raise_for_status()
+            all_states: list[dict] = resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not fetch HA states: {exc}")
+
+    # Filter states to only selected entity IDs
+    selected_ids = set(body.entity_ids)
+    selected_states = [s for s in all_states if s.get("entity_id") in selected_ids]
+
+    current_prompt = _PROMPT_FILE.read_text() if _PROMPT_FILE.exists() else ""
+    known = set()  # treat all selected as new regardless of known state
+    area_by_entity = await fetch_area_mapping(ha._ha_url, ha._headers["Authorization"].split(" ", 1)[1])
+    area_by_entity.update(body.area_overrides)  # user overrides take precedence
+    new_summary = summarise_new_entities(selected_states, known, area_by_entity=area_by_entity)
+
+    if not new_summary:
+        return SyncPromptResponse(status="ok", new_entities_found=0,
+                                  prompt_updated=False,
+                                  summary="No valid entities to integrate.")
+
+    new_count = len(body.entity_ids)
+    integration_request = (
+        "You are updating the system prompt for Nova, an AI home automation controller.\n\n"
+        "Here is the current system prompt:\n```\n" + current_prompt + "\n```\n\n"
+        "The following Home Assistant entities should be added. Each line shows:\n"
+        "  entity_id | friendly name | current state [device_class] — Area\n\n"
+        + new_summary + "\n\n"
+        "Instructions:\n"
+        "- Add each entity to the most appropriate existing section, guided by its Area and group.\n"
+        "- If an Area section exists in the prompt, place the entity there.\n"
+        "- Skip adding if the entity is clearly infrastructure noise (connectivity, cloud connection).\n"
+        "- Preserve the exact structure, tone, and formatting of the original prompt.\n"
+        "- Return ONLY the complete updated system prompt — no explanation, no markdown fences."
+    )
+
+    try:
+        updated_prompt = await llm.generate_text(integration_request, timeout_s=240.0)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"LLM call failed: {exc}")
+
+    if not updated_prompt or len(updated_prompt) < len(current_prompt) // 2:
+        raise HTTPException(status_code=500, detail="LLM returned an unexpectedly short response.")
+    if len(updated_prompt) > len(current_prompt) * 3:
+        raise HTTPException(status_code=500, detail="LLM returned an unexpectedly long response.")
+
+    updated_prompt = "".join(c for c in updated_prompt if c >= " " or c in "\n\r\t")
+
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if _PROMPT_FILE.exists():
+        _backup = _CONFIG_DIR / "system_prompt.txt.bak"
+        _backup.write_text(_PROMPT_FILE.read_text())
+    _PROMPT_FILE.write_text(updated_prompt)
+
+    from avatar_backend.services.session_manager import SessionManager
+    request.app.state.session_manager = SessionManager(updated_prompt)
+    proactive = getattr(request.app.state, "proactive_service", None)
+    if proactive is not None:
+        proactive.update_system_prompt(updated_prompt)
+
+    _LOGGER.info("sync_prompt.apply_done", selected=new_count)
+    return SyncPromptResponse(status="ok", new_entities_found=new_count,
+                               prompt_updated=True,
+                               summary=f"Integrated {new_count} selected entities into the system prompt.")
+
+
 @router.post("/sync-prompt", response_model=SyncPromptResponse)
 async def sync_prompt(request: Request):
+    """Legacy full-auto sync — now area-aware. Prefer /preview + /apply for manual syncs."""
     _require_session(request, min_role="admin")
     import httpx as _httpx
 
@@ -1389,7 +1530,9 @@ async def sync_prompt(request: Request):
 
     current_prompt = _PROMPT_FILE.read_text() if _PROMPT_FILE.exists() else ""
     known          = extract_known_entity_ids(current_prompt)
-    new_summary    = summarise_new_entities(all_states, known)
+    from avatar_backend.services.prompt_bootstrap import fetch_area_mapping
+    area_by_entity = await fetch_area_mapping(ha._ha_url, ha._headers["Authorization"].split(" ", 1)[1])
+    new_summary    = summarise_new_entities(all_states, known, area_by_entity=area_by_entity)
 
     if not new_summary:
         return SyncPromptResponse(status="ok", new_entities_found=0,
@@ -1400,17 +1543,18 @@ async def sync_prompt(request: Request):
     integration_request = (
         "You are updating the system prompt for Nova, an AI home automation controller.\n\n"
         "Here is the current system prompt:\n```\n" + current_prompt + "\n```\n\n"
-        "The following new Home Assistant entities have been discovered:\n\n"
+        "The following new Home Assistant entities have been discovered. Each line shows:\n"
+        "  entity_id | friendly name | current state [device_class] — Area\n\n"
         + new_summary + "\n\n"
         "Instructions:\n"
-        "- Add these entities to appropriate existing sections.\n"
-        "- Skip clear infrastructure noise.\n"
+        "- Add each entity to the most appropriate existing section, guided by its Area.\n"
+        "- Skip clear infrastructure noise (connectivity, cloud connection sensors).\n"
         "- Preserve the exact structure, tone, and formatting of the original prompt.\n"
         "- Return ONLY the complete updated system prompt — no explanation, no markdown fences."
     )
 
     try:
-        updated_prompt = await llm.generate_text(integration_request, timeout_s=180.0)
+        updated_prompt = await llm.generate_text(integration_request, timeout_s=240.0)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"LLM call failed: {exc}")
 
@@ -1419,11 +1563,9 @@ async def sync_prompt(request: Request):
     if len(updated_prompt) > len(current_prompt) * 3:
         raise HTTPException(status_code=500, detail="LLM returned an unexpectedly long response — possible prompt injection. Prompt not saved.")
 
-    # Strip NUL bytes and non-printable control characters before persisting
     updated_prompt = "".join(c for c in updated_prompt if c >= " " or c in "\n\r\t")
 
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    # M7 security fix: backup previous prompt before overwriting
     if _PROMPT_FILE.exists():
         _backup = _CONFIG_DIR / "system_prompt.txt.bak"
         _backup.write_text(_PROMPT_FILE.read_text())

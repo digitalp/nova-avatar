@@ -421,6 +421,14 @@ body {
 .announce-log-query { font-size: 12px; color: var(--text3); font-style: italic; margin-bottom: 3px; }
 .announce-log-query::before { content: '▶ '; font-style: normal; opacity: 0.5; }
 .announce-log-text { font-size: 13px; color: var(--text); line-height: 1.5; }
+.sync-group-hdr { padding:7px 12px; background:var(--surface2); font-size:var(--text-xs); font-weight:600; color:var(--text2); letter-spacing:.04em; text-transform:uppercase; border-bottom:1px solid var(--border); }
+.sync-row { display:flex; align-items:center; gap:10px; padding:7px 12px; border-bottom:1px solid var(--border); font-size:var(--text-sm); }
+.sync-row:hover { background:var(--surface2); }
+.sync-row input[type=checkbox] { flex-shrink:0; width:15px; height:15px; accent-color:var(--accent); }
+.sync-eid { font-family:var(--font-mono); font-size:10px; color:var(--accent-text); flex:1.2; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sync-name { color:var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sync-state { color:var(--text3); font-size:10px; flex-shrink:0; width:60px; text-align:right; }
+.sync-area-sel { font-size:11px; padding:2px 4px; border-radius:4px; border:1px solid var(--border2); background:var(--surface3); color:var(--text); max-width:130px; }
 .shadow-eval-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
 .shadow-eval-row:last-child { border-bottom: none; }
 .shadow-agree { color: #4ade80; font-weight: 600; }
@@ -2451,6 +2459,29 @@ textarea:focus-visible {
         <div class="flex-row gap-2 mt-1">
           <button class="btn btn-primary" onclick="savePrompt()">Save Prompt</button>
           <button class="btn btn-outline" onclick="loadPrompt()">Discard</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:var(--sp-4);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--sp-3);">
+          <div>
+            <div style="font-weight:600;color:var(--text);">Sync Devices to Prompt</div>
+            <div style="font-size:var(--text-sm);color:var(--text2);margin-top:2px;">Discover new HA entities not yet in the system prompt. Review, adjust areas, then apply selected.</div>
+          </div>
+          <button class="btn btn-outline" onclick="syncPreview()">Scan for New Devices</button>
+        </div>
+        <div id="sync-preview-panel" style="display:none;margin-top:var(--sp-4);">
+          <div id="sync-preview-info" style="font-size:var(--text-sm);color:var(--text2);margin-bottom:var(--sp-3);"></div>
+          <div style="display:flex;gap:var(--sp-2);margin-bottom:var(--sp-3);flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-xs btn-outline" onclick="syncSelectAll(true)">Select All</button>
+            <button class="btn btn-xs btn-outline" onclick="syncSelectAll(false)">Deselect All</button>
+            <input id="sync-filter" type="text" placeholder="Filter..." style="padding:4px 8px;border-radius:6px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:var(--text-sm);width:180px;" oninput="syncFilterEntities()">
+          </div>
+          <div id="sync-entity-list" style="max-height:480px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);"></div>
+          <div style="display:flex;gap:var(--sp-2);margin-top:var(--sp-4);align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="syncApply()">Add Selected to Prompt</button>
+            <button class="btn btn-outline" onclick="document.getElementById('sync-preview-panel').style.display='none'">Cancel</button>
+            <span id="sync-apply-status" style="font-size:var(--text-sm);color:var(--text2);"></span>
+          </div>
         </div>
       </div>
     </div>
@@ -5139,6 +5170,101 @@ async function savePrompt() {
     await api('POST', '/admin/prompt', { text: document.getElementById('prompt-text').value });
     toast('System prompt saved', 'ok');
   } catch(e) { toast('Save failed: ' + e.message, 'err'); }
+}
+
+
+// ── Sync Devices to Prompt ────────────────────────────────────────────────────
+
+let _syncEntities = [];   // full list from preview
+let _syncAreas    = [];   // available area names
+
+async function syncPreview() {
+  document.getElementById('sync-preview-info').textContent = 'Scanning HA for new entities...';
+  document.getElementById('sync-entity-list').innerHTML = '';
+  document.getElementById('sync-apply-status').textContent = '';
+  document.getElementById('sync-preview-panel').style.display = 'block';
+  try {
+    const d = await api('GET', '/admin/sync-prompt/preview');
+    _syncEntities = d.entities || [];
+    _syncAreas    = d.available_areas || [];
+    if (_syncEntities.length === 0) {
+      document.getElementById('sync-preview-info').textContent = 'No new entities found — system prompt is up to date.';
+      document.getElementById('sync-entity-list').innerHTML = '<div style="padding:16px;color:var(--text2);text-align:center;">All discovered entities are already in the prompt.</div>';
+      return;
+    }
+    document.getElementById('sync-preview-info').textContent = `${_syncEntities.length} new entities found. Select which to add to the system prompt.`;
+    syncRenderEntities(_syncEntities);
+  } catch(e) { toast('Scan failed: ' + e.message, 'err'); }
+}
+
+function syncRenderEntities(entities) {
+  const list = document.getElementById('sync-entity-list');
+  list.innerHTML = '';
+  // group by logical group
+  const groups = {};
+  for (const e of entities) {
+    const g = e.group || e.domain;
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(e);
+  }
+  for (const [group, items] of Object.entries(groups).sort()) {
+    const hdr = document.createElement('div');
+    hdr.className = 'sync-group-hdr';
+    hdr.textContent = `${group} (${items.length})`;
+    list.appendChild(hdr);
+    for (const e of items) {
+      const row = document.createElement('div');
+      row.className = 'sync-row';
+      row.dataset.entityId = e.entity_id;
+      // area dropdown
+      const areaOpts = ['', ..._syncAreas].map(a =>
+        `<option value="${esc(a)}" ${a === (e.area||'') ? 'selected' : ''}>${a || '— no area —'}</option>`
+      ).join('');
+      row.innerHTML = `
+        <input type="checkbox" class="sync-chk" data-id="${esc(e.entity_id)}" checked>
+        <span class="sync-name" title="${esc(e.friendly_name || e.entity_id)}">${esc(e.friendly_name || e.entity_id)}</span>
+        <span class="sync-eid">${esc(e.entity_id)}</span>
+        <span class="sync-state">${esc(e.state)}${e.unit ? ' ' + esc(e.unit) : ''}${e.device_class ? ' [' + esc(e.device_class) + ']' : ''}</span>
+        <select class="sync-area-sel" data-id="${esc(e.entity_id)}">${areaOpts}</select>
+      `;
+      list.appendChild(row);
+    }
+  }
+}
+
+function syncFilterEntities() {
+  const q = (document.getElementById('sync-filter').value || '').toLowerCase();
+  if (!q) { syncRenderEntities(_syncEntities); return; }
+  syncRenderEntities(_syncEntities.filter(e =>
+    e.entity_id.toLowerCase().includes(q) ||
+    (e.friendly_name||'').toLowerCase().includes(q) ||
+    (e.area||'').toLowerCase().includes(q) ||
+    (e.group||'').toLowerCase().includes(q)
+  ));
+}
+
+function syncSelectAll(checked) {
+  document.querySelectorAll('.sync-chk').forEach(cb => cb.checked = checked);
+}
+
+async function syncApply() {
+  const selected = [...document.querySelectorAll('.sync-chk:checked')].map(cb => cb.dataset.id);
+  if (selected.length === 0) { toast('No entities selected', 'warn'); return; }
+  const area_overrides = {};
+  document.querySelectorAll('.sync-area-sel').forEach(sel => {
+    if (sel.value) area_overrides[sel.dataset.id] = sel.value;
+  });
+  document.getElementById('sync-apply-status').textContent = `Integrating ${selected.length} entities via LLM — this may take up to a minute...`;
+  try {
+    const d = await api('POST', '/admin/sync-prompt/apply', { entity_ids: selected, area_overrides });
+    document.getElementById('sync-apply-status').textContent = d.summary || 'Done.';
+    toast(d.summary || 'Prompt updated', 'ok');
+    document.getElementById('sync-preview-panel').style.display = 'none';
+    await loadPrompt();  // refresh the prompt textarea
+  } catch(e) {
+    document.getElementById('sync-apply-status').textContent = 'Failed: ' + e.message;
+    toast('Apply failed: ' + e.message, 'err');
+  }
 }
 
 // ── ACL ───────────────────────────────────────────────────────────────────────
