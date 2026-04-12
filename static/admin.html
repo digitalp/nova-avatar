@@ -2610,7 +2610,7 @@ textarea:focus-visible {
       </div>
       <div class="card card-flush">
         <table>
-          <thead><tr><th>Session ID</th><th>Host</th><th>Device</th><th style="width:110px;">Idle</th><th style="width:90px;">Msgs</th><th style="width:120px;">Action</th></tr></thead>
+          <thead><tr><th>Session ID</th><th>Host</th><th>Device / Client</th><th style="width:130px;">Connected</th><th style="width:70px;">Msgs</th><th style="width:100px;">Action</th></tr></thead>
           <tbody id="sessions-tbody"><tr><td colspan="6" class="text-muted">Loading…</td></tr></tbody>
         </table>
       </div>
@@ -5175,7 +5175,7 @@ async function loadSessions() {
       const tr = document.createElement('tr');
       const host = meta.host_label || meta.host || '—';
       const device = [meta.platform, meta.screen].filter(Boolean).join(' · ') || '—';
-      const idle = typeof sess.idle_seconds === 'number' ? `${Math.round(sess.idle_seconds)}s` : '—';
+      const cs = sess.connected_seconds; const idle = typeof cs === number ? (cs < 60 ? cs + s : cs < 3600 ? Math.floor(cs/60) + mu00a0 + (cs%60) + s : Math.floor(cs/3600) + hu00a0 + Math.floor((cs%3600)/60) + m) : u2014;
       const msgCount = Number(sess.message_count || 0);
       tr.innerHTML = `
         <td>

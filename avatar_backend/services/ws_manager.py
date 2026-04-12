@@ -11,6 +11,7 @@ directly to the browser without a user initiating a conversation.
 from __future__ import annotations
 import asyncio
 import json
+import time
 from typing import Any
 
 import structlog
@@ -25,6 +26,7 @@ class ConnectionManager:
     def __init__(self) -> None:
         self._connections: set[WebSocket] = set()        # /ws/avatar
         self._voice_connections: set[WebSocket] = set()  # /ws/voice
+        self._voice_meta: dict[int, dict] = {}           # id(ws) → session metadata
         self._lock = asyncio.Lock()
 
     # ── /ws/avatar clients ────────────────────────────────────────────────────
@@ -47,14 +49,48 @@ class ConnectionManager:
     # ── /ws/voice clients ─────────────────────────────────────────────────────
 
     async def connect_voice(self, ws: WebSocket) -> None:
+        session_id = getattr(ws, "_nova_session_id", "unknown")
+        client_host = (ws.client.host if ws.client else None) or "unknown"
+        user_agent = ws.headers.get("user-agent", "")
+        meta = {
+            "session_id":   session_id,
+            "remote_addr":  client_host,
+            "user_agent":   user_agent,
+            "connected_at": time.time(),
+            "message_count": 0,
+        }
         async with self._lock:
             self._voice_connections.add(ws)
+            self._voice_meta[id(ws)] = meta
         _LOGGER.info("ws.voice_connected", total=len(self._voice_connections))
 
     async def disconnect_voice(self, ws: WebSocket) -> None:
         async with self._lock:
             self._voice_connections.discard(ws)
+            self._voice_meta.pop(id(ws), None)
         _LOGGER.info("ws.voice_disconnected", total=len(self._voice_connections))
+
+    def increment_message_count(self, ws: WebSocket) -> None:
+        """Increment the turn counter for a connected voice session."""
+        meta = self._voice_meta.get(id(ws))
+        if meta is not None:
+            meta["message_count"] += 1
+
+    def list_voice_sessions(self) -> list[dict]:
+        """Return a snapshot of active avatar (voice WS) sessions."""
+        now = time.time()
+        result = []
+        for ws_id, meta in list(self._voice_meta.items()):
+            result.append({
+                "session_id":        meta["session_id"],
+                "connected_seconds": round(now - meta["connected_at"]),
+                "message_count":     meta["message_count"],
+                "metadata": {
+                    "host":       meta["remote_addr"],
+                    "user_agent": meta["user_agent"],
+                },
+            })
+        return result
 
     async def broadcast_to_voice_json(self, payload: dict[str, Any]) -> None:
         """Send a JSON message to every connected voice (browser) client."""

@@ -462,6 +462,7 @@ class RealtimeVoiceService:
                     try:
                         from avatar_backend.routers.announce import _log_announcement
                         _log_announcement(reply_text, "normal", [], source="voice", query=transcript)
+                        ctx.ws_mgr.increment_message_count(ctx.ws)
                     except Exception:
                         pass
                     if session_key and not await self._is_current_turn(session_key, turn_id):

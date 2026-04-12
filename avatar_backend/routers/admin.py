@@ -526,7 +526,9 @@ def _update_env_value(key: str, value: str) -> None:
 @router.get("/sessions")
 async def list_sessions(request: Request):
     _require_session(request)
-    return {"active_sessions": request.app.state.session_manager.active_count()}
+    ws_mgr = getattr(request.app.state, "ws_manager", None)
+    sessions = ws_mgr.list_voice_sessions() if ws_mgr else []
+    return {"active_sessions": len(sessions), "sessions": sessions}
 
 
 @router.delete("/sessions/{session_id}")
