@@ -21,6 +21,7 @@ from avatar_backend.services.decision_log import DecisionLog
 from avatar_backend.services.ha_proxy import HAProxy
 from avatar_backend.services.llm_service import LLMService
 from avatar_backend.services.persistent_memory import PersistentMemoryService
+from avatar_backend.services.presence_context import PresenceContextService
 from avatar_backend.services.session_manager import SessionManager
 
 _LOGGER = structlog.get_logger()
@@ -87,6 +88,7 @@ async def run_chat(
     ha: HAProxy,
     decision_log: DecisionLog | None = None,
     memory_service: PersistentMemoryService | None = None,
+    presence_service: PresenceContextService | None = None,
 ) -> ChatResult:
     """
     Full multi-round chat → tool execution loop.
@@ -179,6 +181,14 @@ async def run_chat(
             session_id=session_id,
         )
     messages = _inject_datetime(messages, now_str)
+
+    if presence_service is not None:
+        try:
+            presence_context = await presence_service.get_context()
+            if presence_context:
+                messages = _inject_presence_context(messages, presence_context)
+        except Exception:
+            pass  # never block a conversation turn on presence fetch failure
 
     final_text = ""
     model_name = ""
@@ -450,6 +460,20 @@ def _drop_orphan_tool_messages(messages: list[dict]) -> list[dict]:
 
 def _sanitize_history(messages: list[dict]) -> list[dict]:
     return _drop_dangling_tool_calls(_drop_orphan_tool_messages(messages))
+
+
+def _inject_presence_context(messages: list[dict], presence_context: str) -> list[dict]:
+    """Append live presence context to the system message for this turn."""
+    if not messages or not presence_context:
+        return messages
+    result = list(messages)
+    sys_msg = dict(result[0])
+    original = sys_msg.get("content", "")
+    marker = "Presence context:"
+    if marker not in original:
+        sys_msg["content"] = f"{original}\n\nPresence context: {presence_context}".strip()
+    result[0] = sys_msg
+    return result
 
 
 def _inject_datetime(messages: list[dict], now_str: str) -> list[dict]:

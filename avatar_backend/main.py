@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from avatar_backend.config import get_settings
 from avatar_backend.models.acl import ACLManager
 from avatar_backend.services.ha_proxy import HAProxy
+from avatar_backend.services.presence_context import PresenceContextService
 from avatar_backend.services.llm_service import LLMService
 from avatar_backend.services.cost_log import CostLog
 from avatar_backend.services.decision_log import DecisionLog
@@ -181,6 +182,10 @@ async def lifespan(app: FastAPI):
         acl=acl,
     )
 
+    app.state.presence_service = PresenceContextService(
+        ha_url=settings.ha_url,
+        ha_token=settings.ha_token,
+    )
     app.state.audio_cache = {}  # token → (wav_bytes, expiry) for one-shot audio serving
     app.state.recent_event_contexts = {}
     app.state.stt_service = STTService(model_name=settings.whisper_model)

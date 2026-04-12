@@ -167,4 +167,5 @@ class ConversationService:
             ha=self._app.state.ha_proxy,
             decision_log=getattr(self._app.state, "decision_log", None),
             memory_service=getattr(self._app.state, "memory_service", None),
+            presence_service=getattr(self._app.state, "presence_service", None),
         )
