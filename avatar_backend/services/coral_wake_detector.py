@@ -356,7 +356,7 @@ class CoralWakeDetector:
             interp.set_tensor(inp["index"], tensor)
             interp.invoke()
 
-            out = interp.get_tensor(interp.get_output_details()[0]["index"])
+            out = interp.get_tensor(interp.get_output_details()[0]["index"]).copy()
             out_details = interp.get_output_details()[0]
 
             # Dequantize if the model uses int8 quantization

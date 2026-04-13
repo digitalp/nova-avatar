@@ -225,8 +225,8 @@ class CoralMotionDetector:
         self._interp.set_tensor(self._input_index, tensor)
         self._interp.invoke()
 
-        classes = self._interp.get_tensor(self._out_classes)[0]
-        scores  = self._interp.get_tensor(self._out_scores)[0]
+        classes = self._interp.get_tensor(self._out_classes)[0].copy()
+        scores  = self._interp.get_tensor(self._out_scores)[0].copy()
         count   = int(self._interp.get_tensor(self._out_count)[0])
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
