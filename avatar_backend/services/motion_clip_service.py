@@ -329,16 +329,10 @@ class MotionClipService:
         return fullpath
 
     async def _capture_clip(self, camera_entity_id: str, output_path: Path) -> bool:
-        # Mainstream cameras (H.264) don't support MJPEG streaming via HA's proxy.
-        # Go straight to polling fallback for smooth 25fps clips.
-        if "mainstream" in camera_entity_id or "profile000" in camera_entity_id:
-            _LOGGER.info("motion_clip.mainstream_polling", camera=camera_entity_id,
-                         detail="Mainstream camera — using polling for clip capture")
-            return await self._capture_clip_polling(camera_entity_id, output_path)
-
         # Stream directly from HA's MJPEG proxy endpoint using a single persistent
-        # connection.  This delivers frames at the camera's native rate (~5–15 fps)
-        # versus the ~1 fps we get when polling /api/camera_proxy one request at a time.
+        # connection.  For cameras with STREAM support (supported_features=2) HA
+        # re-encodes the RTSP feed as MJPEG, delivering 10–15 fps.  Cameras that
+        # only expose snapshots fall back to concurrent polling automatically.
         token = self._ha.auth_headers.get("Authorization", "").removeprefix("Bearer ").strip()
         stream_url = f"{self._ha.ha_url}/api/camera_proxy_stream/{camera_entity_id}"
 
@@ -416,20 +410,24 @@ class MotionClipService:
         loop = asyncio.get_running_loop()
         started = loop.time()
         deadline = started + self._clip_duration_s
-        write_index = 0
-        _write_lock = asyncio.Lock()
         url = f"{self._ha.ha_url}/api/camera_proxy/{camera_entity_id}"
         headers = self._ha.auth_headers
 
+        # Collect frames with timestamps so we can sort them chronologically
+        # after concurrent fetching. Without sorting, minterpolate produces
+        # artifacts because it tries to motion-compensate between temporally
+        # scrambled frames.
+        _frames: list[tuple[float, bytes]] = []
+        _frames_lock = asyncio.Lock()
+
         async def _fetch_one(client: _httpx.AsyncClient) -> None:
-            nonlocal write_index
             while loop.time() < deadline:
                 try:
+                    t = loop.time() - started
                     resp = await client.get(url, headers=headers)
                     if resp.status_code == 200 and resp.content:
-                        async with _write_lock:
-                            (frame_dir / f"frame_{write_index:04d}.jpg").write_bytes(resp.content)
-                            write_index += 1
+                        async with _frames_lock:
+                            _frames.append((t, resp.content))
                 except Exception:
                     await asyncio.sleep(0.2)
 
@@ -446,7 +444,12 @@ class MotionClipService:
             shutil.rmtree(frame_dir, ignore_errors=True)
             return False
 
-        captured = write_index
+        # Sort by capture timestamp and write sequentially
+        _frames.sort(key=lambda x: x[0])
+        for idx, (_, data) in enumerate(_frames):
+            (frame_dir / f"frame_{idx:04d}.jpg").write_bytes(data)
+
+        captured = len(_frames)
         elapsed = max(0.1, loop.time() - started)
 
         if captured < 3:
@@ -462,12 +465,14 @@ class MotionClipService:
             elapsed_s=round(elapsed, 2),
             actual_fps=round(actual_fps, 2),
         )
-        # Use minterpolate with MCI + OBMC — proper motion compensation without
-        # the expensive bidirectional search (aobmc:vsbmc=1) that caused timeouts.
-        # OBMC (overlapped block motion compensation) is ~5x faster than AOBMC
-        # while producing clean interpolated frames without the ghosting artifacts
-        # that blend mode creates on moving objects.
-        vf_filters = "minterpolate=fps=25:mi_mode=mci:mc_mode=obmc"
+        # Choose encode filter based on actual capture fps:
+        # - ≥5 fps: use minterpolate (MCI+OBMC) for smooth synthetic frames
+        # - <5 fps: simple frame duplication (fps=25) — holding real frames is
+        #   less distracting than minterpolate morphing at 30× interpolation ratio
+        if actual_fps >= 5.0:
+            vf_filters = "minterpolate=fps=25:mi_mode=mci:mc_mode=obmc"
+        else:
+            vf_filters = "fps=fps=25"
         cmd = [
             "/usr/bin/ffmpeg",
             "-nostdin", "-y", "-loglevel", "error",
