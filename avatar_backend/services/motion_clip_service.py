@@ -33,6 +33,7 @@ class MotionClipService:
         clip_duration_s: int = 8,
         max_search_candidates: int = 120,
         max_search_results: int = 24,
+        retention_days: int = 30,
     ) -> None:
         self._db = db
         self._ha = ha_proxy
@@ -41,10 +42,13 @@ class MotionClipService:
         self._clip_duration_s = max(3, int(clip_duration_s))
         self._max_search_candidates = max(20, int(max_search_candidates))
         self._max_search_results = max(5, int(max_search_results))
+        self._retention_days = max(0, int(retention_days))
         self._clips_dir = data_dir() / "motion_clips"
         self._clips_dir.mkdir(parents=True, exist_ok=True)
         self._clips_dir_ready = self._ensure_clips_dir_ready()
         self._tasks: set[asyncio.Task] = set()
+        self._pending_updates: dict[str, dict[str, Any]] = {}  # clip_handle → {description, extra}
+        self._capture_semaphore: asyncio.Semaphore | None = None  # initialised lazily in async context
 
     async def refresh_storage_status(self) -> bool:
         self._clips_dir_ready = self._ensure_clips_dir_ready()
@@ -78,7 +82,24 @@ class MotionClipService:
         location: str = "",
         description: str = "",
         extra: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> str | None:
+        """Schedule a clip capture. Returns a handle for updating the description later.
+
+        Deduplicates per-camera: if a capture for this camera is already in-flight,
+        the new request is dropped to prevent concurrent ffmpeg processes from
+        exhausting memory.  A global semaphore (max 4) further caps concurrency.
+        """
+        task_name = f"motion_clip:{camera_entity_id}"
+        for t in self._tasks:
+            if t.get_name() == task_name and not t.done():
+                _LOGGER.info(
+                    "motion_clip.capture_skipped_already_running",
+                    camera=camera_entity_id,
+                )
+                return None
+
+        import uuid
+        clip_handle = str(uuid.uuid4())[:12]
         task = asyncio.create_task(
             self.capture_and_store(
                 camera_entity_id=camera_entity_id,
@@ -86,11 +107,26 @@ class MotionClipService:
                 location=location,
                 description=description,
                 extra=extra or {},
+                clip_handle=clip_handle,
             ),
-            name=f"motion_clip:{camera_entity_id}",
+            name=task_name,
         )
         self._tasks.add(task)
         task.add_done_callback(self._on_task_done)
+        return clip_handle
+
+    def update_pending_description(
+        self,
+        clip_handle: str,
+        *,
+        description: str = "",
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Update the description/extra for a clip that's still being captured."""
+        self._pending_updates[clip_handle] = {
+            "description": description,
+            **(extra or {}),
+        }
 
     async def capture_and_store(
         self,
@@ -100,6 +136,7 @@ class MotionClipService:
         location: str = "",
         description: str = "",
         extra: dict[str, Any] | None = None,
+        clip_handle: str = "",
     ) -> int | None:
         if not self._clips_dir_ready:
             _LOGGER.warning(
@@ -141,9 +178,48 @@ class MotionClipService:
                 source="motion_clip.capture_and_store",
             )
 
+        # Initialise semaphore lazily (must be created inside a running event loop)
+        if self._capture_semaphore is None:
+            self._capture_semaphore = asyncio.Semaphore(4)
+
         status = "ready"
-        if not await self._capture_clip(camera_entity_id, fullpath):
-            status = "capture_failed"
+        async with self._capture_semaphore:
+            if not await self._capture_clip(camera_entity_id, fullpath):
+                status = "capture_failed"
+
+        # Check for updated description from vision (arrived while clip was recording)
+        if clip_handle and clip_handle in self._pending_updates:
+            update = self._pending_updates.pop(clip_handle)
+            if update.get("description"):
+                description = update["description"]
+            # Merge extra fields from the vision result
+            merged_extra = dict(extra or {})
+            for k, v in update.items():
+                if k != "description":
+                    merged_extra[k] = v
+            extra = merged_extra
+
+        # Generate thumbnail from first frame — retry once if first attempt fails
+        # (common when concurrent encodes are saturating CPU)
+        thumb_relpath = ""
+        if status == "ready":
+            thumb_path = fullpath.with_suffix(".thumb.jpg")
+            for _attempt in range(2):
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "/usr/bin/ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+                        "-i", str(fullpath), "-vframes", "1", "-q:v", "3",
+                        "-vf", "scale=320:-1", str(thumb_path),
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    await asyncio.wait_for(proc.communicate(), timeout=15)
+                    if proc.returncode == 0 and thumb_path.exists():
+                        thumb_relpath = str(relpath.with_suffix(".thumb.jpg"))
+                        break
+                except Exception as exc:
+                    _LOGGER.debug("motion_clip.thumb_failed", camera=camera_entity_id, exc=str(exc), attempt=_attempt)
+                if _attempt == 0:
+                    await asyncio.sleep(2)  # brief pause before retry
 
         clip_id = self._db.insert_motion_clip({
             "ts": now.isoformat(),
@@ -152,6 +228,7 @@ class MotionClipService:
             "location": location,
             "description": description,
             "video_relpath": str(relpath) if status == "ready" else "",
+            "thumb_relpath": thumb_relpath,
             "status": status,
             "duration_s": self._clip_duration_s,
             "llm_provider": getattr(self._llm, "gemini_vision_provider_name", getattr(self._llm, "provider_name", "")),
@@ -252,6 +329,13 @@ class MotionClipService:
         return fullpath
 
     async def _capture_clip(self, camera_entity_id: str, output_path: Path) -> bool:
+        # Mainstream cameras (H.264) don't support MJPEG streaming via HA's proxy.
+        # Go straight to polling fallback for smooth 25fps clips.
+        if "mainstream" in camera_entity_id or "profile000" in camera_entity_id:
+            _LOGGER.info("motion_clip.mainstream_polling", camera=camera_entity_id,
+                         detail="Mainstream camera — using polling for clip capture")
+            return await self._capture_clip_polling(camera_entity_id, output_path)
+
         # Stream directly from HA's MJPEG proxy endpoint using a single persistent
         # connection.  This delivers frames at the camera's native rate (~5–15 fps)
         # versus the ~1 fps we get when polling /api/camera_proxy one request at a time.
@@ -322,28 +406,41 @@ class MotionClipService:
         return True
 
     async def _capture_clip_polling(self, camera_entity_id: str, output_path: Path) -> bool:
-        """Fallback: poll /api/camera_proxy one frame at a time.  Used when the MJPEG
-        stream endpoint is unavailable.  Computes the actual capture fps from elapsed
-        wall-clock time so the video plays back at real-time speed."""
-        target_fps = 5
-        frame_interval_s = 1.0 / target_fps
+        """Poll /api/camera_proxy with concurrent requests for higher frame rates.
+        Uses multiple in-flight requests to keep the pipeline full — each request
+        takes ~0.5-1s for mainstream cameras, so 4 concurrent requests yield ~4-8 fps
+        instead of the ~1 fps from sequential polling."""
+        import httpx as _httpx
+
         frame_dir = Path(tempfile.mkdtemp(prefix="motion_frames_", dir=str(self._clips_dir)))
         loop = asyncio.get_running_loop()
         started = loop.time()
         deadline = started + self._clip_duration_s
         write_index = 0
-        fetch_index = 0
-        try:
+        _write_lock = asyncio.Lock()
+        url = f"{self._ha.ha_url}/api/camera_proxy/{camera_entity_id}"
+        headers = self._ha.auth_headers
+
+        async def _fetch_one(client: _httpx.AsyncClient) -> None:
+            nonlocal write_index
             while loop.time() < deadline:
-                image_bytes = await self._ha.fetch_camera_image(camera_entity_id)
-                if image_bytes:
-                    (frame_dir / f"frame_{write_index:04d}.jpg").write_bytes(image_bytes)
-                    write_index += 1
-                fetch_index += 1
-                next_tick = started + (fetch_index * frame_interval_s)
-                sleep_for = next_tick - loop.time()
-                if sleep_for > 0:
-                    await asyncio.sleep(sleep_for)
+                try:
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code == 200 and resp.content:
+                        async with _write_lock:
+                            (frame_dir / f"frame_{write_index:04d}.jpg").write_bytes(resp.content)
+                            write_index += 1
+                except Exception:
+                    await asyncio.sleep(0.2)
+
+        concurrency = 4
+        try:
+            async with _httpx.AsyncClient(
+                timeout=_httpx.Timeout(connect=3.0, read=8.0, write=3.0, pool=5.0),
+                limits=_httpx.Limits(max_keepalive_connections=concurrency, max_connections=concurrency),
+            ) as client:
+                workers = [asyncio.create_task(_fetch_one(client)) for _ in range(concurrency)]
+                await asyncio.gather(*workers, return_exceptions=True)
         except Exception as exc:
             _LOGGER.warning("motion_clip.poll_sample_failed", camera=camera_entity_id, exc=_format_exc(exc))
             shutil.rmtree(frame_dir, ignore_errors=True)
@@ -365,15 +462,21 @@ class MotionClipService:
             elapsed_s=round(elapsed, 2),
             actual_fps=round(actual_fps, 2),
         )
+        # Use minterpolate with MCI + OBMC — proper motion compensation without
+        # the expensive bidirectional search (aobmc:vsbmc=1) that caused timeouts.
+        # OBMC (overlapped block motion compensation) is ~5x faster than AOBMC
+        # while producing clean interpolated frames without the ghosting artifacts
+        # that blend mode creates on moving objects.
+        vf_filters = "minterpolate=fps=25:mi_mode=mci:mc_mode=obmc"
         cmd = [
             "/usr/bin/ffmpeg",
             "-nostdin", "-y", "-loglevel", "error",
             "-framerate", f"{actual_fps:.4f}",
             "-i", str(frame_dir / "frame_%04d.jpg"),
             "-an",
+            "-vf", vf_filters,
             "-c:v", "libx264",
             "-preset", "veryfast",
-            "-r", "25",
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
             str(output_path),
@@ -383,7 +486,7 @@ class MotionClipService:
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             try:
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=self._clip_duration_s + 12)
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=self._clip_duration_s + 60)
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()
@@ -455,3 +558,85 @@ class MotionClipService:
                 scored.append((score, clip))
         scored.sort(key=lambda item: (-item[0], item[1].get("ts", "")), reverse=False)
         return [clip for _, clip in scored] or candidates
+
+    async def run_cleanup(self) -> dict[str, int]:
+        """Delete clips older than retention_days. Flagged clips are preserved.
+        Returns stats about what was cleaned up."""
+        if self._retention_days <= 0:
+            return {"skipped": True, "reason": "retention disabled"}
+        relpaths = self._db.delete_old_motion_clips(self._retention_days)
+        deleted_files = 0
+        for relpath in relpaths:
+            fullpath = (self._clips_dir / relpath).resolve()
+            if fullpath.exists():
+                try:
+                    fullpath.unlink()
+                    deleted_files += 1
+                except Exception:
+                    pass
+        # Clean up empty date directories
+        try:
+            for d in sorted(self._clips_dir.rglob("*"), reverse=True):
+                if d.is_dir() and not any(d.iterdir()):
+                    d.rmdir()
+        except Exception:
+            pass
+        if relpaths:
+            _LOGGER.info("motion_clip.cleanup_complete",
+                         db_rows=len(relpaths), files_removed=deleted_files,
+                         retention_days=self._retention_days)
+        return {"db_rows_deleted": len(relpaths), "files_removed": deleted_files}
+
+    async def backfill_thumbnails(self) -> dict[str, int]:
+        """Generate thumbnails for existing clips that don't have one."""
+        clips = self._db.recent_motion_clips(limit=500)
+        generated = 0
+        skipped = 0
+        for clip in clips:
+            if clip.get("thumb_relpath"):
+                skipped += 1
+                continue
+            video_relpath = clip.get("video_relpath", "")
+            if not video_relpath:
+                skipped += 1
+                continue
+            video_path = self._clips_dir / video_relpath
+            if not video_path.exists():
+                skipped += 1
+                continue
+            thumb_path = video_path.with_suffix(".thumb.jpg")
+            if thumb_path.exists():
+                # Thumb file exists but DB not updated — fix the DB
+                thumb_relpath = str(Path(video_relpath).with_suffix(".thumb.jpg"))
+                try:
+                    with self._db._conn() as conn:
+                        conn.execute(
+                            "UPDATE motion_clips SET thumb_relpath = ? WHERE id = ?",
+                            (thumb_relpath, clip["id"]),
+                        )
+                    generated += 1
+                except Exception:
+                    pass
+                continue
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "/usr/bin/ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+                    "-i", str(video_path), "-vframes", "1", "-q:v", "3",
+                    "-vf", "scale=320:-1", str(thumb_path),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.communicate(), timeout=10)
+                if proc.returncode == 0 and thumb_path.exists():
+                    thumb_relpath = str(Path(video_relpath).with_suffix(".thumb.jpg"))
+                    with self._db._conn() as conn:
+                        conn.execute(
+                            "UPDATE motion_clips SET thumb_relpath = ? WHERE id = ?",
+                            (thumb_relpath, clip["id"]),
+                        )
+                    generated += 1
+                else:
+                    skipped += 1
+            except Exception:
+                skipped += 1
+        _LOGGER.info("motion_clip.backfill_complete", generated=generated, skipped=skipped)
+        return {"generated": generated, "skipped": skipped}

@@ -105,6 +105,7 @@ _LEGACY_SNAPSHOT_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "sensor.bedroom_1_thermo_valve",
     "sensor.back_door_device_temperature",
     "sensor.back_entrance_device_temperature",
+    "sensor.living_room_thermostat_temperature",
     "sensor.met_office_",
     "sensor.openweathermap_dew_point",
     "sensor.openweathermap_feels_like_temperature",
@@ -171,6 +172,8 @@ _LEGACY_TEMP_EXCLUDE_PREFIXES: tuple[str, ...] = (
 _LEGACY_TEMP_EXCLUDE_SUBSTRINGS: tuple[str, ...] = (
     "_thermo_local_temperature",
     "_trv_local_temperature",
+    "_thermostat_temperature",
+    "_thermostat_temp",
 )
 
 # ── Temperature thresholds applied to room temperature sensors ─────────────────

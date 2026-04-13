@@ -231,6 +231,7 @@ class CoralMotionDetector:
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         detections: list[str] = []
+        best_scores: dict[str, float] = {}  # label → highest score (dedup)
         has_plate_bearing = False
         for i in range(count):
             score = float(scores[i])
@@ -238,9 +239,12 @@ class CoralMotionDetector:
                 continue
             label = self._labels.get(int(classes[i]) + 1, "unknown").lower()
             if label in _CLASSES_OF_INTEREST:
-                detections.append(f"{label}({score:.0%})")
+                if score > best_scores.get(label, 0.0):
+                    best_scores[label] = score
                 if label in _PLATE_BEARING_CLASSES:
                     has_plate_bearing = True
+
+        detections = [f"{label}({score:.0%})" for label, score in sorted(best_scores.items(), key=lambda x: -x[1])]
 
         if detections:
             _LOGGER.info(

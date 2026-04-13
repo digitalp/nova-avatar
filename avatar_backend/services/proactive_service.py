@@ -262,6 +262,7 @@ class ProactiveService:
         else:
             _LOGGER.info("coral.disabled", detail="No Coral TPU — all motion events go straight to Ollama vision")
         runtime = load_home_runtime_config()
+        self._clip_camera_map: dict[str, str] = {}  # sensor → preferred clip camera override
         self._motion_camera_map = dict(_LEGACY_MOTION_CAMERA_MAP)
         self._motion_camera_map.update(runtime.motion_camera_map)
         self._bypass_global_motion_cameras = set(_LEGACY_BYPASS_GLOBAL_MOTION_CAMERAS)
@@ -496,17 +497,22 @@ class ProactiveService:
             if is_motion_sensor or is_camera_mapped:
                 if is_camera_mapped and new_val == "on":
                     camera_id = self._motion_camera_map[entity_id]
-                    if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) >= _CAMERA_COOLDOWN_S:
-                        self._camera_cooldowns[camera_id] = time.monotonic()
-                        friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
-                        asyncio.create_task(
-                            self._handle_motion_event(entity_id, friendly, camera_id),
-                            name=f"motion_{entity_id}",
-                        )
-                    else:
-                        _LOGGER.debug("proactive.motion_camera_cooldown", entity_id=entity_id, camera=camera_id)
-                        if self._decision_log:
-                            self._decision_log.record("motion_cooldown", entity=entity_id, camera=camera_id)
+                    # Minimum capture interval — prevents concurrent ffmpeg processes
+                    # for the same camera which produce 0-byte files and missing
+                    # thumbnails. Set to clip duration so the previous capture finishes
+                    # before starting a new one. This is NOT an announce cooldown.
+                    _MIN_CAPTURE_INTERVAL_S = self._motion_clip_service._clip_duration_s + 5
+                    if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) < _MIN_CAPTURE_INTERVAL_S:
+                        _LOGGER.debug("proactive.motion_capture_interval",
+                                      entity_id=entity_id, camera=camera_id,
+                                      interval_s=_MIN_CAPTURE_INTERVAL_S)
+                        return
+                    self._camera_cooldowns[camera_id] = time.monotonic()
+                    friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
+                    asyncio.create_task(
+                        self._handle_motion_event(entity_id, friendly, camera_id),
+                        name=f"motion_{entity_id}",
+                    )
                 else:
                     _LOGGER.debug("proactive.motion_no_camera", entity_id=entity_id,
                                   hint="add to motion_camera_map in config/home_runtime.json to enable vision description")
@@ -572,19 +578,23 @@ class ProactiveService:
     # ── Motion + camera describe ──────────────────────────────────────────
 
     async def _handle_motion_event(self, entity_id: str, friendly: str, camera_id: str) -> None:
-        """Fetch a camera snapshot, describe it with vision, and announce."""
+        """Fetch a camera snapshot, describe it with vision, archive clip, and optionally announce."""
         bypass_global = camera_id in self._bypass_global_motion_cameras
 
-        # Global motion rate limit — skipped for bypass cameras (e.g. driveway)
+        # Determine whether we should announce (voice) or just silently archive.
+        # Clips are ALWAYS archived when Coral confirms a detection — only the
+        # voice announcement is rate-limited by the global and per-camera cooldowns.
+        _should_announce = True
         if not bypass_global:
             since_last = time.monotonic() - self._last_motion_announce_time
             if since_last < _GLOBAL_MOTION_COOLDOWN_S:
-                _LOGGER.debug("proactive.motion_global_cooldown",
+                _should_announce = False
+                _LOGGER.debug("proactive.motion_announce_suppressed",
+                              reason="global_cooldown",
                               seconds_remaining=int(_GLOBAL_MOTION_COOLDOWN_S - since_last))
-                return
 
         _LOGGER.info("proactive.motion_triggered", entity_id=entity_id, camera=camera_id,
-                     bypass_global=bypass_global)
+                     bypass_global=bypass_global, will_announce=_should_announce)
         if self._decision_log:
             self._decision_log.record(
                 "motion_triggered",
@@ -636,6 +646,21 @@ class ProactiveService:
                                 detail="falling through to Ollama vision")
         # ─────────────────────────────────────────────────────────────────────
 
+        # Start clip capture IMMEDIATELY so the video captures the actual motion
+        # event. Vision description runs in parallel — the clip gets a placeholder
+        # description that's updated once Gemini finishes.
+        clip_camera = self._clip_camera_map.get(entity_id, camera_id)
+        clip_handle = self._motion_clip_service.schedule_capture(
+            camera_entity_id=clip_camera,
+            trigger_entity_id=entity_id,
+            location=friendly,
+            description=f"Motion detected by {friendly}.",
+            extra={
+                "coral_detections": _coral_detections,
+                "coral_has_plate": _coral_has_plate,
+            },
+        )
+
         try:
             result = await self._camera_event_service.analyze_motion(
                 camera_entity_id=camera_id,
@@ -645,6 +670,7 @@ class ProactiveService:
                 system_prompt=self._system_prompt or None,
                 vision_prompt=self._camera_vision_prompts.get(camera_id),
                 include_plate_ocr=_coral_has_plate,
+                prefetched_frame=frame if self._coral.enabled else None,
             )
         except Exception as exc:
             _LOGGER.warning("proactive.motion_describe_failed", camera=camera_id, exc=str(exc))
@@ -711,25 +737,36 @@ class ProactiveService:
         if result.get("canonical_event") is not None:
             extra["canonical_event"] = result["canonical_event"]
 
-        self._motion_clip_service.schedule_capture(
-            camera_entity_id=camera_id,
-            trigger_entity_id=entity_id,
-            location=friendly,
-            description=description,
-            extra=extra,
-        )
+        # Update the already-recording clip with the real description from Gemini
+        if clip_handle is not None:
+            self._motion_clip_service.update_pending_description(
+                clip_handle, description=description, extra=extra,
+            )
+        else:
+            # Fallback: schedule a new capture if the early one failed
+            self._motion_clip_service.schedule_capture(
+                camera_entity_id=clip_camera,
+                trigger_entity_id=entity_id,
+                location=friendly,
+                description=description,
+                extra=extra,
+            )
 
-        self._last_motion_announce_time = time.monotonic()
         if self._decision_log:
             self._decision_log.record(
                 "motion_clip_archived",
                 camera=camera_id,
                 message=description[:300],
                 delivery=is_delivery,
+                announced=_should_announce,
                 **self._gemini_llm_fields(),
             )
 
-        # For deliveries, also push to phones (user may be away from home)
+        # Only update the announce timestamp and notify if not cooldown-suppressed
+        if _should_announce:
+            self._last_motion_announce_time = time.monotonic()
+
+        # For deliveries, always push to phones regardless of announce cooldown
         if is_delivery:
             title = f"Delivery – {delivery_company}" if delivery_company else "Delivery at driveway"
             await self._notify_phones(title, message)

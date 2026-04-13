@@ -880,623 +880,484 @@ tr:hover td { background: var(--accent-dim); color: var(--text); }
 .dash-sys-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: var(--sp-3); margin-bottom: var(--sp-4); }
 @media (max-width: 720px) { .dash-sys-grid { grid-template-columns: 1fr 1fr; } }
 
-/* ── Find Anything — Apple-style redesign ──────────────────────────────────── */
+/* ── Find Anything — UniFi Protect-style redesign ──────────────────────────── */
 
-/* Search header */
-.fa-header { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-5); }
-
-.fa-search-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* Layout: sidebar + main grid */
+.fa-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 0;
+  min-height: calc(100vh - 120px);
 }
 
-.fa-search-icon {
-  position: absolute;
-  left: 18px;
-  color: var(--text3);
-  pointer-events: none;
-  flex-shrink: 0;
-}
-
-.fa-search-input {
-  width: 100%;
-  height: 52px;
-  padding: 0 120px 0 52px;
-  border-radius: 16px;
-  border: 1px solid var(--border2);
-  background: var(--surface2);
-  color: var(--text);
-  font-size: 16px;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-weight: 400;
-  outline: none;
-  transition: border-color .18s, background .18s;
-  -webkit-appearance: none;
-}
-
-.fa-search-input::placeholder { color: var(--text3); }
-
-.fa-search-input:focus {
-  border-color: var(--accent);
+/* ── Sidebar ── */
+.fa-sidebar {
   background: var(--surface);
-}
-
-.fa-search-btn {
-  position: absolute;
-  right: 10px;
-  padding: 7px 16px;
-  border-radius: 10px;
-  border: none;
-  background: #0A84FF;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  cursor: pointer;
-  transition: opacity .15s;
-  letter-spacing: -.01em;
-}
-.fa-search-btn:active { opacity: .75; }
-
-.fa-reset-btn {
-  flex-shrink: 0;
-  padding: 0 16px;
-  height: 52px;
-  border-radius: 14px;
-  border: 1px solid var(--border2);
-  background: var(--surface2);
-  color: var(--text2);
-  font-size: 13px;
-  font-weight: 500;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  cursor: pointer;
-  transition: background .15s, color .15s;
-  white-space: nowrap;
-}
-.fa-reset-btn:hover { background: var(--surface3); color: var(--text); }
-
-/* Camera filter pills */
-.fa-pill-row {
+  border-right: 1px solid var(--border);
+  padding: 16px;
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  padding-bottom: 2px;
-  flex-wrap: nowrap;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+  position: sticky;
+  top: 0;
 }
-.fa-pill-row::-webkit-scrollbar { display: none; }
-
-/* JS renders motion-camera-item buttons into motion-camera-list — pill style */
-.motion-camera-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border2);
-  background: var(--surface2);
-  color: var(--text2);
-  font-size: 13px;
-  font-weight: 500;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color .15s, background .15s, color .15s;
-  -webkit-appearance: none;
-  flex-shrink: 0;
+.fa-sidebar-search {
+  position: relative;
+  margin-bottom: 12px;
 }
-.motion-camera-item:hover { border-color: var(--border2); background: var(--surface3); color: var(--text); }
-.motion-camera-item.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent-text); font-weight: 600; }
-.motion-camera-name { font-size: 13px; font-weight: inherit; color: inherit; word-break: normal; }
-.motion-camera-count { color: var(--text3); font-size: 12px; font-weight: 600; }
-.motion-camera-item.active .motion-camera-count { color: var(--accent-text); }
-
-/* Tab control */
-.fa-tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  background: var(--surface2);
-  border-radius: 12px;
-  padding: 3px;
-  width: fit-content;
-  margin-bottom: 18px;
-}
-
-.fa-tab {
-  padding: 7px 20px;
-  border-radius: 10px;
-  border: none;
-  background: transparent;
-  color: var(--text3);
-  font-size: 13px;
-  font-weight: 500;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  cursor: pointer;
-  transition: background .15s, color .15s;
-  white-space: nowrap;
-}
-.fa-tab.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-card); }
-
-/* Stats row */
-.fa-stats-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 18px;
-  flex-wrap: wrap;
-}
-
-.fa-count-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  border-radius: 999px;
+.fa-sidebar-search input {
+  width: 100%;
   background: var(--surface2);
   border: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text2);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.fa-results-sub {
-  font-size: 12px;
-  color: var(--text3);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.fa-live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #30D158;
-  flex-shrink: 0;
-  animation: fa-pulse 2.4s infinite;
-}
-@keyframes fa-pulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
-
-/* Section label */
-.fa-section-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: var(--text3);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Activity timeline */
-.fa-timeline { margin-bottom: 24px; }
-.fa-timeline-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.fa-timeline-note { font-size: 11px; color: var(--text); }
-
-.motion-activity-bars {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 4px;
-  align-items: end;
-  height: 36px;
-}
-.motion-activity-slot { display: grid; gap: 3px; align-items: end; }
-.motion-activity-bar {
-  height: 28px;
-  border-radius: 4px;
-  border: none;
-  background: var(--surface2);
-  overflow: hidden;
-  display: flex;
-  align-items: flex-end;
-}
-.motion-activity-fill {
-  width: 100%;
-  border-radius: 3px;
-  background: #0A84FF;
-  opacity: .70;
-  min-height: 3px;
-}
-.motion-activity-label { font-size: 9px; color: var(--text); text-align: center; }
-.motion-activity-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.motion-activity-title { font-size:11px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:#8ea1b8; }
-.motion-activity-note { font-size:11px; color:#7f8ca1; }
-
-/* Event history filter bar */
-.fa-history-bar {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  background: var(--surface2);
-  border: 1px solid var(--border2);
-  border-radius: 16px;
-  padding: 16px 18px;
-  margin-bottom: var(--sp-4);
-}
-.fa-history-bar .field { min-width: 120px; flex: 1; margin: 0; }
-.fa-history-bar .field label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: var(--text);
-  margin-bottom: 6px;
-  display: block;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Workflow queue */
-.fa-queue-card {
-  background: var(--surface2);
-  border: 1px solid var(--border2);
-  border-radius: 14px;
-  padding: 14px 18px;
-  display: grid;
-  gap: 10px;
-  margin-bottom: var(--sp-4);
-}
-.fa-queue-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.fa-queue-chips { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-
-/* Insight/stat chips (used by JS workflow summary renderer) */
-.motion-stat {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
   border-radius: 8px;
-  background: var(--surface2);
-  border: 1px solid var(--border2);
-  font-size: 11px;
+  padding: 8px 12px 8px 34px;
+  font-size: 13px;
   color: var(--text);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  outline: none;
 }
-.motion-stat strong { color: var(--text); font-weight: 700; }
-
-.motion-insights, .motion-insights-grid, .motion-insight-card,
-.motion-insight-label, .motion-insight-items { /* JS compat — invisible */ }
-.motion-insight-chip {
-  display: none; /* hidden in new design */
+.fa-sidebar-search input:focus { border-color: var(--accent); }
+.fa-sidebar-search input::placeholder { color: var(--text3); }
+.fa-sidebar-search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  stroke: var(--text3);
 }
-.motion-insight-chip strong { color: var(--cyan); font-weight: 700; }
 
-/* Group structure — used by JS renderMotionClips */
-.motion-grid { display: grid; gap: 28px; }
-
-.motion-group { display: grid; gap: 14px; }
-
-.motion-group-head {
+/* Sidebar filter sections */
+.fa-filter-section {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.fa-filter-section:last-child { border-bottom: none; }
+.fa-filter-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-bottom: 2px;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
 }
-.motion-group-title {
+.fa-filter-title {
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .05em;
+  font-weight: 700;
   text-transform: uppercase;
-  color: var(--text);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: .06em;
+  color: var(--text2);
 }
-.motion-group-count { font-size: 11px; color: var(--text); }
-
-.motion-group-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: var(--sp-3);
+.fa-filter-chevron {
+  width: 14px;
+  height: 14px;
+  stroke: var(--text3);
+  transition: transform .15s;
 }
+.fa-filter-section.collapsed .fa-filter-chevron { transform: rotate(-90deg); }
+.fa-filter-section.collapsed .fa-filter-body { display: none; }
+.fa-filter-body { padding: 8px 0 4px; }
 
-/* Motion cards — Apple-style */
-.motion-card {
-  display: grid;
-  overflow: hidden;
-  border-radius: 16px;
-  border: 1px solid var(--border2);
+/* Time range quick buttons */
+.fa-time-btns {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.fa-time-btn {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
   background: var(--surface2);
-  transition: transform .20s ease, border-color .20s ease;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all .12s;
+}
+.fa-time-btn:hover { background: var(--surface3); color: var(--text); }
+.fa-time-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Checkbox filters */
+.fa-check-list { display: grid; gap: 2px; }
+.fa-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text2);
+  transition: background .1s;
+}
+.fa-check-item:hover { background: var(--surface2); }
+.fa-check-item input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
   cursor: pointer;
 }
-.motion-card:hover { transform: scale(1.012); border-color: var(--text); box-shadow: none; }
 
-.motion-card-media {
-  position: relative;
-  background: #000;
-  border-bottom: 1px solid var(--border2);
+/* Sidebar footer stats */
+.fa-sidebar-stats {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text3);
+  display: grid;
+  gap: 4px;
 }
-.motion-card video,
-.motion-card-fallback {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  display: block;
-  background: #0a0a0a;
+.fa-sidebar-stats span { display: flex; justify-content: space-between; }
+
+/* ── Main content ── */
+.fa-main {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
 }
-.motion-card-fallback {
+
+/* ── Expanded player ── */
+.fa-player {
+  background: #111;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height .35s ease, opacity .25s ease, margin .25s ease;
+  margin-top: 0;
+}
+.fa-player.show {
+  max-height: 800px;
+  opacity: 1;
+  margin-top: 0;
+}
+.fa-player-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: rgba(255,255,255,.85);
+}
+.fa-player-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #0A84FF;
+  flex-shrink: 0;
+}
+.fa-player-camera { font-weight: 600; }
+.fa-player-time { color: rgba(255,255,255,.5); }
+.fa-player-link {
+  color: #0A84FF;
+  text-decoration: none;
+  font-size: 12px;
+  cursor: pointer;
+}
+.fa-player-link:hover { text-decoration: underline; }
+.fa-player-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.fa-player-actions button {
+  background: rgba(255,255,255,.08);
+  border: none;
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text3);
-  font-size: 12px;
+  cursor: pointer;
+  color: rgba(255,255,255,.6);
+  font-size: 14px;
+  transition: all .12s;
+}
+.fa-player-actions button:hover { background: rgba(255,255,255,.15); color: #fff; }
+.fa-player video {
+  width: 100%;
+  display: block;
+  max-height: 480px;
+  background: #000;
+}
+.fa-player-desc {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: rgba(255,255,255,.6);
+  line-height: 1.4;
 }
 
-.motion-card-overlay {
-  position: absolute;
-  inset: 0;
-  bottom: auto;
+/* Coral detection chips inside expanded player */
+.fa-detect-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  padding: 10px;
-  background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, transparent 100%);
-  pointer-events: none;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
 }
-
-.motion-card-badge,
-.motion-card-age {
+.fa-detect-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: rgba(0,0,0,.58);
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,.06);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--border2);
-  color: var(--text);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .03em;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  border: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.85);
+  transition: background .15s, border-color .15s;
 }
-
-.motion-card-badge::before {
-  content: '';
-  width: 6px;
-  height: 6px;
+.fa-detect-chip:hover {
+  background: rgba(255,255,255,.1);
+  border-color: rgba(255,255,255,.15);
+}
+.fa-detect-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #30D158;
   flex-shrink: 0;
 }
-.motion-card-badge.ai::before { background: #0A84FF; }
-.motion-card-badge.review::before { background: rgba(255,255,255,.45); }
-
-.motion-card-body { display: grid; gap: 10px; padding: 14px 16px 16px; }
-
-.motion-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+.fa-detect-label {
+  text-transform: capitalize;
 }
-.motion-card-title { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.3; font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
-.motion-card-time { font-size: 11px; color: var(--text3); margin-top: 2px; }
-.motion-card-id { font-size: 10px; color: var(--text3); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; padding-top: 2px; }
-.motion-card-camera { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); margin-top: 2px; }
+.fa-detect-score {
+  color: rgba(255,255,255,.5);
+  font-weight: 500;
+}
+.fa-detect-chip.plate {
+  border-color: rgba(255,100,100,.2);
+}
+.fa-detect-chip.plate .fa-detect-dot {
+  background: #ff6b6b;
+}
+.fa-detect-chip svg {
+  width: 12px;
+  height: 12px;
+  stroke: rgba(255,255,255,.7);
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.fa-player-related {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 12px;
+  overflow-x: auto;
+}
+.fa-player-related-thumb {
+  width: 80px;
+  height: 60px;
+  border-radius: 6px;
+  object-fit: cover;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color .12s;
+  flex-shrink: 0;
+}
+.fa-player-related-thumb:hover { border-color: var(--accent); }
+.fa-player-related-thumb.active { border-color: #0A84FF; }
 
-.motion-chip-row { display: flex; gap: 5px; flex-wrap: wrap; }
-.motion-chip {
+/* ── Thumbnail grid ── */
+.fa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: 4px;
+}
+
+/* ── Cards ── */
+.fa-card {
+  position: relative;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #1a1a1a;
+  transition: transform .12s, outline-color .12s;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+.fa-card:hover { transform: scale(1.012); outline-color: var(--accent); }
+.fa-card.selected { outline-color: #0A84FF; }
+
+.fa-card-media {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #111;
+}
+.fa-card-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.fa-card-media .fa-card-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,.15);
+  font-size: 32px;
+}
+
+/* Bottom overlay bar */
+.fa-card-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: linear-gradient(transparent, rgba(0,0,0,.7));
+  font-size: 10px;
+  color: rgba(255,255,255,.85);
+}
+.fa-card-camera {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+.fa-card-time {
+  white-space: nowrap;
+  color: rgba(255,255,255,.6);
+}
+
+/* Event type icon — top left pill */
+.fa-card-type {
+  position: absolute;
+  top: 6px;
+  left: 6px;
   display: inline-flex;
   align-items: center;
-  padding: 3px 8px;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,.08);
+}
+.fa-card-type svg {
+  width: 14px;
+  height: 14px;
+  stroke: rgba(255,255,255,.9);
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Confidence badge — bottom right */
+.fa-card-badge {
+  position: absolute;
+  bottom: 26px;
+  right: 6px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
   border-radius: 6px;
-  border: 1px solid var(--border2);
-  background: var(--surface2);
-  color: var(--text2);
-  font-size: 11px;
-  font-weight: 500;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.motion-chip.search { background: rgba(10,132,255,.12); color: rgba(10,132,255,.90); border-color: rgba(10,132,255,.20); }
-.motion-chip.good { background: rgba(48,209,88,.10); color: rgba(48,209,88,.85); border-color: rgba(48,209,88,.18); }
-.motion-chip.info { background: rgba(10,132,255,.10); color: rgba(10,132,255,.80); border-color: rgba(10,132,255,.15); }
-.motion-chip.coral { background: rgba(255,159,10,.12); color: rgba(255,159,10,.90); border-color: rgba(255,159,10,.25); }
-.motion-chip.coral-plate { background: rgba(255,69,58,.12); color: rgba(255,69,58,.90); border-color: rgba(255,69,58,.25); }
-
-.motion-card-desc {
-  font-size: 12px;
-  color: var(--text2);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,.1);
+  letter-spacing: .02em;
 }
 
-.motion-mark { padding: 0 3px; border-radius: 3px; background: var(--accent-dim); color: var(--accent-text); }
-.motion-card-note { font-size: 11px; color: var(--text3); }
-.motion-card-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; padding-top: 2px; }
-
-.motion-empty {
-  padding: 40px 24px;
-  text-align: center;
-  color: var(--text3);
-  font-size: 14px;
-  border: 1px dashed var(--border);
-  border-radius: 16px;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-/* Event history list items */
-.motion-history-list { display: grid; gap: var(--sp-2); }
-.motion-history-item {
-  display: grid;
-  gap: var(--sp-2);
-  border-radius: 13px;
-  border: 1px solid var(--border2);
-  background: var(--surface2);
-  padding: 14px 16px;
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  transition: border-color .15s, background .15s;
-}
-.motion-history-item:hover { border-color: rgba(10,132,255,.28); background: var(--surface2); transform: none; }
-.motion-history-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
-.motion-history-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.motion-history-time { font-size: 11px; color: var(--text); }
-.motion-history-meta { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.motion-history-desc { font-size: 12px; color: var(--text); line-height: 1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.motion-history-note-inline { font-size:11px; color: var(--text); line-height:1.45; padding-left:10px; border-left: 2px solid var(--accent); }
-.motion-history-note-inline strong { color: var(--text); font-weight:600; }
-
-/* Modal — Apple style */
-.motion-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 600;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: var(--sp-6);
-  background: rgba(0,0,0,.78);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-.motion-modal.show { display: flex; }
-
-.motion-modal-card {
-  width: min(1180px, 96vw);
-  max-height: 92vh;
-  overflow: auto;
-  border-radius: 20px;
-  border: 1px solid var(--border2);
-  background: rgba(28,28,30,.98);
-  box-shadow: 0 32px 80px rgba(0,0,0,.72);
-}
-.motion-modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--border2);
-}
-.motion-modal-title { font-size: 16px; font-weight: 700; color: var(--text); font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
-.motion-modal-close {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface3);
-  border: none;
-  border-radius: 50%;
-  color: var(--text);
+/* Flag star */
+.fa-card-flag {
+  position: absolute;
+  top: 6px;
+  right: 6px;
   font-size: 16px;
   cursor: pointer;
-  line-height: 1;
-  transition: background .15s, color .15s;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.5));
+  opacity: 0;
+  transition: opacity .12s;
 }
-.motion-modal-close:hover { background: var(--surface3); color: var(--text); }
+.fa-card:hover .fa-card-flag { opacity: 1; }
+.fa-card-flag.flagged { opacity: 1; color: #FFD60A; }
 
-.motion-modal-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(300px, .75fr);
-}
-.motion-modal-stage {
-  display: grid;
-  gap: 14px;
-  padding: var(--sp-5);
-  border-right: 1px solid var(--border);
-  align-content: start;
-}
-.motion-modal video { width: 100%; border-radius: 12px; background: #000; display: block; }
-.motion-modal-fallback {
-  display: none;
-  min-height: 220px;
-  border-radius: 12px;
-  border: 1px solid var(--border2);
-  background: var(--surface2);
-  padding: var(--sp-6);
-  align-items: center;
-}
-.motion-modal-fallback.show { display: flex; }
-.motion-modal-fallback-copy { max-width: 520px; }
-.motion-modal-fallback-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--text3); font-weight: 600; margin-bottom: 8px; font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
-.motion-modal-fallback-title { font-size: 22px; font-weight: 700; letter-spacing: -.3px; margin-bottom: 8px; color: var(--text); font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
-.motion-modal-fallback-sub { font-size: 13px; color: var(--text2); line-height: 1.5; max-width: 52ch; }
-.motion-modal-strip { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-.motion-modal-side { display: grid; gap: 0; overflow-y: auto; max-height: 80vh; padding: var(--sp-5); align-content: start; }
-.motion-modal-nav { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
-
-.motion-meta-block { padding: 14px 0; border-bottom: 1px solid var(--border2); }
-.motion-meta-block:last-child { border-bottom: 0; }
-.motion-meta-label { font-size: 10px; font-weight: 600; color: var(--text3); letter-spacing: .07em; text-transform: uppercase; margin-bottom: 8px; font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
-.motion-meta-value { font-size: 13px; color: var(--text2); line-height: 1.55; }
-.motion-meta-grid { display: grid; gap: var(--sp-2); }
-.motion-meta-row { display: flex; justify-content: space-between; gap: var(--sp-3); padding: 8px 0; border-bottom: 1px solid var(--border2); }
-.motion-meta-row:last-child { border-bottom: 0; padding-bottom: 0; }
-.motion-meta-key { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); }
-.motion-meta-row .motion-meta-value { text-align: right; font-size: 12px; }
-
-/* Sidebar note */
-.motion-side-note { margin-top:14px; padding-top:14px; border-top:1px solid var(--border); font-size:12px; color:var(--text2); line-height:1.5; }
-
-/* Results meta (hidden in new design, kept for JS compat) */
-.motion-results-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.motion-results-badge { display:none; }
-.motion-results-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
-
-/* Responsive */
-@media (max-width: 960px) {
-  .motion-modal-body { grid-template-columns: 1fr; }
-  .motion-modal-stage { border-right: none; border-bottom: 1px solid var(--border2); }
-  .motion-group-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-}
-@media (max-width: 640px) {
-  .fa-search-input { font-size: 15px; }
-  .motion-group-grid { grid-template-columns: 1fr; }
-  .motion-activity-bars { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-}
-
-
-
-/* ── Empty State ─────────────────────────────────────────────────────────────── */
-.empty-state {
+/* ── Empty state ── */
+.fa-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--sp-12) var(--sp-6);
-  text-align: center;
+  padding: 60px 20px;
   color: var(--text3);
+  text-align: center;
 }
-.empty-state-icon {
-  width: 48px; height: 48px;
-  margin-bottom: var(--sp-4);
-  opacity: 0.4;
-  font-size: 32px;
+.fa-empty-icon { font-size: 48px; margin-bottom: 12px; opacity: .4; }
+.fa-empty-title { font-size: 16px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
+.fa-empty-desc { font-size: 13px; max-width: 320px; line-height: 1.5; }
+
+/* ── Loading skeleton ── */
+.fa-card-skeleton {
+  aspect-ratio: 4 / 3;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #1a1a1a 25%, #222 50%, #1a1a1a 75%);
+  background-size: 200% 100%;
+  animation: fa-shimmer 1.5s infinite;
 }
-.empty-state-title {
-  font-size: var(--text-lg);
-  font-weight: var(--fw-semibold);
-  color: var(--text2);
-  margin-bottom: var(--sp-2);
+@keyframes fa-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
-.empty-state-desc {
-  font-size: var(--text-md);
-  max-width: 320px;
-  line-height: 1.5;
+
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+  .fa-layout { grid-template-columns: 1fr; }
+  .fa-sidebar {
+    position: fixed;
+    left: -260px;
+    top: 0;
+    bottom: 0;
+    z-index: 900;
+    width: 240px;
+    transition: left .2s;
+    box-shadow: 4px 0 20px rgba(0,0,0,.4);
+  }
+  .fa-sidebar.open { left: 0; }
+  .fa-sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.5);
+    z-index: 899;
+  }
+  .fa-sidebar.open + .fa-sidebar-overlay { display: block; }
+  .fa-mobile-toggle { display: flex !important; }
 }
+@media (min-width: 1025px) {
+  .fa-mobile-toggle { display: none !important; }
+  .fa-sidebar-overlay { display: none !important; }
+}
+@media (max-width: 600px) {
+  .fa-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Event History (preserved) ── */
+.fa-history-pane { display: none; }
+
 
 /* ── Loading Skeleton ────────────────────────────────────────────────────────── */
 .loading-skeleton {
@@ -2119,8 +1980,59 @@ textarea:focus-visible {
 [data-theme="light"] .motion-chip.search { background: rgba(108,92,231,.08); color: #5a4bd1; border-color: rgba(108,92,231,.2); }
 [data-theme="light"] .motion-chip.good { background: rgba(0,168,132,.08); color: #0a7558; border-color: rgba(0,168,132,.18); }
 [data-theme="light"] .motion-chip.info { background: rgba(108,92,231,.08); color: #5a4bd1; border-color: rgba(108,92,231,.15); }
-[data-theme="light"] .motion-chip.coral { background: rgba(230,125,0,.08); color: #b85c00; border-color: rgba(230,125,0,.2); }
-[data-theme="light"] .motion-chip.coral-plate { background: rgba(200,30,20,.08); color: #b01010; border-color: rgba(200,30,20,.2); }
+[data-theme="light"] .motion-chip.coral {
+  background: rgba(0,0,0,.04);
+  color: var(--text);
+  border-color: rgba(0,0,0,.08);
+}
+[data-theme="light"] .motion-chip.coral::before {
+  background: #e07800;
+}
+[data-theme="light"] .motion-chip.coral-plate {
+  background: rgba(0,0,0,.04);
+  color: var(--text);
+  border-color: rgba(0,0,0,.08);
+}
+[data-theme="light"] .motion-chip.coral-plate::before {
+  background: #d03030;
+}
+
+/* Dark-mode coral chip variants (base theme) */
+.motion-chip.coral {
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.8);
+  border: 1px solid rgba(255,255,255,.1);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-variant-numeric: tabular-nums;
+}
+.motion-chip.coral::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f0a030;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.motion-chip.coral-plate {
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.8);
+  border: 1px solid rgba(255,255,255,.1);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.motion-chip.coral-plate::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
 
 /* Motion empty state in light mode */
 [data-theme="light"] .motion-empty { color: var(--text3); border-color: var(--border); }
@@ -2270,6 +2182,10 @@ textarea:focus-visible {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       LLM Cost
     </button>
+    <button class="nav-item" data-section="grafana" onclick="navigate(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Grafana
+    </button>
     <div class="nav-group-label mt-1">Manage</div>
 
     <button class="nav-item" data-section="sessions" onclick="navigate(this)">
@@ -2283,6 +2199,10 @@ textarea:focus-visible {
     <button class="nav-item" data-section="tools" onclick="navigate(this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
       Tools
+    </button>
+    <button class="nav-item" data-section="selfheal" onclick="navigate(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Self-Heal
     </button>
     <button class="nav-item admin-only" data-section="users" onclick="navigate(this)" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
@@ -2796,193 +2716,162 @@ textarea:focus-visible {
 
     <!-- ══════════════ FIND ANYTHING ══════════════ -->
     <div id="section-motion" class="section">
+      <div class="fa-layout">
 
-      <!-- Search header -->
-      <div class="fa-header">
-        <div class="fa-search-wrap">
-          <svg class="fa-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input id="motion-query" type="text" class="fa-search-input" placeholder="Search clips, events, or locations…" onkeydown="if(event.key==='Enter')searchMotionClips()">
-          <button class="fa-search-btn" onclick="searchMotionClips()">Search</button>
-        </div>
+        <!-- ── Sidebar ── -->
+        <div class="fa-sidebar" id="fa-sidebar">
 
-        <!-- Camera filter pills — JS populates this with motion-camera-item buttons -->
-        <div class="fa-pill-row" id="motion-camera-list"></div>
+          <!-- Search -->
+          <div class="fa-sidebar-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input id="fa-search-input" type="text" placeholder="Find anything…" onkeydown="if(event.key==='Enter')faSearch()" oninput="faSearchDebounced()">
+          </div>
 
-        <!-- Hidden form controls read by JS filter functions -->
-        <select id="motion-camera" style="display:none" onchange="setMotionCamera(this.value)"></select>
-        <select id="motion-event-type" style="display:none" onchange="setMotionEventType(this.value)"></select>
-        <select id="motion-group-mode" style="display:none" onchange="setMotionGroupMode(this.value)">
-          <option value="day">Day</option>
-          <option value="event_type">Event Type</option>
-          <option value="source">Source</option>
-          <option value="status">Status</option>
-        </select>
-        <select id="motion-preset" style="display:none" onchange="setMotionPreset(this.value)">
-          <option value="">Custom search</option>
-          <option value="person at door">Person at door</option>
-          <option value="vehicle in driveway">Vehicle in driveway</option>
-          <option value="package delivery">Package delivery</option>
-          <option value="motion in garden">Motion in garden</option>
-          <option value="person near outdoor 1">Person near Outdoor 1</option>
-          <option value="person near outdoor 2">Person near Outdoor 2</option>
-          <option value="doorbell visitor">Doorbell visitor</option>
-        </select>
-        <input id="motion-date" type="date" style="display:none">
-        <input id="motion-start" type="time" style="display:none">
-        <input id="motion-end" type="time" style="display:none">
-      </div>
-
-      <!-- View tabs -->
-      <div class="fa-tabs">
-        <button class="fa-tab active" id="fa-tab-clips" onclick="
-          document.getElementById('fa-pane-clips').style.display='';
-          document.getElementById('fa-pane-history').style.display='none';
-          document.querySelectorAll('.fa-tab').forEach(t=>t.classList.remove('active'));
-          this.classList.add('active');
-        ">Motion Archive</button>
-        <button class="fa-tab" id="fa-tab-history" onclick="
-          document.getElementById('fa-pane-clips').style.display='none';
-          document.getElementById('fa-pane-history').style.display='';
-          document.querySelectorAll('.fa-tab').forEach(t=>t.classList.remove('active'));
-          this.classList.add('active');
-          loadEventHistory();
-        ">Event History</button>
-      </div>
-
-      <!-- Stats row -->
-      <div class="fa-stats-row">
-        <span id="motion-results-count" class="fa-count-badge">
-          <span class="fa-live-dot"></span>0 results
-        </span>
-        <span id="motion-results-sub" class="fa-results-sub">Recent Nova-indexed motion clips</span>
-        <!-- JS compat: hidden KPI spans -->
-        <span id="motion-count-hero" style="display:none">0</span>
-        <span id="motion-mode-hero" style="display:none">Recent</span>
-        <span id="motion-count-chip" style="display:none">0</span>
-        <span id="motion-mode-chip" style="display:none">Recent</span>
-        <span id="motion-count-chip-body" style="display:none">0</span>
-        <span id="motion-mode-chip-body" style="display:none">Recent</span>
-      </div>
-
-      <!-- Activity timeline -->
-      <div class="fa-timeline">
-        <div class="fa-timeline-head">
-          <span class="fa-section-label">Activity — last 24h</span>
-          <span id="motion-activity-note" class="fa-timeline-note"></span>
-        </div>
-        <div id="motion-activity-bars" class="motion-activity-bars"></div>
-      </div>
-
-      <!-- Pane: Motion Archive -->
-      <div id="fa-pane-clips">
-        <div class="motion-archive-toolbar">
-          <button id="mc-select-all-btn" class="btn btn-outline btn-sm" onclick="_motionSelectAll()">Select All</button>
-          <button id="mc-deselect-btn" class="btn btn-outline btn-sm" style="display:none" onclick="_motionDeselectAll()">Deselect All</button>
-          <button id="mc-delete-selected-btn" class="btn btn-danger btn-sm" style="display:none" onclick="_deleteSelectedMotionClips()">Delete Selected</button>
-          <button id="mc-delete-all-btn" class="btn btn-danger btn-sm" onclick="_deleteAllMotionClips()">Delete All Clips</button>
-        </div>
-        <div id="motion-grid" class="motion-grid">
-          <div class="motion-empty">Loading motion archive…</div>
-        </div>
-      </div>
-
-      <!-- Pane: Event History -->
-      <div id="fa-pane-history" style="display:none">
-
-        <!-- Workflow queue -->
-        <div class="fa-queue-card">
-          <div class="fa-queue-head">
-            <span class="fa-section-label">Open Loop Queue</span>
-            <div class="flex-row flex-wrap gap-2">
-              <button class="btn btn-outline btn-sm" onclick="runEventHistoryWorkflow({ includeReminders: true, includeEscalations: false })">Apply Reminders</button>
-              <button class="btn btn-outline btn-sm" onclick="runEventHistoryWorkflow({ includeReminders: false, includeEscalations: true })">Apply Escalations</button>
+          <!-- Cameras -->
+          <div class="fa-filter-section" id="fa-filter-cameras">
+            <div class="fa-filter-header" onclick="this.parentElement.classList.toggle('collapsed')">
+              <span class="fa-filter-title">Cameras</span>
+              <svg class="fa-filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="fa-filter-body">
+              <div class="fa-check-list" id="fa-camera-list">
+                <label class="fa-check-item"><input type="checkbox" checked value="" onchange="faApplyFilters()"> All Cameras</label>
+              </div>
             </div>
           </div>
-          <div class="fa-queue-chips" id="motion-history-open-loop"></div>
+
+          <!-- Time Range -->
+          <div class="fa-filter-section" id="fa-filter-time">
+            <div class="fa-filter-header" onclick="this.parentElement.classList.toggle('collapsed')">
+              <span class="fa-filter-title">Time Range</span>
+              <svg class="fa-filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="fa-filter-body">
+              <div class="fa-time-btns">
+                <button class="fa-time-btn" onclick="faSetTimeRange('1h',this)">1H</button>
+                <button class="fa-time-btn" onclick="faSetTimeRange('1d',this)">1D</button>
+                <button class="fa-time-btn active" onclick="faSetTimeRange('1w',this)">1W</button>
+                <button class="fa-time-btn" onclick="faSetTimeRange('1m',this)">1M</button>
+              </div>
+              <input id="fa-date-input" type="date" onchange="faApplyFilters()" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;color:var(--text);margin-top:4px;">
+            </div>
+          </div>
+
+          <!-- Event Type -->
+          <div class="fa-filter-section" id="fa-filter-events">
+            <div class="fa-filter-header" onclick="this.parentElement.classList.toggle('collapsed')">
+              <span class="fa-filter-title">Event Type</span>
+              <svg class="fa-filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="fa-filter-body">
+              <div class="fa-check-list">
+                <label class="fa-check-item"><input type="checkbox" value="person" onchange="faApplyFilters()"> Person</label>
+                <label class="fa-check-item"><input type="checkbox" value="vehicle" onchange="faApplyFilters()"> Vehicle</label>
+                <label class="fa-check-item"><input type="checkbox" value="delivery" onchange="faApplyFilters()"> Delivery</label>
+                <label class="fa-check-item"><input type="checkbox" value="package" onchange="faApplyFilters()"> Package</label>
+                <label class="fa-check-item"><input type="checkbox" value="doorbell" onchange="faApplyFilters()"> Doorbell</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Flagged -->
+          <div class="fa-filter-section">
+            <label class="fa-check-item" style="padding:10px 6px;">
+              <input type="checkbox" id="fa-flagged-only" onchange="faApplyFilters()">
+              <span style="font-weight:600;">⚑ Flagged Only</span>
+            </label>
+          </div>
+
+          <!-- Group By -->
+          <div class="fa-filter-section" id="fa-filter-groupby">
+            <div class="fa-filter-header" onclick="this.parentElement.classList.toggle('collapsed')">
+              <span class="fa-filter-title">Group By</span>
+              <svg class="fa-filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="fa-filter-body">
+              <div class="fa-time-btns" style="flex-wrap:wrap;">
+                <button class="fa-time-btn active" onclick="faSetGroupBy('none',this)">None</button>
+                <button class="fa-time-btn" onclick="faSetGroupBy('day',this)">Day</button>
+                <button class="fa-time-btn" onclick="faSetGroupBy('camera',this)">Camera</button>
+                <button class="fa-time-btn" onclick="faSetGroupBy('type',this)">Type</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- View toggle -->
+          <div class="fa-filter-section">
+            <div class="fa-time-btns">
+              <button class="fa-time-btn active" id="fa-view-grid" onclick="faSetView('grid')">Archive</button>
+              <button class="fa-time-btn" id="fa-view-history" onclick="faSetView('history')">History</button>
+            </div>
+          </div>
+
+          <!-- Bulk select -->
+          <div class="fa-filter-section">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label class="fa-check-item" style="padding:6px;">
+                <input type="checkbox" id="fa-bulk-toggle" onchange="faToggleBulkMode(this.checked)">
+                <span style="font-weight:600;">Select Multiple</span>
+              </label>
+            </div>
+            <div id="fa-bulk-actions" style="display:none;padding:6px 0;">
+              <div style="font-size:11px;color:var(--text3);margin-bottom:6px;"><span id="fa-bulk-count">0</span> selected</div>
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-outline btn-sm" onclick="faBulkDelete()" style="font-size:11px;">Delete Selected</button>
+                <button class="btn btn-outline btn-sm" onclick="faBulkClearSelection()" style="font-size:11px;">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Storage stats -->
+          <div class="fa-sidebar-stats" id="fa-stats">
+            <span><em>Clips</em> <strong id="fa-stat-total">—</strong></span>
+            <span><em>Flagged</em> <strong id="fa-stat-flagged">—</strong></span>
+            <span><em>Disk</em> <strong id="fa-stat-disk">—</strong></span>
+          </div>
         </div>
 
-        <!-- History filters -->
-        <div class="fa-history-bar">
-          <div class="field" style="margin:0;min-width:130px;flex:1;">
-            <label for="event-history-preset">Preset</label>
-            <select id="event-history-preset" onchange="applyEventHistoryPreset(this.value)">
-              <option value="">Custom View</option>
-              <option value="needs_attention">Needs Attention</option>
-              <option value="deliveries">Deliveries</option>
-              <option value="door_events">Door Events</option>
-              <option value="motion_review">Motion Review</option>
-            </select>
-          </div>
-          <div class="field" style="margin:0;min-width:160px;flex:2;">
-            <label for="event-history-query">Search</label>
-            <input id="event-history-query" type="text" placeholder="Search events, notes, or sources" onkeydown="handleEventHistorySearchKey(event)">
-          </div>
-          <div class="field" style="margin:0;min-width:110px;flex:1;">
-            <label for="event-history-window">Window</label>
-            <select id="event-history-window" onchange="setEventHistoryWindow(this.value)">
-              <option value="24h">Last 24h</option>
-              <option value="3d">Last 3 days</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-            </select>
-          </div>
-          <div class="field" style="margin:0;min-width:110px;flex:1;">
-            <label for="event-history-kind">Kind</label>
-            <select id="event-history-kind" onchange="setEventHistoryKind(this.value)">
-              <option value="">All Kinds</option>
-            </select>
-          </div>
-          <div class="field" style="margin:0;min-width:120px;flex:1;">
-            <label for="event-history-type">Event Type</label>
-            <select id="event-history-type" onchange="setEventHistoryEventType(this.value)">
-              <option value="">All Event Types</option>
-            </select>
-          </div>
-          <div class="field" style="margin:0;min-width:110px;flex:1;">
-            <label for="event-history-source">Source</label>
-            <select id="event-history-source" onchange="setEventHistorySource(this.value)">
-              <option value="">All Sources</option>
-            </select>
-          </div>
-          <div class="field" style="margin:0;min-width:110px;flex:1;">
-            <label for="event-history-status">Status</label>
-            <select id="event-history-status" onchange="setEventHistoryStatus(this.value)">
-              <option value="">All Statuses</option>
-            </select>
-          </div>
-          <div class="field" style="margin:0;min-width:110px;flex:1;">
-            <label for="event-history-group">Group By</label>
-            <select id="event-history-group" onchange="setEventHistoryGroup(this.value)">
-              <option value="time">Time</option>
-              <option value="status">Status</option>
-              <option value="event_type">Event Type</option>
-              <option value="source">Source</option>
-            </select>
-          </div>
-          <button class="btn btn-outline btn-sm" onclick="resetEventHistoryFilters()" style="align-self:flex-end;flex-shrink:0;">Reset</button>
-        </div>
+        <!-- Mobile sidebar toggle -->
+        <button class="fa-mobile-toggle btn btn-ghost" onclick="document.getElementById('fa-sidebar').classList.toggle('open')" style="position:fixed;bottom:20px;left:20px;z-index:901;background:var(--accent);color:#fff;border-radius:50%;width:48px;height:48px;font-size:20px;display:none;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.4);">☰</button>
+        <div class="fa-sidebar-overlay" onclick="document.getElementById('fa-sidebar').classList.remove('open')"></div>
 
-        <div id="motion-history-list" class="motion-history-list">
-          <div class="motion-empty">Loading event history…</div>
-        </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
-          <button class="btn btn-outline btn-sm" onclick="loadOlderEventHistory()">Older</button>
-          <button class="btn btn-outline btn-sm" onclick="resetEventHistoryPaging()">Newest</button>
+        <!-- ── Main content ── -->
+        <div class="fa-main" id="fa-main">
+
+          <!-- Expanded player (hidden by default) -->
+          <div class="fa-player" id="fa-player">
+            <div class="fa-player-header">
+              <span class="fa-player-dot"></span>
+              <span class="fa-player-camera" id="fa-player-camera"></span>
+              <span class="fa-player-time" id="fa-player-time"></span>
+              <a class="fa-player-link" id="fa-player-timeline-link" onclick="faGoToTimeline()" style="cursor:pointer;">Go to Timeline</a>
+              <div class="fa-player-actions">
+                <button onclick="faToggleFlag()" title="Flag" id="fa-player-flag-btn">⚑</button>
+                <button onclick="faDownloadClip()" title="Download">⬇</button>
+                <button onclick="faDeleteClip()" title="Delete">🗑</button>
+                <button onclick="faCollapsePlayer()" title="Close">✕</button>
+              </div>
+            </div>
+            <video id="fa-player-video" controls></video>
+            <div class="fa-player-desc" id="fa-player-desc"></div>
+            <div class="fa-player-related" id="fa-player-related"></div>
+          </div>
+
+          <!-- Thumbnail grid -->
+          <div class="fa-grid" id="fa-grid"></div>
+
+          <!-- Event History pane (hidden by default) -->
+          <div class="fa-history-pane" id="fa-history-pane">
+            <div id="motion-history-controls" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"></div>
+            <div id="motion-history-list"></div>
+            <div id="motion-history-metrics" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:11px;color:var(--text3);"></div>
+            <div id="motion-history-status-mix"></div>
+            <div id="motion-history-type-mix"></div>
+            <div id="motion-history-source-mix"></div>
+          </div>
+
         </div>
       </div>
-
-      <!-- JS compat: hidden elements referenced by render functions -->
-      <div style="display:none">
-        <div id="motion-insights-note"></div>
-        <div id="motion-history-note"></div>
-        <div id="motion-insight-types"></div>
-        <div id="motion-insight-sources"></div>
-        <div id="motion-insight-statuses"></div>
-        <div id="motion-history-status-mix"></div>
-        <div id="motion-history-type-mix"></div>
-        <div id="motion-history-source-mix"></div>
-      </div>
-
     </div>
 
 
@@ -3179,6 +3068,127 @@ textarea:focus-visible {
       </div>
     </div>
 
+    <!-- ══════════════ GRAFANA ══════════════ -->
+    <div id="section-grafana" class="section">
+      <div class="page-header">
+        <div class="page-title">Grafana</div>
+        <div class="page-sub">Nova metrics, activity &amp; home energy dashboards</div>
+        <a class="btn btn-outline" href="https://192.168.0.249:3443" target="_blank" style="margin-left:auto;text-decoration:none;">&#8599; Open Full Grafana</a>
+      </div>
+
+      <!-- Dashboard tabs -->
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="gf-tab-health"   onclick="switchGrafana('health')"   style="font-size:12px;">Nova Health</button>
+        <button class="btn btn-outline" id="gf-tab-activity" onclick="switchGrafana('activity')" style="font-size:12px;">Nova Activity</button>
+        <button class="btn btn-outline" id="gf-tab-energy"   onclick="switchGrafana('energy')"   style="font-size:12px;">Home Energy</button>
+      </div>
+
+      <!-- Iframe embed — fills available height -->
+      <div style="position:relative;width:100%;height:calc(100vh - 220px);border-radius:10px;overflow:hidden;border:1px solid var(--border);">
+        <iframe id="grafana-frame"
+          src="https://192.168.0.249:3443/d/nova-health/nova-health?orgId=1&kiosk&theme=dark&refresh=1m"
+          style="width:100%;height:100%;border:none;background:var(--surface);"
+          allow="fullscreen">
+        </iframe>
+      </div>
+    </div>
+
+    <!-- ══════════════ SELF-HEAL ══════════════ -->
+
+    <div id="section-selfheal" class="section">
+      <div class="page-header">
+        <div class="page-title">Self-Heal</div>
+        <div class="page-sub">Autonomous error detection &amp; repair via Claude Code</div>
+        <button class="btn btn-outline" onclick="loadSelfHeal()" style="margin-left:auto">&#8635; Refresh</button>
+        <button class="btn btn-outline" onclick="shTestInject()" style="font-size:12px;">&#9654; Inject Test Error</button>
+      </div>
+
+      <!-- Status bar -->
+      <div id="sh-status-bar" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+        <div class="stat-card"><div class="stat-val" id="sh-stat-status">—</div><div class="stat-label">Status</div></div>
+        <div class="stat-card"><div class="stat-val" id="sh-stat-uptime">—</div><div class="stat-label">Uptime</div></div>
+        <div class="stat-card"><div class="stat-val" id="sh-stat-errors">—</div><div class="stat-label">Errors Detected</div></div>
+        <div class="stat-card"><div class="stat-val" id="sh-stat-applied">—</div><div class="stat-label">Patches Applied</div></div>
+        <div class="stat-card"><div class="stat-val" id="sh-stat-rejected">—</div><div class="stat-label">Fixes Rejected</div></div>
+        <div class="stat-card"><div class="stat-val" id="sh-stat-pending">—</div><div class="stat-label">Pending</div></div>
+      </div>
+
+      <!-- Pending fixes -->
+      <div id="sh-pending-section" style="display:none;margin-bottom:24px;">
+        <h3 style="margin:0 0 12px;font-size:14px;font-weight:600;">Pending Fixes</h3>
+        <div id="sh-pending-list"></div>
+      </div>
+
+      <!-- Config -->
+      <details id="sh-config-details" style="margin-bottom:24px;">
+        <summary style="cursor:pointer;font-size:14px;font-weight:600;padding:6px 0;">Configuration</summary>
+        <div style="margin-top:12px;display:grid;gap:10px;max-width:520px;">
+          <div class="field">
+            <label style="font-size:12px;color:var(--text3);">Anthropic API Key <span style="color:var(--text3);font-weight:400;">(primary)</span></label>
+            <div style="display:flex;gap:8px;">
+              <input id="sh-cfg-api-key" type="password" placeholder="sk-ant-..." style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);">
+              <button class="btn btn-outline" style="font-size:12px;" onclick="shToggleKeyVisibility('sh-cfg-api-key', this)">Show</button>
+            </div>
+          </div>
+          <div class="field">
+            <label style="font-size:12px;color:var(--text3);">OpenAI API Key <span style="color:var(--text3);font-weight:400;">(fallback)</span></label>
+            <div style="display:flex;gap:8px;">
+              <input id="sh-cfg-openai-key" type="password" placeholder="sk-..." style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);">
+              <button class="btn btn-outline" style="font-size:12px;" onclick="shToggleKeyVisibility('sh-cfg-openai-key', this)">Show</button>
+            </div>
+          </div>
+          <div class="field">
+            <label style="font-size:12px;color:var(--text3);">OpenAI Model</label>
+            <select id="sh-cfg-openai-model" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);">
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+              <option value="gpt-4-turbo">gpt-4-turbo</option>
+              <option value="o3-mini">o3-mini</option>
+            </select>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="field">
+              <label style="font-size:12px;color:var(--text3);">Approval Timeout (s)</label>
+              <input id="sh-cfg-approval-timeout" type="number" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);">
+            </div>
+            <div class="field">
+              <label style="font-size:12px;color:var(--text3);">Dedup Window (s)</label>
+              <input id="sh-cfg-dedup-window" type="number" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);">
+            </div>
+            <div class="field">
+              <label style="font-size:12px;color:var(--text3);">Claude Timeout (s)</label>
+              <input id="sh-cfg-claude-timeout" type="number" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);">
+            </div>
+            <div class="field">
+              <label style="font-size:12px;color:var(--text3);">Log Level</label>
+              <select id="sh-cfg-log-level" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);">
+                <option>DEBUG</option><option>INFO</option><option>WARNING</option><option>ERROR</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button class="btn btn-primary" style="font-size:12px;" onclick="shSaveConfig()">Save Configuration</button>
+            <span id="sh-cfg-status" style="font-size:12px;color:var(--text3);"></span>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">⚠️ Saving restarts the self-heal service to apply changes.</div>
+        </div>
+      </details>
+
+      <!-- Event log -->
+      <h3 style="margin:0 0 12px;font-size:14px;font-weight:600;">Event Log</h3>
+      <table class="table" style="font-size:12px;">
+        <thead><tr>
+          <th style="width:160px">Time</th>
+          <th style="width:140px">Type</th>
+          <th style="width:180px">Event / Service</th>
+          <th>Details</th>
+        </tr></thead>
+        <tbody id="sh-events-tbody">
+          <tr><td colspan="4" class="text-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- ══════════════ USERS ══════════════ -->
 
 
@@ -3235,57 +3245,6 @@ textarea:focus-visible {
 
   </div><!-- /content -->
 </div><!-- /main -->
-
-<div id="motion-modal" class="motion-modal" onclick="closeMotionModal(event)">
-  <div class="motion-modal-card">
-    <div class="motion-modal-head">
-      <div>
-        <div id="motion-modal-title" class="motion-modal-title">Motion Clip</div>
-        <div id="motion-modal-time" class="motion-card-time"></div>
-      </div>
-      <button class="motion-modal-close" onclick="closeMotionModal(event)">&#x2715;</button>
-    </div>
-    <div class="motion-modal-body">
-      <div class="motion-modal-stage">
-        <div class="motion-modal-strip" id="motion-modal-strip"></div>
-        <video id="motion-modal-video" controls preload="metadata"></video>
-        <div id="motion-modal-fallback" class="motion-modal-fallback">
-          <div class="motion-modal-fallback-copy">
-            <div class="motion-modal-fallback-label">Event Review</div>
-            <div id="motion-modal-fallback-title" class="motion-modal-fallback-title">Event</div>
-            <div id="motion-modal-fallback-sub" class="motion-modal-fallback-sub">No linked clip is available for this event.</div>
-          </div>
-        </div>
-      </div>
-      <div class="motion-modal-side">
-        <div class="motion-modal-nav">
-          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(-1)">&#8592; Previous</button>
-          <button class="btn btn-outline btn-sm" onclick="stepMotionModal(1)">Next &#8594;</button>
-        </div>
-        <div class="motion-meta-block">
-          <div class="motion-meta-label">AI Description</div>
-          <div id="motion-modal-desc" class="motion-meta-value">—</div>
-        </div>
-        <div class="motion-meta-block">
-          <div class="motion-meta-label">Nova Follow-up</div>
-          <div id="motion-modal-followup" class="motion-meta-value">—</div>
-        </div>
-        <div class="motion-meta-block">
-          <div class="motion-meta-label">Event Details</div>
-          <div id="motion-modal-meta" class="motion-meta-grid">—</div>
-        </div>
-        <div class="motion-meta-block">
-          <div class="motion-meta-label">Actions</div>
-          <div id="motion-modal-actions" class="motion-modal-nav"></div>
-        </div>
-        <div class="motion-meta-block">
-          <div class="motion-meta-label">Incident Note</div>
-          <textarea id="motion-modal-note" rows="3" placeholder="Add context for this status change…"></textarea>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <div class="toast-container"></div>
 
@@ -3365,7 +3324,7 @@ const TITLES = {
   'prompts-tuning':'Prompts & Tuning',
   acl:'ACL Rules', sessions:'Sessions', memory:'Memory',
   avatar:'Avatar', tools:'Tools', users:'Users',
-  decisions:'AI Decisions', motion:'Find Anything',
+  decisions:'AI Decisions', selfheal:'Self-Heal', motion:'Find Anything',
   costs:'LLM Cost', metrics:'System Metrics', pylog:'Server Logs',
 };
 
@@ -3557,8 +3516,9 @@ function navigate(el) {
   if (sec === 'users')     loadUsers();
   if (sec === 'speakers')  loadSpeakerConfig();
   if (sec === 'pylog')     initPylog();
-  if (sec === 'motion')    loadMotionClips();
+  if (sec === 'motion')    faInit();
   if (sec === 'tools')   { loadWakeStatus(); loadAnnouncementLog(); loadHeatingShadow(); }
+  if (sec === 'selfheal') loadSelfHeal();
 }
 
 function refreshSection() {
@@ -4367,7 +4327,7 @@ function renderMotionClips() {
     const duration = clip.duration_s ? `${clip.duration_s}s` : '—';
     const canonicalType = String(clip.canonical_event_type || '');
     const source = String(clip.event_source || '');
-    const coralDetections = Array.isArray(clip.extra?.coral_detections) ? clip.extra.coral_detections : [];
+    const coralDetections = typeof _faDedupCoral === 'function' ? _faDedupCoral(clip.extra?.coral_detections) : (Array.isArray(clip.extra?.coral_detections) ? clip.extra.coral_detections : []);
     const coralHasPlate = Boolean(clip.extra?.coral_has_plate);
     const plateNumber = String(clip.extra?.plate_number || '');
     card.innerHTML = `
@@ -4393,8 +4353,16 @@ function renderMotionClips() {
           ${canonicalType ? `<div class="motion-chip info">${_esc(canonicalType.replaceAll('_', ' '))}</div>` : ''}
           ${source ? `<div class="motion-chip">${_esc(source.replaceAll('_', ' '))}</div>` : ''}
           ${_motionSearchMode === 'ai' ? '<div class="motion-chip search">AI match</div>' : ''}
-          ${coralDetections.map(d => `<div class="motion-chip coral" title="Coral TPU detection">${_esc(d)}</div>`).join('')}
-          ${plateNumber ? `<div class="motion-chip coral-plate" title="Number plate read by Gemini">🚘 ${_esc(plateNumber)}</div>` : (coralHasPlate ? '<div class="motion-chip coral-plate" title="Plate-bearing vehicle detected">🚘 plate</div>' : '')}
+          ${coralDetections.map(d => {
+            const parsed = d.match(/^(\w+)\((\d+)%\)$/);
+            if (parsed) {
+              const score = parseInt(parsed[2], 10);
+              const dotColor = score >= 80 ? '#00b894' : score >= 50 ? '#f0a030' : '#ff6b6b';
+              return `<div class="motion-chip coral" title="Coral TPU · ${parsed[2]}% confidence"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${dotColor};margin-right:2px;"></span>${_esc(parsed[1])} <span style="color:var(--text3);font-weight:400;">${parsed[2]}%</span></div>`;
+            }
+            return `<div class="motion-chip coral" title="Coral TPU detection">${_esc(d)}</div>`;
+          }).join('')}
+          ${plateNumber ? `<div class="motion-chip coral-plate" title="Number plate read by Gemini"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;stroke-width:1.8;fill:none;vertical-align:-2px;margin-right:2px;"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h12"/></svg>${_esc(plateNumber)}</div>` : (coralHasPlate ? '<div class="motion-chip coral-plate" title="Plate-bearing vehicle detected"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;stroke-width:1.8;fill:none;vertical-align:-2px;margin-right:2px;"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h12"/></svg>plate</div>' : '')}
         </div>
         <div class="motion-card-desc">${_motionHighlight(clip.description || 'No AI description available.')}</div>
         ${note ? `<div class="motion-card-note">${_esc(note)}</div>` : ''}
@@ -4695,7 +4663,7 @@ function _eventDataRows(item) {
   const extra = data.extra || {};
   if (extra.open_loop_note && !item.open_loop_note) rows.push(['Open Loop', extra.open_loop_note]);
   if (Array.isArray(extra.coral_detections) && extra.coral_detections.length > 0) {
-    rows.push(['Coral TPU', extra.coral_detections.join(', ')]);
+    rows.push(['Coral TPU', _faDedupCoral(extra.coral_detections).join(', ')]);
   }
   if (extra.plate_number) rows.push(['Number Plate', extra.plate_number]);
   else if (extra.coral_has_plate) rows.push(['Plate-bearing', 'vehicle detected — plate not legible']);
@@ -7059,6 +7027,837 @@ async function saveCooldowns() {
     toast('Cooldowns saved — restart server to apply');
   } catch (e) { toast('Save failed: ' + e.message); }
 }
+
+// ── Find Anything — UniFi Protect-style ──────────────────────────────────────
+
+let _faClips = [];
+let _faActiveClipId = null;
+let _faTimeRange = '1w';
+let _faInitialized = false;
+let _faLoading = false;
+let _faHasMore = true;
+let _faPage = 0;
+const _FA_PAGE_SIZE = 50;
+let _faSearchTimer = null;
+let _faBulkMode = false;
+let _faBulkSelected = new Set();
+
+const _FA_CAMERA_LABELS = {
+  'camera.rlc_410w_fluent': 'Outdoor 1',
+  'camera.rlc_1224a_fluent': 'Outdoor 2',
+  'camera.reolink_video_doorbell_poe_fluent': 'Doorbell',
+  'camera.reolink_profile000_mainstream': 'Outdoor 1 HD',
+  'camera.outdoor2_profile000_mainstream': 'Outdoor 2 HD',
+  'camera.tangu_home_door_bell': 'Doorbell 2',
+};
+
+function _faCameraLabel(id) {
+  return _FA_CAMERA_LABELS[id] || id.replace('camera.', '').replace(/_/g, ' ').replace(/fluent|mainstream|profile000/gi, '').trim() || id;
+}
+
+function _faFormatTs(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d)) return ts;
+  const mon = d.toLocaleString('en-GB', { month: 'short' });
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${mon} ${day}, ${h}:${m}`;
+}
+
+function _faEventIcon(clip) {
+  const desc = ((clip.description || '') + ' ' + (clip.location || '')).toLowerCase();
+  const extra = clip.extra || {};
+  const coralDets = (Array.isArray(extra.coral_detections) ? extra.coral_detections : []).join(' ').toLowerCase();
+  // Delivery / package — box with arrow
+  if (extra.delivery || desc.includes('delivery') || desc.includes('package') || desc.includes('parcel'))
+    return '<svg viewBox="0 0 24 24"><path d="M12 3l9 4.5v9L12 21l-9-4.5v-9L12 3z"/><path d="M12 12l9-4.5"/><path d="M12 12v9"/><path d="M12 12L3 7.5"/><path d="M16.5 5.25L7.5 10"/></svg>';
+  // Doorbell — bell
+  if (desc.includes('doorbell') || desc.includes('door bell'))
+    return '<svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+  // Person
+  if (coralDets.includes('person') || desc.includes('person') || desc.includes('someone') || desc.includes('walking'))
+    return '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"/><path d="M12 8c-3.5 0-6 2.5-6 6v4h12v-4c0-3.5-2.5-6-6-6z"/></svg>';
+  // Vehicle
+  if (coralDets.includes('car') || coralDets.includes('truck') || coralDets.includes('bus') || desc.includes('vehicle') || desc.includes('car') || desc.includes('van'))
+    return '<svg viewBox="0 0 24 24"><path d="M5 17h14v-5l-2-5H7L5 12v5z"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/><path d="M5 12h14"/></svg>';
+  // Animal
+  if (coralDets.includes('dog') || coralDets.includes('cat') || coralDets.includes('bird'))
+    return '<svg viewBox="0 0 24 24"><path d="M10 5.172C10 3.782 8.423 2.679 6.5 3c-2.823.47-4.113 6.006-4 7 .137 1.217 1.5 2 2.5 2s2-.5 3-1.5c.52-.52 1-1.328 1-2.328z"/><path d="M14.267 5.172c0-1.39 1.577-2.493 3.5-2.172 2.823.47 4.113 6.006 4 7-.137 1.217-1.5 2-2.5 2s-2-.5-3-1.5c-.52-.52-1-1.328-1-2.328z"/><path d="M8 14v.5"/><path d="M16 14v.5"/><path d="M11.25 16.25h1.5L12 17l-.75-.75z"/><path d="M4.42 11.247A13.152 13.152 0 0 0 4 14.556C4 18.728 7.582 21 12 21s8-2.272 8-6.444a11.702 11.702 0 0 0-.493-3.309"/></svg>';
+  // Motion (generic) — no icon
+  return '';
+}
+
+async function faInit() {
+  if (!_faInitialized) {
+    _faInitialized = true;
+    faLoadStats();
+    // Infinite scroll — load more when near bottom
+    const main = document.getElementById('fa-main');
+    if (main) {
+      main.addEventListener('scroll', () => {
+        if (_faLoading || !_faHasMore) return;
+        if (main.scrollTop + main.clientHeight >= main.scrollHeight - 200) {
+          faLoadMore();
+        }
+      });
+    }
+  }
+  _faPage = 0;
+  _faHasMore = true;
+  _faClips = [];
+  await faLoadClips();
+}
+
+async function faLoadStats() {
+  try {
+    const s = await api('GET', '/admin/motion-clips/stats');
+    const el = (id) => document.getElementById(id);
+    if (el('fa-stat-total')) el('fa-stat-total').textContent = s.total_clips || 0;
+    if (el('fa-stat-flagged')) el('fa-stat-flagged').textContent = s.flagged_clips || 0;
+    if (el('fa-stat-disk')) el('fa-stat-disk').textContent = (s.disk_usage_mb || 0) + ' MB';
+  } catch (e) {}
+}
+
+function _faDateFilter() {
+  const dateInput = document.getElementById('fa-date-input');
+  if (dateInput && dateInput.value) return dateInput.value;
+  const now = new Date();
+  if (_faTimeRange === '1h') { now.setHours(now.getHours() - 1); return now.toISOString().slice(0, 10); }
+  if (_faTimeRange === '1d') { return now.toISOString().slice(0, 10); }
+  if (_faTimeRange === '1w') { now.setDate(now.getDate() - 7); return now.toISOString().slice(0, 10); }
+  if (_faTimeRange === '1m') { now.setMonth(now.getMonth() - 1); return now.toISOString().slice(0, 10); }
+  return '';
+}
+
+async function faLoadClips() {
+  const grid = document.getElementById('fa-grid');
+  if (!grid) return;
+  _faLoading = true;
+  grid.innerHTML = Array.from({length: 12}, () => '<div class="fa-card-skeleton"></div>').join('');
+
+  const query = (document.getElementById('fa-search-input') || {}).value || '';
+  const flagged = (document.getElementById('fa-flagged-only') || {}).checked;
+  const params = new URLSearchParams();
+  if (query) params.set('query', query);
+  if (flagged) params.set('flagged_only', '1');
+  params.set('limit', String(_FA_PAGE_SIZE));
+
+  // Camera filter
+  const camChecks = document.querySelectorAll('#fa-camera-list input[type=checkbox]:checked');
+  let selectedCam = '';
+  camChecks.forEach(cb => { if (cb.value) selectedCam = cb.value; });
+  if (selectedCam) params.set('camera', selectedCam);
+
+  try {
+    let clips;
+    if (query) {
+      const body = { query, camera_entity_id: selectedCam || undefined };
+      const res = await api('POST', '/admin/motion-clips/search', body);
+      clips = (res.clips || []).map(c => ({ ...c, ..._faSerialize(c) }));
+      _faHasMore = false; // search returns all results
+    } else {
+      const res = await api('GET', '/admin/motion-clips?' + params.toString());
+      clips = (res.clips || []).map(c => ({ ...c, ..._faSerialize(c) }));
+      _faHasMore = clips.length >= _FA_PAGE_SIZE;
+    }
+    _faClips = clips;
+    _faPage = 1;
+    faRenderGrid(clips);
+    faPopulateCameras(clips);
+  } catch (e) {
+    grid.innerHTML = '<div class="fa-empty"><div class="fa-empty-icon">📹</div><div class="fa-empty-title">Failed to load clips</div><div class="fa-empty-desc">' + (e.message || '') + '</div></div>';
+  } finally {
+    _faLoading = false;
+  }
+}
+
+async function faLoadMore() {
+  if (_faLoading || !_faHasMore) return;
+  _faLoading = true;
+  const params = new URLSearchParams();
+  params.set('limit', String(_FA_PAGE_SIZE));
+  params.set('offset', String(_faPage * _FA_PAGE_SIZE));
+  const flagged = (document.getElementById('fa-flagged-only') || {}).checked;
+  if (flagged) params.set('flagged_only', '1');
+  const camChecks = document.querySelectorAll('#fa-camera-list input[type=checkbox]:checked');
+  let selectedCam = '';
+  camChecks.forEach(cb => { if (cb.value) selectedCam = cb.value; });
+  if (selectedCam) params.set('camera', selectedCam);
+  try {
+    const res = await api('GET', '/admin/motion-clips?' + params.toString());
+    const newClips = (res.clips || []).map(c => ({ ...c, ..._faSerialize(c) }));
+    if (newClips.length < _FA_PAGE_SIZE) _faHasMore = false;
+    _faClips = _faClips.concat(newClips);
+    _faPage++;
+    faRenderGrid(_faClips);
+  } catch (e) {}
+  _faLoading = false;
+}
+
+function _faSerialize(c) {
+  return {
+    thumb_url: c.thumb_url || '',
+    video_url: c.video_url || '',
+    flagged: !!c.flagged,
+  };
+}
+
+function faRenderGrid(clips) {
+  const grid = document.getElementById('fa-grid');
+  if (!grid) return;
+
+  // Apply client-side event type filter
+  const eventTypes = _faGetEventTypeFilters();
+  const filtered = eventTypes.length ? clips.filter(c => _faMatchesEventType(c, eventTypes)) : clips;
+
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="fa-empty"><div class="fa-empty-icon">📹</div><div class="fa-empty-title">No clips found</div><div class="fa-empty-desc">Try adjusting your filters or time range</div></div>';
+    return;
+  }
+
+  // Group clips if group-by is active
+  const groups = _faGroupClips(filtered);
+  let html = '';
+  for (const group of groups) {
+    if (group.label) {
+      html += `<div style="grid-column:1/-1;padding:8px 4px 4px;font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);margin-top:8px;">${_esc(group.label)} <span style="font-weight:400;color:var(--text3);">(${group.clips.length})</span></div>`;
+    }
+    html += group.clips.map(clip => _faRenderCard(clip)).join('');
+  }
+  grid.innerHTML = html;
+}
+
+function _faParseCoralScore(detections) {
+  // Extract the highest confidence % from coral detections like ["person(85%)", "car(72%)"]
+  const deduped = _faDedupCoral(detections);
+  if (!deduped.length) return null;
+  let best = 0;
+  let bestLabel = '';
+  for (const d of deduped) {
+    const m = d.match(/^(\w+)\((\d+)%\)$/);
+    if (m) {
+      const pct = parseInt(m[2], 10);
+      if (pct > best) { best = pct; bestLabel = m[1]; }
+    }
+  }
+  return best > 0 ? { label: bestLabel, score: best } : null;
+}
+
+function _faDedupCoral(detections) {
+  // Keep only the highest confidence per label — handles legacy clips with dupes
+  if (!Array.isArray(detections) || !detections.length) return [];
+  const best = {};
+  for (const d of detections) {
+    const m = d.match(/^(\w+)\((\d+)%\)$/);
+    if (m) {
+      const label = m[1];
+      const pct = parseInt(m[2], 10);
+      if (!best[label] || pct > best[label]) best[label] = pct;
+    } else {
+      best[d] = best[d] || 0; // non-standard format, keep as-is
+    }
+  }
+  return Object.entries(best)
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, pct]) => pct > 0 ? `${label}(${pct}%)` : label);
+}
+
+function _faCoralBadgeColor(score) {
+  if (score >= 80) return 'rgba(0,184,148,.85)';   // green — high confidence
+  if (score >= 50) return 'rgba(230,165,0,.85)';    // amber — medium
+  return 'rgba(255,107,107,.85)';                    // red — low
+}
+
+function _faRenderCard(clip) {
+  const icon = _faEventIcon(clip);
+  const cam = _faCameraLabel(clip.camera_entity_id);
+  const time = _faFormatTs(clip.ts);
+  const thumb = clip.thumb_url
+    ? `<img src="${clip.thumb_url}" loading="lazy" alt="">`
+    : `<div class="fa-card-placeholder">📷</div>`;
+  const flagClass = clip.flagged ? ' flagged' : '';
+  const bulkCheck = _faBulkMode
+    ? `<input type="checkbox" class="fa-card-bulk" ${_faBulkSelected.has(clip.id) ? 'checked' : ''} onclick="event.stopPropagation();faBulkToggle(${clip.id},this.checked)" style="position:absolute;top:6px;left:6px;z-index:2;width:18px;height:18px;accent-color:var(--accent);">`
+    : '';
+  const extra = clip.extra || {};
+  const coralTop = _faParseCoralScore(extra.coral_detections);
+  const badgeHtml = coralTop
+    ? `<span class="fa-card-badge" style="background:${_faCoralBadgeColor(coralTop.score)}" title="${_faDedupCoral(extra.coral_detections).join(', ')}">${coralTop.score}%</span>`
+    : '';
+  const plateNumber = String(extra.plate_number || '');
+  const plateHtml = plateNumber
+    ? `<span class="fa-card-badge" style="bottom:42px;background:rgba(255,255,255,.08);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,100,100,.2);display:inline-flex;align-items:center;gap:3px;" title="Number plate"><svg viewBox="0 0 24 24" style="width:10px;height:10px;stroke:rgba(255,255,255,.7);stroke-width:1.8;fill:none;"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h12"/></svg>${_esc(plateNumber)}</span>`
+    : '';
+  return `<div class="fa-card${_faActiveClipId === clip.id ? ' selected' : ''}${_faBulkSelected.has(clip.id) ? ' selected' : ''}" data-id="${clip.id}" onclick="faExpandClip(${clip.id})">
+    <div class="fa-card-media">
+      ${bulkCheck}
+      ${thumb}
+      <div class="fa-card-overlay">
+        <span class="fa-card-camera">${_esc(cam)}</span>
+        <span class="fa-card-time">${_esc(time)}</span>
+      </div>
+      ${!_faBulkMode && icon ? `<span class="fa-card-type">${icon}</span>` : ''}
+      ${badgeHtml}
+      ${plateHtml}
+      <span class="fa-card-flag${flagClass}" onclick="event.stopPropagation();faToggleFlagCard(${clip.id})">${clip.flagged ? '★' : '☆'}</span>
+    </div>
+  </div>`;
+}
+
+function faPopulateCameras(clips) {
+  const list = document.getElementById('fa-camera-list');
+  if (!list) return;
+  const cameras = [...new Set(clips.map(c => c.camera_entity_id).filter(Boolean))];
+  const current = list.querySelector('input:checked')?.value || '';
+  list.innerHTML = '<label class="fa-check-item"><input type="checkbox" ' + (!current ? 'checked' : '') + ' value="" onchange="faSelectCamera(this)"> All Cameras</label>';
+  for (const cam of cameras) {
+    const label = _faCameraLabel(cam);
+    const checked = current === cam ? ' checked' : '';
+    list.innerHTML += `<label class="fa-check-item"><input type="checkbox"${checked} value="${_esc(cam)}" onchange="faSelectCamera(this)"> ${_esc(label)}</label>`;
+  }
+}
+
+function faSelectCamera(el) {
+  // Radio-style: uncheck others
+  document.querySelectorAll('#fa-camera-list input').forEach(cb => { if (cb !== el) cb.checked = false; });
+  if (!el.checked) { el.checked = true; } // at least one must be checked
+  faLoadClips();
+}
+
+function faSetTimeRange(range, btn) {
+  _faTimeRange = range;
+  document.querySelectorAll('.fa-time-btns .fa-time-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('fa-date-input').value = '';
+  faLoadClips();
+}
+
+function faSearch() { faLoadClips(); }
+function faApplyFilters() {
+  clearTimeout(_faSearchTimer);
+  _faSearchTimer = setTimeout(() => faLoadClips(), 300);
+}
+function faSearchDebounced() {
+  clearTimeout(_faSearchTimer);
+  _faSearchTimer = setTimeout(() => faLoadClips(), 300);
+}
+
+function _faGetEventTypeFilters() {
+  const checks = document.querySelectorAll('#fa-filter-events input[type=checkbox]:checked');
+  return [...checks].map(cb => cb.value).filter(Boolean);
+}
+
+function _faMatchesEventType(clip, types) {
+  if (!types.length) return true;
+  const desc = ((clip.description || '') + ' ' + JSON.stringify(clip.extra || {})).toLowerCase();
+  return types.some(t => {
+    if (t === 'person') return /person|someone|walking|man|woman/.test(desc);
+    if (t === 'vehicle') return /vehicle|car|van|truck|bus/.test(desc);
+    if (t === 'delivery') return /delivery|parcel|dhl|royal mail|amazon/.test(desc) || (clip.extra || {}).delivery;
+    if (t === 'package') return /package|parcel|box/.test(desc);
+    if (t === 'doorbell') return /doorbell|door bell|visitor|rang/.test(desc);
+    return false;
+  });
+}
+
+function faSetView(view) {
+  const gridEl = document.getElementById('fa-grid');
+  const playerEl = document.getElementById('fa-player');
+  const historyEl = document.getElementById('fa-history-pane');
+  const gridBtn = document.getElementById('fa-view-grid');
+  const histBtn = document.getElementById('fa-view-history');
+  if (view === 'history') {
+    if (gridEl) gridEl.style.display = 'none';
+    if (playerEl) playerEl.style.display = 'none';
+    if (historyEl) historyEl.style.display = '';
+    if (gridBtn) gridBtn.classList.remove('active');
+    if (histBtn) histBtn.classList.add('active');
+    if (typeof loadEventHistory === 'function') loadEventHistory();
+  } else {
+    if (gridEl) gridEl.style.display = '';
+    if (historyEl) historyEl.style.display = 'none';
+    if (gridBtn) gridBtn.classList.add('active');
+    if (histBtn) histBtn.classList.remove('active');
+  }
+}
+
+// ── Inline player ──
+
+function faExpandClip(clipId) {
+  const clip = _faClips.find(c => c.id === clipId);
+  if (!clip) return;
+  _faActiveClipId = clipId;
+
+  const player = document.getElementById('fa-player');
+  const video = document.getElementById('fa-player-video');
+  const camEl = document.getElementById('fa-player-camera');
+  const timeEl = document.getElementById('fa-player-time');
+  const descEl = document.getElementById('fa-player-desc');
+  const flagBtn = document.getElementById('fa-player-flag-btn');
+
+  if (camEl) camEl.textContent = _faCameraLabel(clip.camera_entity_id);
+  if (timeEl) timeEl.textContent = _faFormatTs(clip.ts);
+  if (descEl) {
+    let descHtml = _esc(clip.description || '');
+    // Append Coral TPU detection chips below description
+    const extra = clip.extra || {};
+    const coralDets = _faDedupCoral(extra.coral_detections);
+    const plateNum = String(extra.plate_number || '');
+    if (coralDets.length || plateNum) {
+      descHtml += '<div class="fa-detect-row">';
+      for (const d of coralDets) {
+        const parsed = d.match(/^(\w+)\((\d+)%\)$/);
+        if (parsed) {
+          const score = parseInt(parsed[2], 10);
+          const dotColor = _faCoralBadgeColor(score);
+          descHtml += `<span class="fa-detect-chip" title="Coral TPU · ${parsed[2]}% confidence"><span class="fa-detect-dot" style="background:${dotColor}"></span><span class="fa-detect-label">${_esc(parsed[1])}</span><span class="fa-detect-score">${parsed[2]}%</span></span>`;
+        } else {
+          descHtml += `<span class="fa-detect-chip" title="Coral TPU detection"><span class="fa-detect-dot" style="background:#f0a030"></span>${_esc(d)}</span>`;
+        }
+      }
+      if (plateNum) {
+        descHtml += `<span class="fa-detect-chip plate" title="Number plate"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h12"/><circle cx="7" cy="9" r=".5" fill="currentColor"/><circle cx="17" cy="9" r=".5" fill="currentColor"/></svg><span>${_esc(plateNum)}</span></span>`;
+      } else if (extra.coral_has_plate) {
+        descHtml += `<span class="fa-detect-chip plate" title="Plate-bearing vehicle"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h12"/></svg><span>plate detected</span></span>`;
+      }
+      descHtml += '</div>';
+    }
+    descEl.innerHTML = descHtml;
+  }
+  if (flagBtn) flagBtn.textContent = clip.flagged ? '★' : '⚑';
+  if (video && clip.video_url) {
+    video.src = clip.video_url;
+    video.load();
+  }
+  if (player) player.classList.add('show');
+
+  // Highlight selected card
+  document.querySelectorAll('.fa-card').forEach(c => c.classList.remove('selected'));
+  const card = document.querySelector(`.fa-card[data-id="${clipId}"]`);
+  if (card) card.classList.add('selected');
+
+  // Load related clips
+  faLoadRelated(clip);
+
+  // Scroll player into view
+  if (player) player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function faCollapsePlayer() {
+  _faActiveClipId = null;
+  const player = document.getElementById('fa-player');
+  const video = document.getElementById('fa-player-video');
+  if (video) { video.pause(); video.src = ''; }
+  if (player) player.classList.remove('show');
+  document.querySelectorAll('.fa-card').forEach(c => c.classList.remove('selected'));
+}
+
+async function faLoadRelated(clip) {
+  const container = document.getElementById('fa-player-related');
+  if (!container) return;
+  container.innerHTML = '';
+  // Show clips from same camera
+  const related = _faClips.filter(c => c.camera_entity_id === clip.camera_entity_id && c.id !== clip.id).slice(0, 10);
+  for (const r of related) {
+    const img = document.createElement('img');
+    img.className = 'fa-player-related-thumb' + (r.id === _faActiveClipId ? ' active' : '');
+    img.src = r.thumb_url || '';
+    img.alt = _faFormatTs(r.ts);
+    img.title = _faCameraLabel(r.camera_entity_id) + ' — ' + _faFormatTs(r.ts);
+    img.onclick = () => faExpandClip(r.id);
+    if (!r.thumb_url) { img.style.background = '#222'; img.style.minWidth = '80px'; }
+    container.appendChild(img);
+  }
+}
+
+async function faToggleFlag() {
+  if (!_faActiveClipId) return;
+  try {
+    const res = await api('POST', `/admin/motion-clips/${_faActiveClipId}/flag`);
+    const clip = _faClips.find(c => c.id === _faActiveClipId);
+    if (clip) clip.flagged = res.flagged;
+    const btn = document.getElementById('fa-player-flag-btn');
+    if (btn) btn.textContent = res.flagged ? '★' : '⚑';
+    faRenderGrid(_faClips);
+    faLoadStats();
+  } catch (e) { toast('Flag failed: ' + e.message); }
+}
+
+async function faToggleFlagCard(clipId) {
+  try {
+    const res = await api('POST', `/admin/motion-clips/${clipId}/flag`);
+    const clip = _faClips.find(c => c.id === clipId);
+    if (clip) clip.flagged = res.flagged;
+    faRenderGrid(_faClips);
+    faLoadStats();
+  } catch (e) { toast('Flag failed: ' + e.message); }
+}
+
+function faDownloadClip() {
+  if (!_faActiveClipId) return;
+  window.open(`/admin/motion-clips/${_faActiveClipId}/video?download=1`, '_blank');
+}
+
+async function faDeleteClip() {
+  if (!_faActiveClipId) return;
+  if (!confirm('Delete this clip?')) return;
+  try {
+    await api('DELETE', `/admin/motion-clips/${_faActiveClipId}`);
+    faCollapsePlayer();
+    _faClips = _faClips.filter(c => c.id !== _faActiveClipId);
+    faRenderGrid(_faClips);
+    faLoadStats();
+    toast('Clip deleted');
+  } catch (e) { toast('Delete failed: ' + e.message); }
+}
+
+
+// ── Grafana ──────────────────────────────────────────────────────────────────
+const GRAFANA_DASHBOARDS = {
+  health:   'https://192.168.0.249:3443/d/nova-health/nova-health?orgId=1&kiosk&theme=dark&refresh=1m',
+  activity: 'https://192.168.0.249:3443/d/nova-activity/nova-activity?orgId=1&kiosk&theme=dark&refresh=5m',
+  energy:   'https://192.168.0.249:3443/d/home-energy/home-energy?orgId=1&kiosk&theme=dark&refresh=5m',
+};
+function switchGrafana(key) {
+  document.getElementById('grafana-frame').src = GRAFANA_DASHBOARDS[key];
+  ['health','activity','energy'].forEach(k => {
+    const btn = document.getElementById('gf-tab-' + k);
+    btn.className = k === key ? 'btn btn-primary' : 'btn btn-outline';
+    btn.style.fontSize = '12px';
+  });
+}
+
+// ── Self-Heal ────────────────────────────────────────────────────────────────
+
+const _SH_API = () => '/admin/selfheal';
+
+const _SH_TYPE_LABELS = {
+  error_detected:  '🔴 Error detected',
+  deduplicated:    '⏭ Deduplicated',
+  no_source_file:  '⚠️ No source file',
+  claude_failed:   '💔 Claude failed',
+  fix_proposed:    '🔧 Fix proposed',
+  analysis_only:   '🔍 Analysis only',
+  approved:        '✅ Approved',
+  rejected:        '❌ Rejected',
+  auto_rejected:   '⏱ Auto-rejected',
+  apply_ok:        '✅ Patch applied',
+  apply_failed:    '💥 Apply failed',
+  restart_ok:      '🔄 Restarted',
+  restart_failed:  '💥 Restart failed',
+};
+
+async function _shFetch(path, opts={}) {
+  const r = await fetch(_SH_API() + path, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function _shFmtUptime(s) {
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+  return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+}
+
+async function loadSelfHeal() {
+  // Status
+  try {
+    const st = await _shFetch('/status');
+    document.getElementById('sh-stat-status').innerHTML =
+      '<span style="color:var(--green,#34c759)">&#9679; Running</span>';
+    document.getElementById('sh-stat-uptime').textContent = _shFmtUptime(st.uptime_seconds);
+    document.getElementById('sh-stat-errors').textContent = st.errors_detected ?? '—';
+    document.getElementById('sh-stat-applied').textContent = st.patches_applied ?? '—';
+    document.getElementById('sh-stat-rejected').textContent = st.fixes_rejected ?? '—';
+    document.getElementById('sh-stat-pending').textContent = st.pending_count ?? '—';
+  } catch(e) {
+    document.getElementById('sh-stat-status').innerHTML =
+      '<span style="color:var(--red,#ff3b30)">&#9679; Offline</span>';
+    ['sh-stat-uptime','sh-stat-errors','sh-stat-applied','sh-stat-rejected','sh-stat-pending']
+      .forEach(function(id){ document.getElementById(id).textContent = '—'; });
+  }
+
+  // Pending fixes
+  try {
+    const pending = await _shFetch('/pending');
+    const sec = document.getElementById('sh-pending-section');
+    const list = document.getElementById('sh-pending-list');
+    if (!pending.length) {
+      sec.style.display = 'none';
+    } else {
+      sec.style.display = '';
+      list.innerHTML = pending.map(function(f) {
+        const diffHtml = f.has_diff
+          ? '<pre style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:11px;overflow-x:auto;max-height:200px;white-space:pre;">' + _shEsc(f.diff) + '</pre>'
+          : '';
+        return '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px;">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+          + '<div style="font-weight:600;font-size:13px;">🔴 ' + _shEsc(f.event) + ' <span style="color:var(--text3);font-weight:400;">— ' + _shEsc(f.exc_type) + '</span></div>'
+          + '<div style="font-size:11px;color:var(--text3);">' + Math.floor(f.age_seconds/60) + 'm ago</div>'
+          + '</div>'
+          + '<div style="font-size:12px;color:var(--text2);margin-bottom:4px;">📄 ' + _shEsc(f.source_file) + '</div>'
+          + '<div style="font-size:12px;margin-bottom:10px;">' + _shEsc(f.summary) + '</div>'
+          + diffHtml
+          + '<div style="display:flex;gap:8px;margin-top:10px;">'
+          + '<button class="btn btn-primary" style="font-size:12px;" onclick="shApprove(\'' + f.fix_id + '\')">✅ Approve</button>'
+          + '<button class="btn btn-outline" style="font-size:12px;" onclick="shReject(\'' + f.fix_id + '\')">❌ Reject</button>'
+          + '</div></div>';
+      }).join('');
+    }
+  } catch(e) {
+    document.getElementById('sh-pending-section').style.display = 'none';
+  }
+
+  // Events
+  try {
+    const events = await _shFetch('/events?limit=100');
+    const tbody = document.getElementById('sh-events-tbody');
+    if (!events.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No events yet.</td></tr>';
+    } else {
+      tbody.innerHTML = events.map(function(e) {
+        const label = _SH_TYPE_LABELS[e.event_type] || e.event_type;
+        const time = e.ts_iso ? new Date(e.ts_iso).toLocaleString() : '—';
+        const detail = [e.summary, e.message].filter(Boolean).join(' ').slice(0, 120);
+        return '<tr>'
+          + '<td style="white-space:nowrap;color:var(--text3)">' + time + '</td>'
+          + '<td>' + label + '</td>'
+          + '<td style="font-size:11px;color:var(--text2)">' + _shEsc(e.log_event || e.service || '') + '</td>'
+          + '<td style="font-size:11px;color:var(--text2)">' + _shEsc(detail) + '</td>'
+          + '</tr>';
+      }).join('');
+    }
+  } catch(e) {
+    document.getElementById('sh-events-tbody').innerHTML =
+      '<tr><td colspan="4" class="text-muted">Could not load events.</td></tr>';
+  }
+
+  // Config — populate form fields
+  try {
+    const cfg = await _shFetch('/config');
+    const at = document.getElementById('sh-cfg-approval-timeout');
+    const dw = document.getElementById('sh-cfg-dedup-window');
+    const ct = document.getElementById('sh-cfg-claude-timeout');
+    const ll = document.getElementById('sh-cfg-log-level');
+    if (at && cfg.approval_timeout_seconds) at.value = cfg.approval_timeout_seconds;
+    if (dw && cfg.dedup_window_seconds) dw.value = cfg.dedup_window_seconds;
+    if (ct && cfg.claude_timeout_seconds) ct.value = cfg.claude_timeout_seconds;
+    if (ll && cfg.log_level) ll.value = cfg.log_level;
+    const om = document.getElementById('sh-cfg-openai-model');
+    if (om && cfg.openai_model) om.value = cfg.openai_model;
+  } catch(e) {
+    // non-fatal — form just stays empty
+  }
+}
+
+
+
+async function shTestInject() {
+  try {
+    const r = await fetch('/admin/selfheal-test', {method:'POST'});
+    const d = await r.json();
+    toast(d.message || 'Test error injected.');
+    setTimeout(loadSelfHeal, 8000);
+  } catch(e) { toast('Test failed: ' + e.message, 'err'); }
+}
+
+async function shSaveConfig() {
+  const apiKey = document.getElementById('sh-cfg-api-key').value.trim();
+  const openaiKey = document.getElementById('sh-cfg-openai-key').value.trim();
+  const openaiModel = document.getElementById('sh-cfg-openai-model').value;
+  const approvalTimeout = document.getElementById('sh-cfg-approval-timeout').value;
+  const dedupWindow = document.getElementById('sh-cfg-dedup-window').value;
+  const claudeTimeout = document.getElementById('sh-cfg-claude-timeout').value;
+  const logLevel = document.getElementById('sh-cfg-log-level').value;
+
+  const payload = {};
+  if (apiKey) payload['anthropic_api_key'] = apiKey;
+  if (openaiKey) payload['openai_api_key'] = openaiKey;
+  if (openaiModel) payload['openai_model'] = openaiModel;
+  if (approvalTimeout) payload['approval_timeout_seconds'] = parseInt(approvalTimeout);
+  if (dedupWindow) payload['dedup_window_seconds'] = parseInt(dedupWindow);
+  if (claudeTimeout) payload['claude_timeout_seconds'] = parseInt(claudeTimeout);
+  if (logLevel) payload['log_level'] = logLevel;
+
+  if (!Object.keys(payload).length) {
+    toast('No changes to save.', 'err');
+    return;
+  }
+
+  const statusEl = document.getElementById('sh-cfg-status');
+  statusEl.textContent = 'Saving…';
+  try {
+    const r = await fetch(_SH_API() + '/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.status);
+    statusEl.textContent = 'Saved. Restarting service…';
+    document.getElementById('sh-cfg-api-key').value = ''; document.getElementById('sh-cfg-openai-key').value = '';
+    // Restart nova-selfheal via Nova API
+    try {
+      await fetch('/admin/selfheal-restart', {method: 'POST'});
+    } catch(e) {}
+    setTimeout(() => { statusEl.textContent = ''; loadSelfHeal(); }, 3000);
+    toast('Configuration saved.');
+  } catch(e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    toast('Save failed: ' + e.message, 'err');
+  }
+}
+
+function shToggleKeyVisibility(id, btn) {
+  if (!id) id = 'sh-cfg-api-key';
+  const input = document.getElementById(id);
+  if (!btn) btn = input.nextElementSibling;
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    input.type = 'password';
+    btn.textContent = 'Show';
+  }
+}
+
+async function shApprove(fix_id) {
+  try {
+    await _shFetch('/pending/' + fix_id + '/approve', {method:'POST'});
+    toast('Fix approved — applying patch\u2026');
+    setTimeout(loadSelfHeal, 1500);
+  } catch(e) { toast('Approve failed: ' + e.message, 'err'); }
+}
+
+async function shReject(fix_id) {
+  try {
+    await _shFetch('/pending/' + fix_id + '/reject', {method:'POST'});
+    toast('Fix rejected.');
+    setTimeout(loadSelfHeal, 800);
+  } catch(e) { toast('Reject failed: ' + e.message, 'err'); }
+}
+
+function _shEsc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Group By ──
+
+let _faGroupBy = 'none';
+
+function faSetGroupBy(mode, btn) {
+  _faGroupBy = mode;
+  const parent = btn?.parentElement;
+  if (parent) parent.querySelectorAll('.fa-time-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  faRenderGrid(_faClips);
+}
+
+function _faGroupClips(clips) {
+  if (_faGroupBy === 'none') return [{ label: '', clips }];
+  const groups = {};
+  for (const clip of clips) {
+    let key;
+    if (_faGroupBy === 'day') {
+      key = clip.ts ? clip.ts.slice(0, 10) : 'Unknown';
+    } else if (_faGroupBy === 'camera') {
+      key = _faCameraLabel(clip.camera_entity_id);
+    } else if (_faGroupBy === 'type') {
+      key = _faEventIcon(clip) ? _faEventIcon(clip) + ' ' + _faGuessType(clip) : 'Motion';
+    } else {
+      key = 'All';
+    }
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(clip);
+  }
+  return Object.entries(groups).map(([label, clips]) => ({ label, clips }));
+}
+
+function _faGuessType(clip) {
+  const desc = ((clip.description || '') + ' ' + JSON.stringify(clip.extra || {})).toLowerCase();
+  if ((clip.extra || {}).delivery || desc.includes('delivery')) return 'Delivery';
+  if (desc.includes('doorbell') || desc.includes('visitor')) return 'Doorbell';
+  if (desc.includes('person') || desc.includes('someone') || desc.includes('walking')) return 'Person';
+  if (desc.includes('vehicle') || desc.includes('car') || desc.includes('van')) return 'Vehicle';
+  if (desc.includes('package') || desc.includes('parcel')) return 'Package';
+  return 'Motion';
+}
+
+// ── Go to Timeline ──
+
+function faGoToTimeline() {
+  if (!_faActiveClipId) return;
+  const clip = _faClips.find(c => c.id === _faActiveClipId);
+  if (!clip) return;
+  // Switch to Event History view filtered to this clip's time
+  faCollapsePlayer();
+  faSetView('history');
+}
+
+// ── Bulk select ──
+
+function faToggleBulkMode(on) {
+  _faBulkMode = on;
+  _faBulkSelected.clear();
+  document.getElementById('fa-bulk-actions').style.display = on ? '' : 'none';
+  _faUpdateBulkCount();
+  faRenderGrid(_faClips);
+}
+
+function faBulkToggle(clipId, checked) {
+  if (checked) _faBulkSelected.add(clipId);
+  else _faBulkSelected.delete(clipId);
+  _faUpdateBulkCount();
+}
+
+function _faUpdateBulkCount() {
+  const el = document.getElementById('fa-bulk-count');
+  if (el) el.textContent = _faBulkSelected.size;
+}
+
+function faBulkClearSelection() {
+  _faBulkSelected.clear();
+  _faUpdateBulkCount();
+  faRenderGrid(_faClips);
+}
+
+async function faBulkDelete() {
+  if (!_faBulkSelected.size) return;
+  if (!confirm(`Delete ${_faBulkSelected.size} selected clips?`)) return;
+  try {
+    await api('POST', '/admin/motion-clips/delete', { ids: [..._faBulkSelected] });
+    toast(`${_faBulkSelected.size} clips deleted`);
+    _faClips = _faClips.filter(c => !_faBulkSelected.has(c.id));
+    _faBulkSelected.clear();
+    _faUpdateBulkCount();
+    faRenderGrid(_faClips);
+    faLoadStats();
+  } catch (e) { toast('Bulk delete failed: ' + e.message); }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (!document.getElementById('section-motion')?.classList.contains('active')) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'Escape') faCollapsePlayer();
+  if (e.key === ' ' && _faActiveClipId) {
+    e.preventDefault();
+    const vid = document.getElementById('fa-player-video');
+    if (vid) vid.paused ? vid.play() : vid.pause();
+  }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    if (!_faActiveClipId || !_faClips.length) return;
+    const idx = _faClips.findIndex(c => c.id === _faActiveClipId);
+    if (idx < 0) return;
+    const next = e.key === 'ArrowRight' ? idx + 1 : idx - 1;
+    if (next >= 0 && next < _faClips.length) {
+      e.preventDefault();
+      faExpandClip(_faClips[next].id);
+    }
+  }
+});
 
 </script>
 </body>
