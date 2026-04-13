@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import re
 from datetime import datetime
 from typing import Any
@@ -541,7 +542,8 @@ class HAProxy:
         )
 
     async def fetch_camera_image(self, entity_id: str) -> bytes | None:
-        """Fetch a camera snapshot from HA. Returns raw image bytes or None on failure."""
+        """Fetch a camera snapshot from HA. Returns raw image bytes or None on failure.
+        Retries once after a short delay for transient failures (502/503/timeout)."""
         entity_id = self.resolve_camera_entity(entity_id)
         # ACL gate — treat camera reads as domain=camera, service=get_image
         if self._acl is not None and not self._acl.is_allowed("camera", "get_image", entity_id):
@@ -549,16 +551,29 @@ class HAProxy:
             logger.warning("ha_proxy.camera_acl_denied", entity_id=entity_id, reason=reason)
             return None
         url = f"{self._ha_url}/api/camera_proxy/{entity_id}"
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(url, headers=self._headers)
-                if resp.status_code == 200:
-                    return resp.content
-                logger.warning("ha_proxy.camera_fetch_failed", entity_id=entity_id, status=resp.status_code)
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(url, headers=self._headers)
+                    if resp.status_code == 200 and resp.content:
+                        return resp.content
+                    if attempt == 0 and resp.status_code in (502, 503, 504):
+                        logger.debug("ha_proxy.camera_fetch_retry", entity_id=entity_id, status=resp.status_code)
+                        await asyncio.sleep(1.0)
+                        continue
+                    logger.warning("ha_proxy.camera_fetch_failed", entity_id=entity_id, status=resp.status_code)
+                    return None
+            except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                if attempt == 0:
+                    logger.debug("ha_proxy.camera_fetch_retry", entity_id=entity_id, exc_type=type(exc).__name__)
+                    await asyncio.sleep(1.0)
+                    continue
+                logger.warning("ha_proxy.camera_fetch_failed", entity_id=entity_id, exc_type=type(exc).__name__)
                 return None
-        except Exception as exc:
-            logger.error("ha_proxy.camera_error", entity_id=entity_id, exc=str(exc))
-            return None
+            except Exception as exc:
+                logger.error("ha_proxy.camera_error", entity_id=entity_id, exc=repr(exc), exc_type=type(exc).__name__)
+                return None
+        return None
 
         # ── Diagnostics ───────────────────────────────────────────────────────
 
