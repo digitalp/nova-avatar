@@ -33,6 +33,11 @@ class HomeRuntimeConfig:
     vision_enabled_cameras: list[str] = field(default_factory=list)
     camera_room_map: dict[str, str] = field(default_factory=dict)  # camera_id → room_id slug
     sensor_shortcuts: dict[str, str] = field(default_factory=dict)
+    kitchen_watch_camera: str = "camera.tangu_home_kitchen"
+    kitchen_watch_tasks: dict[str, int] = field(default_factory=lambda: {"empty_kitchen_bin": 7200})
+    living_room_camera: str = "camera.reolink_living_room_profile000_mainstream"
+    blind_check_camera: str = "camera.reolink_living_room_profile000_mainstream"
+    blind_reminder_names: str = "Jason, Miya, Joel or Tse"
 
 
 def load_home_runtime_config() -> HomeRuntimeConfig:
@@ -59,7 +64,6 @@ def load_home_runtime_config() -> HomeRuntimeConfig:
         sensor_temp_exclude_prefixes=tuple(_as_str_list(raw.get("sensor_temp_exclude_prefixes"))),
         sensor_threshold_rules=_as_dict_of_dicts(raw.get("sensor_threshold_rules")),
         phone_notify_services=_as_str_list(raw.get("phone_notify_services")),
-        sensor_shortcuts=_as_str_dict(raw.get("sensor_shortcuts")),
         energy_summary_entities=_as_str_dict(raw.get("energy_summary_entities")),
         energy_device_entities=_as_str_dict(raw.get("energy_device_entities")),
         camera_labels=_as_str_dict(raw.get("camera_labels")),
@@ -67,6 +71,12 @@ def load_home_runtime_config() -> HomeRuntimeConfig:
         polling_only_cameras=_as_str_list(raw.get("polling_only_cameras")),
         vision_enabled_cameras=_as_str_list(raw.get("vision_enabled_cameras")),
         camera_room_map=_as_str_dict(raw.get("camera_room_map")),
+        sensor_shortcuts=_as_str_dict(raw.get("sensor_shortcuts")),
+        kitchen_watch_camera=str(raw.get("kitchen_watch_camera") or "camera.tangu_home_kitchen"),
+        kitchen_watch_tasks={str(k): int(v) for k, v in (raw.get("kitchen_watch_tasks") or {"empty_kitchen_bin": 7200}).items()},
+        living_room_camera=str(raw.get("living_room_camera") or "camera.reolink_living_room_profile000_mainstream"),
+        blind_check_camera=str(raw.get("blind_check_camera") or "camera.reolink_living_room_profile000_mainstream"),
+        blind_reminder_names=str(raw.get("blind_reminder_names") or "Jason, Miya, Joel or Tse"),
     )
 
 
