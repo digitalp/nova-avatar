@@ -3,12 +3,12 @@
  *
  * Install:
  *   Settings → Dashboards → Resources → Add
- *   URL:  https://192.168.0.249:8443/static/nova-avatar-card.js
+ *   URL:  https://<YOUR_SERVER>:8443/static/nova-avatar-card.js
  *   Type: JavaScript module
  *
  * Usage (YAML):
  *   type: custom:nova-avatar-card
- *   url:    https://192.168.0.249:8443/avatar?api_key=YOUR_KEY&session_id=ha-dashboard
+ *   url:    https://<YOUR_SERVER>:8443/avatar?api_key=YOUR_KEY&session_id=ha-dashboard
  *   height: 480px          # any CSS height value — default 480px
  *   title:  Nova           # optional card header label
  */
@@ -61,7 +61,7 @@ class NovaAvatarCard extends HTMLElement {
 
   static getStubConfig() {
     return {
-      url: 'https://192.168.0.249:8443/avatar?api_key=YOUR_KEY&session_id=ha-dashboard',
+      url: 'https://<YOUR_SERVER>:8443/avatar?api_key=YOUR_KEY&session_id=ha-dashboard',
       height: '480px',
     };
   }

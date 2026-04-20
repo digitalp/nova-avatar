@@ -215,6 +215,9 @@ async def test_rejects_update_entity_outside_homeassistant_domain(proxy):
     assert result.success is False
     assert "homeassistant" in result.message.lower()
     mock_post.assert_not_called()
+    assert result.success is False
+    assert "homeassistant" in result.message.lower()
+    mock_post.assert_not_called()
 
 
 # ── No ACL (permissive mode) ──────────────────────────────────────────────────

@@ -10,6 +10,14 @@ from avatar_backend.services.surface_state_service import SurfaceStateService
 from avatar_backend.services.ws_manager import ConnectionManager
 
 
+def _make_state(**kwargs):
+    from types import SimpleNamespace
+    ns = SimpleNamespace(**kwargs)
+    ns._container = ns
+    return ns
+
+
+
 class _FakeHAProxy:
     def resolve_camera_entity(self, entity_id: str) -> str:
         if entity_id == "camera.outdoor_2":
@@ -106,7 +114,7 @@ async def test_action_service_executes_recent_surface_transition():
         },
     )
 
-    app = SimpleNamespace(state=SimpleNamespace(surface_state_service=surface_state))
+    app = SimpleNamespace(state=_make_state(surface_state_service=surface_state))
     ack = await action_service.handle_surface_action(
         app=app,
         ws_mgr=ws_mgr,
@@ -141,7 +149,7 @@ async def test_action_service_can_open_related_camera_event():
         },
     )
 
-    app = SimpleNamespace(state=SimpleNamespace(
+    app = SimpleNamespace(state=_make_state(
         surface_state_service=surface_state,
         event_service=EventService(),
         ha_proxy=_FakeHAProxy(),
@@ -191,7 +199,7 @@ async def test_action_service_handles_event_history_actions_across_db_and_surfac
         },
     )
 
-    app = SimpleNamespace(state=SimpleNamespace(
+    app = SimpleNamespace(state=_make_state(
         surface_state_service=surface_state,
         metrics_db=metrics_db,
         event_store=event_store,
@@ -254,7 +262,7 @@ async def test_action_service_can_apply_open_loop_workflow_actions():
         },
     )
 
-    app = SimpleNamespace(state=SimpleNamespace(
+    app = SimpleNamespace(state=_make_state(
         surface_state_service=surface_state,
         metrics_db=metrics_db,
         event_store=event_store,
@@ -303,7 +311,7 @@ async def test_action_service_handles_event_history_followup_action():
         session_id="admin_event_history",
         processing_time_ms=42,
     )))
-    app = SimpleNamespace(state=SimpleNamespace(conversation_service=conversation))
+    app = SimpleNamespace(state=_make_state(conversation_service=conversation))
 
     result = await action_service.handle_event_history_domain_action(
         app=app,

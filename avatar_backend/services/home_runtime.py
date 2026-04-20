@@ -24,6 +24,15 @@ class HomeRuntimeConfig:
     sensor_snapshot_exclude_prefixes: tuple[str, ...] = ()
     sensor_temp_exclude_prefixes: tuple[str, ...] = ()
     sensor_threshold_rules: dict[str, dict[str, Any]] = field(default_factory=dict)
+    phone_notify_services: list[str] = field(default_factory=list)
+    energy_summary_entities: dict[str, str] = field(default_factory=dict)
+    energy_device_entities: dict[str, str] = field(default_factory=dict)
+    camera_labels: dict[str, str] = field(default_factory=dict)
+    blueiris_camera_map: dict[str, str] = field(default_factory=dict)
+    polling_only_cameras: list[str] = field(default_factory=list)
+    vision_enabled_cameras: list[str] = field(default_factory=list)
+    camera_room_map: dict[str, str] = field(default_factory=dict)  # camera_id → room_id slug
+    sensor_shortcuts: dict[str, str] = field(default_factory=dict)
 
 
 def load_home_runtime_config() -> HomeRuntimeConfig:
@@ -49,6 +58,15 @@ def load_home_runtime_config() -> HomeRuntimeConfig:
         sensor_snapshot_exclude_prefixes=tuple(_as_str_list(raw.get("sensor_snapshot_exclude_prefixes"))),
         sensor_temp_exclude_prefixes=tuple(_as_str_list(raw.get("sensor_temp_exclude_prefixes"))),
         sensor_threshold_rules=_as_dict_of_dicts(raw.get("sensor_threshold_rules")),
+        phone_notify_services=_as_str_list(raw.get("phone_notify_services")),
+        sensor_shortcuts=_as_str_dict(raw.get("sensor_shortcuts")),
+        energy_summary_entities=_as_str_dict(raw.get("energy_summary_entities")),
+        energy_device_entities=_as_str_dict(raw.get("energy_device_entities")),
+        camera_labels=_as_str_dict(raw.get("camera_labels")),
+        blueiris_camera_map=_as_str_dict(raw.get("blueiris_camera_map")),
+        polling_only_cameras=_as_str_list(raw.get("polling_only_cameras")),
+        vision_enabled_cameras=_as_str_list(raw.get("vision_enabled_cameras")),
+        camera_room_map=_as_str_dict(raw.get("camera_room_map")),
     )
 
 

@@ -1,8 +1,136 @@
 # AI Avatar — Entity Access Control List
-# Full unrestricted access to all Home Assistant entities and services.
+# Controls which Home Assistant domains/services the LLM may call.
+# The hardcoded denylist in ha_proxy.py (shell_command, script,
+# homeassistant.stop/restart, tts) is enforced regardless of these rules.
 version: 1
 
+# ── Deny rules (evaluated first by ha_proxy._DENIED_DOMAINS / _DENIED_SERVICES) ──
+# The domains below are ALSO blocked here so the ACL check itself rejects them
+# before the call even reaches the hardcoded denylist.
+
 rules:
-  - domain: "*"
+  # ── Safe domains — full access ──────────────────────────────────────
+  - domain: "light"
     entities: "*"
     services: "*"
+
+  - domain: "switch"
+    entities: "*"
+    services: "*"
+
+  - domain: "climate"
+    entities: "*"
+    services: "*"
+
+  - domain: "cover"
+    entities: "*"
+    services: "*"
+
+  - domain: "fan"
+    entities: "*"
+    services: "*"
+
+  - domain: "media_player"
+    entities: "*"
+    services: "*"
+
+  - domain: "input_boolean"
+    entities: "*"
+    services: "*"
+
+  - domain: "input_number"
+    entities: "*"
+    services: "*"
+
+  - domain: "input_select"
+    entities: "*"
+    services: "*"
+
+  - domain: "scene"
+    entities: "*"
+    services: "*"
+
+  - domain: "vacuum"
+    entities: "*"
+    services: "*"
+
+  - domain: "humidifier"
+    entities: "*"
+    services: "*"
+
+  - domain: "water_heater"
+    entities: "*"
+    services: "*"
+
+  - domain: "number"
+    entities: "*"
+    services: "*"
+
+  - domain: "select"
+    entities: "*"
+    services: "*"
+
+  - domain: "button"
+    entities: "*"
+    services: "*"
+
+  - domain: "remote"
+    entities: "*"
+    services: "*"
+
+  # ── Read-only domains — state queries only, no service calls ────────
+  - domain: "sensor"
+    entities: "*"
+    services: "*"
+
+  - domain: "binary_sensor"
+    entities: "*"
+    services: "*"
+
+  - domain: "weather"
+    entities: "*"
+    services: "*"
+
+  - domain: "sun"
+    entities: "*"
+    services: "*"
+
+  - domain: "zone"
+    entities: "*"
+    services: "*"
+
+  - domain: "person"
+    entities: "*"
+    services: "*"
+
+  - domain: "device_tracker"
+    entities: "*"
+    services: "*"
+
+  - domain: "camera"
+    entities: "*"
+    services: "*"
+
+  - domain: "update"
+    entities: "*"
+    services: "*"
+
+  - domain: "automation"
+    entities: "*"
+    services: "*"
+
+  - domain: "notify"
+    entities: "*"
+    services: "*"
+
+  - domain: "homeassistant"
+    entities: "*"
+    services: "*"
+
+  - domain: "music_assistant"
+    entities: "*"
+    services: "*"
+
+  # ── Security-sensitive domains — BLOCKED ────────────────────────────
+  # lock, alarm_control_panel, and safe_mode are NOT listed.
+  # Any domain not listed here is denied by default (no wildcard rule).

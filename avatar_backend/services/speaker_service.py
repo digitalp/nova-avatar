@@ -12,10 +12,10 @@ Supports two playback strategies:
                      Uses tts.speak (HA 2023.6+).
 
 Force Alexa mode by prefixing entity_id with "alexa:" in the SPEAKERS env var:
-  SPEAKERS=alexa:media_player.living_room_3,media_player.sonos_kitchen
+  SPEAKERS=alexa:media_player.kitchen_echo,media_player.sonos_living_room
 
 Both of the user's Echo devices map automatically:
-  media_player.penn_s_2nd_echo_dot   ← contains "echo" → auto Alexa
+  media_player.living_room_echo_dot   ← contains "echo" → auto Alexa
   media_player.living_room_3        ← use "alexa:" prefix in .env
 """
 from __future__ import annotations
@@ -72,7 +72,7 @@ _OCCUPIED_AREAS_TEMPLATE = """
 def _notify_service_name(entity_id: str) -> str:
     """
     media_player.living_room_3       → alexa_media_living_room_3
-    media_player.penn_s_2nd_echo_dot → alexa_media_penn_s_2nd_echo_dot
+    media_player.living_room_echo_dot → alexa_media_living_room_echo_dot
     """
     local = entity_id.split(".", 1)[-1]
     return f"alexa_media_{local}"
@@ -93,6 +93,20 @@ class SpeakerService:
         self._tts_engine = tts_engine
         self._settings_path = Path(_SPEAKER_SETTINGS_FILE)
         self._catalog_cache: tuple[float, list[dict]] = (0.0, [])
+        # For constructing LAN-reachable URLs for Sonos/non-Alexa speakers
+        from avatar_backend.config import get_settings
+        _s = get_settings()
+        self._public_url = (_s.public_url or "").rstrip("/")
+        self._port = _s.port
+        import socket
+        try:
+            # Get actual LAN IP by connecting to an external address (doesn't send data)
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            self._local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            self._local_ip = ""
         self._occupied_cache: tuple[float, list[str]] = (0.0, [])
 
         # Default entries seeded from env config: entity_id -> use_alexa_notify
@@ -163,7 +177,12 @@ class SpeakerService:
                 else:
                     tasks.append(self._speak_on(entity_id, text, True))
             else:
-                tasks.append(self._play_media_with_tts_fallback(entity_id, audio_url, text))
+                # Sonos/non-Alexa speakers fetch audio themselves — they need a
+                # LAN-reachable URL, not the Cloudflare tunnel.
+                local_url = (mp3_url or audio_url or "").replace(
+                    self._public_url, f"http://{self._local_ip}:{self._port}"
+                ) if self._public_url and self._local_ip else (mp3_url or audio_url)
+                tasks.append(self._play_media_with_tts_fallback(entity_id, local_url, text))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for (entity_id, _), result in zip(speakers, results):
@@ -347,6 +366,8 @@ class SpeakerService:
             ]
             if occupied:
                 return [(item["entity_id"], bool(item["use_alexa"])) for item in occupied]
+            # No occupied rooms — nobody home, skip speakers
+            return []
 
         return [(item["entity_id"], bool(item["use_alexa"])) for item in catalog]
 
@@ -409,8 +430,9 @@ class SpeakerService:
         except RuntimeError as exc:
             msg = str(exc)
             if "HTTP 5" in msg:
-                _LOGGER.warning(
+                _LOGGER.error(
                     "speaker.play_media_5xx_fallback",
+                    audio_url=audio_url,
                     entity_id=entity_id,
                     exc=msg[:120],
                 )

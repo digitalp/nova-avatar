@@ -102,6 +102,7 @@ class CoralMotionDetector:
         self._interp = interpreter
         self._labels = labels
         self._executor = executor
+        self._lock = __import__('threading').Lock()
         inp = interpreter.get_input_details()[0]
         self._input_index = inp["index"]
         self._input_dtype = inp["dtype"]
@@ -211,6 +212,17 @@ class CoralMotionDetector:
 
         t0 = time.perf_counter()
 
+        if not self._lock.acquire(timeout=10):
+            return CoralMotionDetector.Result(
+                skip=False, detections=[], inference_ms=0.0, reason="lock_timeout"
+            )
+        try:
+            return self._run_detection_locked(image_bytes, camera_id, np, Image, t0)
+        finally:
+            self._lock.release()
+
+    def _run_detection_locked(self, image_bytes, camera_id, np, Image, t0):
+
         # Decode and resize to model input size
         try:
             img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -238,6 +250,9 @@ class CoralMotionDetector:
             if score < _SCORE_THRESHOLD:
                 continue
             label = self._labels.get(int(classes[i]) + 1, "unknown").lower()
+            # SSD MobileNet frequently misclassifies cars as motorcycles on security cameras
+            if label == "motorcycle":
+                label = "car"
             if label in _CLASSES_OF_INTEREST:
                 if score > best_scores.get(label, 0.0):
                     best_scores[label] = score

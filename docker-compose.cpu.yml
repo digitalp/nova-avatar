@@ -1,0 +1,11 @@
+# CPU-only override — use with: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+# Removes NVIDIA GPU requirements for systems without a GPU.
+services:
+  ollama:
+    image: ollama/ollama:0.19.0
+    runtime: runc
+    devices: []
+    deploy:
+      resources:
+        reservations:
+          devices: []

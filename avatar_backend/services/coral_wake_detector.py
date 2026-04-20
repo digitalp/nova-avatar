@@ -352,7 +352,17 @@ class CoralWakeDetector:
                 features = features / norm
 
             inp = interp.get_input_details()[0]
-            tensor = features.reshape(inp["shape"]).astype(inp["dtype"])
+            tensor = features.reshape(inp["shape"])
+
+            # Quantize float32 → int8 if the model expects quantized input
+            if inp["dtype"] == np.int8:
+                qp = inp.get("quantization_parameters", {})
+                scale = qp.get("scales", [1.0])[0]
+                zp = qp.get("zero_points", [0])[0]
+                tensor = np.clip(np.round(tensor / scale + zp), -128, 127).astype(np.int8)
+            else:
+                tensor = tensor.astype(inp["dtype"])
+
             interp.set_tensor(inp["index"], tensor)
             interp.invoke()
 
@@ -526,16 +536,49 @@ class CoralWakeDetector:
 
 
 def _bytes_to_pcm_f32(audio_bytes: bytes) -> np.ndarray:
-    """Convert raw bytes (PCM16 or WAV) to float32 PCM in [-1, 1]."""
-    # Detect WAV header
+    """Convert raw bytes (PCM16, WAV, or WebM/Opus) to float32 PCM at 16kHz."""
+    # WAV
     if audio_bytes[:4] == b"RIFF":
         import wave
         with wave.open(io.BytesIO(audio_bytes)) as wf:
             raw = wf.readframes(wf.getnframes())
-    else:
-        raw = audio_bytes
+            pcm16 = np.frombuffer(raw, dtype=np.int16)
+            pcm = pcm16.astype(np.float32) / 32768.0
+            if wf.getframerate() != _SAMPLE_RATE:
+                pcm = _resample_simple(pcm, wf.getframerate(), _SAMPLE_RATE)
+            return pcm
 
+    # WebM / OGG / any container — decode via PyAV
+    try:
+        import av
+        container = av.open(io.BytesIO(audio_bytes))
+        audio_stream = next((s for s in container.streams if s.type == "audio"), None)
+        if audio_stream is not None:
+            resampler = av.AudioResampler(format="fltp", layout="mono", rate=_SAMPLE_RATE)
+            frames = []
+            for frame in container.decode(audio_stream):
+                for rf in resampler.resample(frame):
+                    frames.append(rf.to_ndarray().flatten())
+            container.close()
+            if frames:
+                return np.concatenate(frames).astype(np.float32)
+        container.close()
+    except Exception:
+        pass
+
+    # Fallback: raw PCM16
+    raw = audio_bytes
     if len(raw) % 2 != 0:
         raw = raw[:-1]
     pcm16 = np.frombuffer(raw, dtype=np.int16)
     return pcm16.astype(np.float32) / 32768.0
+
+
+def _resample_simple(pcm: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
+    """Simple linear resampling."""
+    if src_rate == dst_rate:
+        return pcm
+    ratio = dst_rate / src_rate
+    n = int(len(pcm) * ratio)
+    indices = np.linspace(0, len(pcm) - 1, n)
+    return np.interp(indices, np.arange(len(pcm)), pcm).astype(np.float32)

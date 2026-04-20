@@ -191,6 +191,7 @@ def generate_prompt(
     extra_notes: list[str],
     states: list[dict] | None,
     source_label: str,
+    area_by_entity: dict[str, str] | None = None,
 ) -> str:
     prompt = template_text
     prompt = prompt.replace("<YOUR_ADDRESS>", address)
@@ -203,6 +204,7 @@ def generate_prompt(
         extra_notes=extra_notes,
         states=states or [],
         source_label=source_label,
+        area_by_entity=area_by_entity or {},
     )
     prompt = _replace_home_profile_section(prompt, generated_section)
     prompt = _strip_template_comments(prompt)
@@ -438,10 +440,12 @@ def _render_home_profile(
     extra_notes: list[str],
     states: list[dict],
     source_label: str,
+    area_by_entity: dict[str, str] | None = None,
 ) -> str:
     weather_entity = _pick_weather_entity(states)
     inventory = _build_inventory(states, weather_entity)
     personal_devices = _match_personal_devices(states, household)
+    _area_map = area_by_entity or {}
 
     lines: list[str] = [
         "=" * 70,
@@ -494,6 +498,16 @@ def _render_home_profile(
                 f"  {weather_entity} — primary weather entity; use this first for weather questions.",
             ]
         )
+
+    # Areas summary — group entities by room/zone
+    if _area_map:
+        area_entities: dict[str, list[str]] = defaultdict(list)
+        for eid, area_name in sorted(_area_map.items()):
+            area_entities[area_name].append(eid)
+        lines.extend(["", "Areas / Rooms:"])
+        for area_name in sorted(area_entities):
+            eids = area_entities[area_name]
+            lines.append(f"  {area_name} ({len(eids)} entities)")
 
     for title, entries in inventory:
         if not entries:

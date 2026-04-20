@@ -1,14 +1,18 @@
 """
-GET /health       — full component status (requires API key)
-GET /health/public — liveness probe (no auth)
+GET /health         — full component status (requires API key)
+GET /health/public  — liveness probe (no auth)
+GET /health/history — rolling health-check history
 """
 import asyncio
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Query
 import httpx
 import structlog
 
+from avatar_backend.bootstrap.container import AppContainer, get_container
 from avatar_backend.config import get_settings
 
 router = APIRouter(tags=["health"])
@@ -49,20 +53,20 @@ async def _probe_ha(url: str, token: str) -> str:
         return "timeout"
 
 
-def _probe_whisper(request: Request) -> str:
+def _probe_whisper(container: AppContainer) -> str:
     """Check if the Whisper model is loaded and ready."""
     try:
-        stt = request.app.state.stt_service
+        stt = container.stt_service
         return "ready" if stt.is_ready else "loading"
     except Exception as exc:
         logger.warning("health.whisper_probe_error", exc=str(exc))
         return "unavailable"
 
 
-def _probe_piper(request: Request) -> str:
+def _probe_piper(container: AppContainer) -> str:
     """Check if the Piper binary and voice model are present."""
     try:
-        tts = request.app.state.tts_service
+        tts = container.tts_service
         return "ready" if tts.is_ready else "missing"
     except Exception as exc:
         logger.warning("health.piper_probe_error", exc=str(exc))
@@ -89,7 +93,7 @@ async def _probe_intron_afro_tts(url: str) -> str:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/health")
-async def health_check(request: Request) -> dict:
+async def health_check(container: AppContainer = Depends(get_container)) -> dict:
     settings = get_settings()
 
     ollama_status, ha_status, intron_status = await asyncio.gather(
@@ -98,8 +102,8 @@ async def health_check(request: Request) -> dict:
         _probe_intron_afro_tts(settings.intron_afro_tts_url),
     )
 
-    whisper_status = _probe_whisper(request)
-    piper_status   = _probe_piper(request)
+    whisper_status = _probe_whisper(container)
+    piper_status   = _probe_piper(container)
 
     components = {
         "ollama":           ollama_status,
@@ -115,7 +119,7 @@ async def health_check(request: Request) -> dict:
     all_ok     = all(v in healthy for v in core_components.values())
     overall    = "ok" if all_ok else "degraded"
 
-    issue_autofix = getattr(request.app.state, "issue_autofix_service", None)
+    issue_autofix = getattr(container, "issue_autofix_service", None)
     if issue_autofix is not None:
         if ha_status == "timeout":
             await issue_autofix.report_issue(
@@ -128,6 +132,16 @@ async def health_check(request: Request) -> dict:
             await issue_autofix.resolve_issue("home_assistant_timeout", source="health_check")
 
     logger.info("health.checked", status=overall, components=components)
+
+    # Persist each component probe result for the history endpoint
+    health_history = getattr(container, "health_history_service", None)
+    if health_history is not None:
+        for comp, comp_status in components.items():
+            try:
+                health_history.record_check(comp, comp_status)
+            except Exception as exc:
+                logger.warning("health.persist_failed", component=comp, exc=str(exc))
+
     return {"status": overall, "version": _VERSION, "components": components}
 
 
@@ -135,6 +149,55 @@ async def health_check(request: Request) -> dict:
 async def health_public() -> dict:
     """Unauthenticated liveness probe — used by load balancers / systemd watchdog."""
     return {"status": "ok", "version": _VERSION}
+
+
+@router.get("/health/live")
+async def health_live() -> dict:
+    """Liveness probe — process is alive. Always returns 200."""
+    return {"status": "alive", "version": _VERSION}
+
+
+@router.get("/health/ready")
+async def health_ready(container: AppContainer = Depends(get_container)) -> dict:
+    """Readiness probe — core dependencies connected."""
+    settings = get_settings()
+    ollama_status, ha_status = await asyncio.gather(
+        _probe_ollama(settings.ollama_url),
+        _probe_ha(settings.ha_url, settings.ha_token),
+    )
+    ws_mgr = getattr(container, "ha_ws_manager", None)
+    ws_connected = ws_mgr.is_connected if ws_mgr else False
+
+    ready = ollama_status == "reachable" and ha_status == "reachable"
+    return {
+        "ready": ready,
+        "ollama": ollama_status,
+        "home_assistant": ha_status,
+        "websocket_mirror": "connected" if ws_connected else "disconnected",
+    }
+
+
+@router.get("/health/history")
+async def health_history(
+    container: AppContainer = Depends(get_container),
+    component: Optional[str] = Query(None, description="Filter by component name"),
+    since: Optional[str] = Query(None, description="ISO-8601 start timestamp"),
+    until: Optional[str] = Query(None, description="ISO-8601 end timestamp"),
+) -> dict:
+    """Return rolling health-check history, optionally filtered by component and time range.
+
+    Defaults to the last 24 hours when no time range is specified.
+    """
+    svc = getattr(container, "health_history_service", None)
+    if svc is None:
+        return {"rows": [], "count": 0}
+
+    # Default to last 24 hours if no time range given
+    if since is None and until is None:
+        since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+    rows = svc.get_history(component=component, since=since, until=until)
+    return {"rows": rows, "count": len(rows)}
 
 
 # ── Ambient data (clock + weather for avatar page) ────────────────────────────
@@ -147,7 +210,7 @@ _AMBIENT_TTL = 120  # cache weather for 2 minutes
 
 
 @router.get("/ambient")
-async def ambient_data(request: Request) -> dict:
+async def ambient_data(container: AppContainer = Depends(get_container)) -> dict:
     """Return current time + weather + hourly forecast for the avatar ambient display.
     Lightweight, no auth — polled every 60s by the avatar page."""
     now = _dt.now()
@@ -166,11 +229,13 @@ async def ambient_data(request: Request) -> dict:
 
     # Fetch weather from HA
     settings = get_settings()
-    ha = getattr(request.app.state, "ha_proxy", None)
+    ha = getattr(container, "ha_proxy", None)
     if ha is None:
         return result
 
-    weather_entity = "weather.met_office_ince_in_makerfield"
+    from avatar_backend.services.home_runtime import load_home_runtime_config
+    _rt = load_home_runtime_config()
+    weather_entity = _rt.weather_entity or "weather.forecast_home"
     headers = {"Authorization": f"Bearer {settings.ha_token}", "Content-Type": "application/json"}
 
     try:

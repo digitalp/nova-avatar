@@ -31,7 +31,7 @@ rest_command:
       X-API-Key: "<API_KEY>"
     payload: >-
       {"camera_entity_id": {{ camera_entity_id | default('', true) | tojson }},
-      "trigger_entity_id": {{ trigger_entity_id | default('binary_sensor.reolink_video_doorbell_poe_package', true) | tojson }},
+      "trigger_entity_id": {{ trigger_entity_id | default('', true) | tojson }},
       "location": {{ location | default('front door', true) | tojson }},
       "title": {{ title | default('Package Delivery', true) | tojson }},
       "message": {{ message | default('A package was delivered.', true) | tojson }}}

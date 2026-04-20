@@ -58,6 +58,7 @@ class ConnectionManager:
             "user_agent":   user_agent,
             "connected_at": time.time(),
             "message_count": 0,
+            "room_id":      None,
         }
         async with self._lock:
             self._voice_connections.add(ws)
@@ -83,6 +84,7 @@ class ConnectionManager:
         for ws_id, meta in list(self._voice_meta.items()):
             result.append({
                 "session_id":        meta["session_id"],
+                "room_id":           meta.get("room_id"),
                 "connected_seconds": round(now - meta["connected_at"]),
                 "message_count":     meta["message_count"],
                 "metadata": {
@@ -104,6 +106,61 @@ class ConnectionManager:
             snapshot = list(self._voice_connections)
         dead: list[WebSocket] = []
         for ws in snapshot:
+            try:
+                await ws.send_bytes(data)
+            except Exception:
+                dead.append(ws)
+        if dead:
+            async with self._lock:
+                for ws in dead:
+                    self._voice_connections.discard(ws)
+
+    def set_room(self, ws: WebSocket, room_id: str) -> None:
+        """Register which room this voice client is in."""
+        meta = self._voice_meta.get(id(ws))
+        if meta is not None:
+            meta["room_id"] = room_id or None
+
+    def get_room(self, ws: WebSocket) -> str | None:
+        meta = self._voice_meta.get(id(ws))
+        return meta.get("room_id") if meta else None
+
+    async def send_to_room_json(
+        self, room_id: str | None, payload: dict[str, Any], *, fallback_to_all: bool = True
+    ) -> None:
+        """Send JSON to clients in *room_id* only. Falls back to all if none connected."""
+        if not room_id:
+            await self.broadcast_to_voice_json(payload)
+            return
+        async with self._lock:
+            targets = [
+                ws for ws in self._voice_connections
+                if (self._voice_meta.get(id(ws)) or {}).get("room_id") == room_id
+            ]
+        if not targets:
+            if fallback_to_all:
+                await self.broadcast_to_voice_json(payload)
+            return
+        await self._send_json_to(set(targets), payload)
+
+    async def send_to_room_bytes(
+        self, room_id: str | None, data: bytes, *, fallback_to_all: bool = True
+    ) -> None:
+        """Send binary audio to clients in *room_id* only. Falls back to all if none connected."""
+        if not room_id:
+            await self.broadcast_to_voice_bytes(data)
+            return
+        async with self._lock:
+            targets = [
+                ws for ws in self._voice_connections
+                if (self._voice_meta.get(id(ws)) or {}).get("room_id") == room_id
+            ]
+        if not targets:
+            if fallback_to_all:
+                await self.broadcast_to_voice_bytes(data)
+            return
+        dead: list[WebSocket] = []
+        for ws in targets:
             try:
                 await ws.send_bytes(data)
             except Exception:

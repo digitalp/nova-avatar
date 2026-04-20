@@ -50,13 +50,8 @@ def _select_sensor_watch_model(settings) -> str:
     configured = (getattr(settings, "sensor_watch_ollama_model", "") or "").strip()
     if configured:
         return configured
-    try:
-        with httpx.Client(timeout=2.0) as client:
-            resp = client.get(f"{settings.ollama_url.rstrip('/')}/api/tags")
-            resp.raise_for_status()
-        installed = {str(model.get("name") or "").strip() for model in resp.json().get("models", [])}
-    except Exception:
-        installed = set()
+    from avatar_backend.services.llm_service import _get_ollama_installed_models
+    installed = _get_ollama_installed_models(settings.ollama_url)
     for candidate in _SENSOR_WATCH_MODEL_PREFERENCES:
         if candidate in installed:
             return candidate
@@ -91,89 +86,34 @@ _SNAPSHOT_DEVICE_CLASSES: set[str] = {
 _LEGACY_SNAPSHOT_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "sensor.ble_",              # BLE beacon noise
     "sensor.cpu_",              # system metrics
-    "sensor.awtrix_b21ffc_",   # matrix clock device
-    "sensor.tangu_home_",         # Nova server hardware sensors (CPU/RAM/disk)
-    "sensor.192_168_",            # network IP sensors
-    "sensor.calex_",           # single smart plug — already low value
-    "sensor.octopus_energy_a_ffd8c137_",  # loyalty points, spins — not actionable
-    "sensor.octopus_energy_electricity_16p0478729_",  # rate/standing charge info
-    "sensor.octopus_energy_gas_g4p04330231600_",
-    "sensor.monthly_",         # monthly aggregates — too slow-moving to be actionable
-    "sensor.daddy_s_pixel",    # phone battery — person manages their own phone
-    "sensor.bedroom_1_thermo_closing",   # TRV internals
-    "sensor.bedroom_1_thermo_idle",
-    "sensor.bedroom_1_thermo_valve",
-    "sensor.back_door_device_temperature",
-    "sensor.back_entrance_device_temperature",
-    "sensor.living_room_thermostat_temperature",
-    "sensor.met_office_",
-    "sensor.openweathermap_dew_point",
-    "sensor.openweathermap_feels_like_temperature",
+    "sensor.192_168_",          # network IP sensors
+    "sensor.monthly_",          # monthly aggregates — too slow-moving
+    # Additional exclusions configured via home_runtime.json sensor_snapshot_exclude_prefixes
 )
 
 # ── Hard threshold rules — immediate announcement on WebSocket event ──────────
 # Format: entity_id → {"min": float|None, "max": float|None, "label": str}
 # An announcement fires when value crosses a bound (and cooldown allows).
-_LEGACY_THRESHOLD_RULES: dict[str, dict] = {
-    # Car fuel
-    "sensor.ko66ewx_fuel_level": {
-        "min": 15.0,
-        "max": None,
-        "label": "Car fuel level",
-        "unit": "%",
-        "min_msg": "Heads up — the car fuel level is low at {value}%. Consider filling up soon.",
-    },
-    # Bin collection — remind 1 day before
-    "sensor.19_patterdale_place_black_bin_days_until_collection": {
-        "min": None, "max": None,
-        "equals": 1,
-        "label": "Black bin collection",
-        "unit": "days",
-        "equals_msg": "Reminder: the black bin needs to go out tomorrow.",
-    },
-    "sensor.19_patterdale_place_brown_bin_days_until_collection": {
-        "min": None, "max": None,
-        "equals": 1,
-        "label": "Brown bin collection",
-        "unit": "days",
-        "equals_msg": "Reminder: the brown bin needs to go out tomorrow.",
-    },
-    "sensor.19_patterdale_place_green_bin_days_until_collection": {
-        "min": None, "max": None,
-        "equals": 1,
-        "label": "Green bin collection",
-        "unit": "days",
-        "equals_msg": "Reminder: the green bin needs to go out tomorrow.",
-    },
-    "sensor.19_patterdale_place_blue_bin_days_until_collection": {
-        "min": None, "max": None,
-        "equals": 1,
-        "label": "Blue bin collection",
-        "unit": "days",
-        "equals_msg": "Reminder: the blue bin needs to go out tomorrow.",
-    },
-}
+# Configure in config/home_runtime.json under "sensor_threshold_rules".
+_LEGACY_THRESHOLD_RULES: dict[str, dict] = {}
 
 # ── Temperature sensor entity prefixes to SKIP in threshold check ─────────────
 # (server hardware, TRV internals, door sensors — not room ambient sensors)
-_LEGACY_TEMP_EXCLUDE_PREFIXES: tuple[str, ...] = (
-    "sensor.tangu_home_",
-    "sensor.192_168_",
-    "sensor.awtrix_",
-    "sensor.back_door_device_",
-    "sensor.back_entrance_device_",
-    "sensor.bedroom_1_thermo_",
-    "sensor.met_office_",
-    "sensor.openweathermap_dew_point",
-    "sensor.openweathermap_feels_like_temperature",
-    "sensor.openweathermap_temperature",
-)
+# Configure in config/home_runtime.json under "sensor_temp_exclude_prefixes".
+_LEGACY_TEMP_EXCLUDE_PREFIXES: tuple[str, ...] = ()
 
 _LEGACY_TEMP_EXCLUDE_SUBSTRINGS: tuple[str, ...] = (
     "_thermo_local_temperature",
     "_trv_local_temperature",
     "_thermostat_temperature",
     "_thermostat_temp",
+    "_cpu_temperature",
+    "_processor_temperature",
+    "_gpu_temperature",
+    "_disk_temperature",
+    "_ssd_temperature",
+    "_hdd_temperature",
+    "cpu_temp",
 )
 
 # ── Temperature thresholds applied to room temperature sensors ─────────────────
@@ -290,6 +230,7 @@ class SensorWatchService:
         announce_fn: Callable[[str, str], Awaitable[None]],
         llm_service=None,
         issue_autofix_service=None,
+        ha_ws_manager=None,
     ) -> None:
         self._ha_url       = ha_url.rstrip("/")
         self._ha_token     = ha_token
@@ -297,6 +238,7 @@ class SensorWatchService:
         self._announce     = announce_fn
         self._llm_service = llm_service
         self._issue_autofix_service = issue_autofix_service
+        self._ha_ws_manager = ha_ws_manager
         settings = get_settings()
         self._ollama_model = _select_sensor_watch_model(settings)
         self._review_timeout_s = max(30.0, float(settings.sensor_watch_review_timeout_s))
@@ -328,14 +270,35 @@ class SensorWatchService:
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="sensor_watch")
-        _LOGGER.info(
-            "sensor_watch.started",
-            model=self._ollama_model,
-            review_timeout_s=self._review_timeout_s,
-        )
+        if self._ha_ws_manager is not None:
+            # Use shared WS manager — register callback and start review loop
+            self._ha_ws_manager.register("sensor_watch", self._on_message)
+            self._review_task = asyncio.create_task(self._review_loop(), name="sensor_review")
+            _LOGGER.info(
+                "sensor_watch.started",
+                mode="shared_ws",
+                model=self._ollama_model,
+                review_timeout_s=self._review_timeout_s,
+            )
+        else:
+            self._task = asyncio.create_task(self._run(), name="sensor_watch")
+            _LOGGER.info(
+                "sensor_watch.started",
+                mode="own_ws",
+                model=self._ollama_model,
+                review_timeout_s=self._review_timeout_s,
+            )
 
     async def stop(self) -> None:
+        if self._ha_ws_manager is not None:
+            self._ha_ws_manager.unregister("sensor_watch")
+            review_task = getattr(self, "_review_task", None)
+            if review_task:
+                review_task.cancel()
+                try:
+                    await review_task
+                except asyncio.CancelledError:
+                    pass
         if self._task:
             self._task.cancel()
             try:
@@ -580,19 +543,25 @@ class SensorWatchService:
             await asyncio.sleep(_REVIEW_INTERVAL_S)
 
     async def _fetch_sensor_snapshot(self) -> list[dict]:
-        """Fetch current states of all actionable sensors from HA REST API."""
-        headers = {
-            "Authorization": f"Bearer {self._ha_token}",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:  # L3: removed verify=False
-                resp = await client.get(f"{self._ha_url}/api/states", headers=headers)
-                resp.raise_for_status()
-                all_states = resp.json()
-        except Exception as exc:
-            _LOGGER.warning("sensor_watch.snapshot_fetch_failed", exc=_format_exc(exc))
-            return []
+        """Fetch current states of all actionable sensors, preferring WS mirror."""
+        all_states = None
+        ws_mgr = getattr(self, "_ha_ws_manager", None)
+        if ws_mgr and ws_mgr.is_connected:
+            all_states = ws_mgr.get_all_states()
+
+        if not all_states:
+            headers = {
+                "Authorization": f"Bearer {self._ha_token}",
+                "Content-Type": "application/json",
+            }
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(f"{self._ha_url}/api/states", headers=headers)
+                    resp.raise_for_status()
+                    all_states = resp.json()
+            except Exception as exc:
+                _LOGGER.warning("sensor_watch.snapshot_fetch_failed", exc=_format_exc(exc))
+                return []
 
         results = []
         for entity in all_states:

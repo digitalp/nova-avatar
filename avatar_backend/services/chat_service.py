@@ -23,6 +23,7 @@ from avatar_backend.services.llm_service import LLMService
 from avatar_backend.services.persistent_memory import PersistentMemoryService
 from avatar_backend.services.presence_context import PresenceContextService
 from avatar_backend.services.session_manager import SessionManager
+from avatar_backend.services.metrics_db import MetricsDB
 
 _LOGGER = structlog.get_logger()
 
@@ -51,10 +52,17 @@ _OPERATIONAL_SESSION_HINTS = {
         "If a refresh is truly needed, only homeassistant.update_entity is valid, but prefer reading current state first."
     ),
 }
-_AUTOMATED_SESSION_COOLDOWNS = {
-    "ha_power_alert": get_settings().ha_power_alert_cooldown_s,
-}
+_AUTOMATED_SESSION_COOLDOWNS: dict[str, int] | None = None
 _LAST_AUTOMATED_SESSION_RUN_AT: dict[str, float] = {}
+
+
+def _get_cooldowns() -> dict[str, int]:
+    global _AUTOMATED_SESSION_COOLDOWNS
+    if _AUTOMATED_SESSION_COOLDOWNS is None:
+        _AUTOMATED_SESSION_COOLDOWNS = {
+            "ha_power_alert": get_settings().ha_power_alert_cooldown_s,
+        }
+    return _AUTOMATED_SESSION_COOLDOWNS
 
 
 @dataclass
@@ -68,7 +76,7 @@ class ChatResult:
 
 def _is_automated_session_on_cooldown(session_id: str) -> bool:
     session_key = (session_id or "").strip().lower()
-    cooldown_s = _AUTOMATED_SESSION_COOLDOWNS.get(session_key)
+    cooldown_s = _get_cooldowns().get(session_key)
     if not cooldown_s or cooldown_s <= 0:
         return False
     now = time.monotonic()
@@ -89,6 +97,7 @@ async def run_chat(
     decision_log: DecisionLog | None = None,
     memory_service: PersistentMemoryService | None = None,
     presence_service: PresenceContextService | None = None,
+    metrics_db: MetricsDB | None = None,
 ) -> ChatResult:
     """
     Full multi-round chat → tool execution loop.
@@ -110,7 +119,7 @@ async def run_chat(
                 "automated_session_cooldown",
                 session=session_id,
                 query=user_text[:100],
-                cooldown_s=_AUTOMATED_SESSION_COOLDOWNS.get((session_id or "").strip().lower(), 0),
+                cooldown_s=_get_cooldowns().get((session_id or "").strip().lower(), 0),
             )
         return ChatResult(
             text="",
@@ -142,7 +151,10 @@ async def run_chat(
                     memory_preview=enforced_context[:240],
                     phase="enforced",
                 )
-        memory_context, memory_ids = memory_service.build_context(user_text)
+        try:
+            memory_context, memory_ids = await memory_service.build_context_async(user_text)
+        except Exception:
+            memory_context, memory_ids = memory_service.build_context(user_text)
         if memory_context:
             if decision_log:
                 decision_log.record(
@@ -254,7 +266,10 @@ async def run_chat(
             enforced_context, enforced_memory_ids = memory_service.build_enforced_preferences_context()
             if enforced_context:
                 messages = _inject_enforced_preferences(messages, enforced_context)
-            memory_context, memory_ids = memory_service.build_context(user_text)
+            try:
+                memory_context, memory_ids = await memory_service.build_context_async(user_text)
+            except Exception:
+                memory_context, memory_ids = memory_service.build_context(user_text)
             if memory_context:
                 if decision_log:
                     decision_log.record(
@@ -310,6 +325,26 @@ async def run_chat(
             response=final_text[:150] if final_text else "",
             ms=elapsed_ms,
         )
+
+    # ── Conversation audit trail ──────────────────────────────────────────
+    if metrics_db is not None:
+        try:
+            metrics_db.insert_conversation_audit({
+                "session_id": session_id,
+                "user_text": user_text,
+                "context_summary": "",
+                "llm_response": "",
+                "tool_calls": [
+                    {"name": tc.function_name, "args": tc.arguments, "status": tc.acl_status}
+                    for tc in all_tool_calls
+                ],
+                "final_reply": final_text or "",
+                "processing_ms": elapsed_ms,
+                "model": model_name or llm.model_name,
+            })
+        except Exception:
+            _LOGGER.warning("conversation_audit.insert_failed", session_id=session_id)
+
     return ChatResult(
         text=final_text,
         tool_calls=all_tool_calls,
@@ -339,8 +374,11 @@ def _operational_prompt_for_session(session_id: str, user_text: str) -> str:
         return _OPERATIONAL_SESSION_HINTS[session_key]
     text = (user_text or "").lower()
     if "weather" in text:
+        from avatar_backend.services.home_runtime import load_home_runtime_config
+        _rt = load_home_runtime_config()
+        _we = _rt.weather_entity or "weather.forecast_home"
         return (
-            "For weather reads, use get_entity_state('weather.met_office_ince_in_makerfield'). "
+            f"For weather reads, use get_entity_state('{_we}'). "
             "Do not call weather.get_state or any other weather service unless you are explicitly requesting forecasts through the dedicated backend path."
         )
     return ""

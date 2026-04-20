@@ -4,7 +4,8 @@
 # Supports Ubuntu 22.04/24.04, Debian 12+  (x86_64)
 #
 # Usage:
-#   ./install.sh            — full interactive install
+#   ./install.sh            — interactive install (3 prompts: HA URL, HA token, LLM)
+#   ./install.sh --defaults — fully non-interactive (auto-detects everything)
 #   ./install.sh --update   — update source + static files, restart service
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -82,7 +83,13 @@ configure_nvidia_docker_runtime() {
 
 # ── Update-only mode ──────────────────────────────────────────────────────────
 UPDATE_ONLY=false
-[[ "${1:-}" == "--update" ]] && UPDATE_ONLY=true
+USE_DEFAULTS=false
+for arg in "$@"; do
+  case "$arg" in
+    --update)   UPDATE_ONLY=true ;;
+    --defaults) USE_DEFAULTS=true ;;
+  esac
+done
 
 # ── Root check ────────────────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
@@ -105,7 +112,15 @@ if $UPDATE_ONLY; then
     "${SCRIPT_DIR}/docker-compose.yml" \
     "${SCRIPT_DIR}/scripts" \
     "${SCRIPT_DIR}/install.sh" \
+    "${SCRIPT_DIR}/deploy.sh" \
+    "${SCRIPT_DIR}/.env.example" \
     "${INSTALL_DIR}/"
+  # Update ACL if the installed one still uses the old wildcard rule
+  if grep -q 'domain: "\*"' "${INSTALL_DIR}/config/acl.yaml" 2>/dev/null; then
+    info "Upgrading acl.yaml from wildcard to restricted domain allowlist…"
+    cp "${SCRIPT_DIR}/config/acl.yaml" "${INSTALL_DIR}/config/acl.yaml"
+    success "acl.yaml upgraded — lock/alarm domains now denied"
+  fi
   info "Installing/updating Python dependencies…"
   "${INSTALL_DIR}/.venv/bin/pip" install -q -r "${INSTALL_DIR}/requirements.txt"
   if command -v docker &>/dev/null && [[ -f "${INSTALL_DIR}/docker-compose.yml" ]]; then
@@ -121,6 +136,10 @@ if $UPDATE_ONLY; then
     if docker ps -a --format '{{.Names}}' | grep -qx 'avatar_intron_afro_tts'; then
       info "Refreshing Intron Afro TTS sidecar…"
       $DC up -d --build intron_afro_tts || warn "Could not refresh Intron Afro TTS sidecar"
+    fi
+    if docker ps -a --format '{{.Names}}' | grep -qx 'nova_music_assistant'; then
+      info "Updating Music Assistant…"
+      $DC pull music-assistant 2>/dev/null && $DC up -d music-assistant || warn "Could not refresh Music Assistant"
     fi
   fi
   info "Ensuring gemma2:9b is available (sensor watch + fallback)…"
@@ -194,113 +213,116 @@ fi
 
 # ── Gather config ─────────────────────────────────────────────────────────────
 header "Configuration"
-echo "  Press Enter to accept defaults shown in [brackets]."
-echo ""
 
-# API Key
-ask "API key for Nova (leave blank to auto-generate):"
-read -r INPUT_API_KEY
-if [[ -z "$INPUT_API_KEY" ]]; then
-  INPUT_API_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-  echo "  Generated: ${INPUT_API_KEY}"
+# --defaults flag: skip all prompts, use auto-detected values
+if $USE_DEFAULTS; then
+  info "Using auto-detected defaults (--defaults mode)"
+else
+  echo "  Press Enter to accept defaults shown in [brackets]."
+  echo ""
 fi
 
-# HA
-ask "Home Assistant URL [http://homeassistant.local:8123]:"
-read -r INPUT_HA_URL
-INPUT_HA_URL="${INPUT_HA_URL:-http://homeassistant.local:8123}"
+# ── Auto-detect Home Assistant ────────────────────────────────────────────────
+HA_DETECTED_URL=""
+HA_DETECTED_NAME=""
+info "Scanning for Home Assistant on the network…"
+for candidate in "homeassistant.local" "homeassistant" "$(ip route | awk '/default/{print $3}')"; do
+  for port in 8123 443; do
+    if curl -sf --max-time 2 "http://${candidate}:${port}/api/" -o /dev/null 2>/dev/null; then
+      HA_DETECTED_URL="http://${candidate}:${port}"
+      HA_DETECTED_NAME="${candidate}:${port}"
+      break 2
+    fi
+  done
+done
+if [[ -n "$HA_DETECTED_URL" ]]; then
+  success "Found Home Assistant at ${HA_DETECTED_URL}"
+else
+  warn "Home Assistant not auto-detected — you'll need to enter the URL"
+fi
 
-ask "HA Long-Lived Access Token (blank to configure later):"
-read -r INPUT_HA_TOKEN
-INPUT_HA_TOKEN="${INPUT_HA_TOKEN:-}"
+# ── Essential prompts only (3 questions) ──────────────────────────────────────
 
-DEFAULT_HOME_LABEL="$(hostname)"
-DEFAULT_TIMEZONE="$(default_timezone)"
-DEFAULT_PRIMARY_USERS="${SUDO_USER:-$(whoami)}"
+# 1. HA URL (auto-detected or ask)
+INPUT_HA_URL="${HA_DETECTED_URL:-http://homeassistant.local:8123}"
+if ! $USE_DEFAULTS && [[ -z "$HA_DETECTED_URL" ]]; then
+  ask "Home Assistant URL [${INPUT_HA_URL}]:"
+  read -r _val; INPUT_HA_URL="${_val:-$INPUT_HA_URL}"
+fi
 
-ask "Home label or address [${DEFAULT_HOME_LABEL}]:"
-read -r INPUT_HOME_LABEL
-INPUT_HOME_LABEL="${INPUT_HOME_LABEL:-${DEFAULT_HOME_LABEL}}"
+# 2. HA Token (required for full functionality)
+INPUT_HA_TOKEN=""
+if ! $USE_DEFAULTS; then
+  ask "HA Long-Lived Access Token (blank to configure later):"
+  read -r INPUT_HA_TOKEN
+fi
 
-ask "Timezone [${DEFAULT_TIMEZONE}]:"
-read -r INPUT_TIMEZONE
-INPUT_TIMEZONE="${INPUT_TIMEZONE:-${DEFAULT_TIMEZONE}}"
+# 3. LLM provider (auto-select based on GPU)
+if $GPU_FOUND && $DOCKER_OK; then
+  INPUT_LLM_PROVIDER="ollama"
+  info "GPU + Docker detected → using local Ollama (no cloud API needed)"
+elif $DOCKER_OK; then
+  INPUT_LLM_PROVIDER="ollama"
+  info "Docker detected → using Ollama on CPU (slower but works)"
+else
+  INPUT_LLM_PROVIDER="google"
+  info "No Docker → defaulting to Google Gemini (cloud)"
+fi
 
-ask "Primary household members (comma-separated) [${DEFAULT_PRIMARY_USERS}]:"
-read -r INPUT_PRIMARY_USERS
-INPUT_PRIMARY_USERS="${INPUT_PRIMARY_USERS:-${DEFAULT_PRIMARY_USERS}}"
+INPUT_CLOUD_MODEL=""
+INPUT_CLOUD_KEY_NAME=""
+INPUT_CLOUD_KEY=""
 
-ask "Other household members (optional; semicolon-separated as Name:role or Name:role,details):"
-read -r INPUT_OTHER_MEMBERS
-INPUT_OTHER_MEMBERS="${INPUT_OTHER_MEMBERS:-}"
+if ! $USE_DEFAULTS; then
+  echo ""
+  echo "  LLM: ${INPUT_LLM_PROVIDER} (auto-detected)"
+  ask "  Change LLM? [ollama/google/openai/anthropic] or Enter to keep:"
+  read -r _llm_override
+  if [[ -n "$_llm_override" ]]; then
+    INPUT_LLM_PROVIDER="${_llm_override}"
+  fi
+fi
 
-ask "Vehicles (optional; semicolon-separated as Owner:colour make model):"
-read -r INPUT_VEHICLES
-INPUT_VEHICLES="${INPUT_VEHICLES:-}"
-
-ask "Other useful household notes (optional; semicolon-separated):"
-read -r INPUT_HOME_NOTES
-INPUT_HOME_NOTES="${INPUT_HOME_NOTES:-}"
-
-# LLM provider
-echo ""
-echo "  LLM providers:"
-echo "    1) ollama   — local Llama 3.1 8B (requires Docker, 5 GB download)"
-echo "    2) google   — Gemini (requires GOOGLE_API_KEY)"
-echo "    3) openai   — GPT (requires OPENAI_API_KEY)"
-echo "    4) anthropic — Claude (requires ANTHROPIC_API_KEY)"
-ask "LLM provider [1]:"
-read -r LLM_CHOICE
-LLM_CHOICE="${LLM_CHOICE:-1}"
-
-case "$LLM_CHOICE" in
-  1) INPUT_LLM_PROVIDER="ollama"; INPUT_CLOUD_MODEL=""; INPUT_CLOUD_KEY_NAME=""; INPUT_CLOUD_KEY="" ;;
-  2)
-    INPUT_LLM_PROVIDER="google"
-    ask "  Gemini model [gemini-2.0-flash]:"; read -r INPUT_CLOUD_MODEL
-    INPUT_CLOUD_MODEL="${INPUT_CLOUD_MODEL:-gemini-2.0-flash}"
+case "$INPUT_LLM_PROVIDER" in
+  google)
+    INPUT_CLOUD_MODEL="gemini-2.0-flash"
     INPUT_CLOUD_KEY_NAME="GOOGLE_API_KEY"
-    ask "  Google API key:"; read -r INPUT_CLOUD_KEY
+    if ! $USE_DEFAULTS; then
+      ask "  Google API key:"; read -r INPUT_CLOUD_KEY
+    fi
     ;;
-  3)
-    INPUT_LLM_PROVIDER="openai"
-    ask "  OpenAI model [gpt-4o-mini]:"; read -r INPUT_CLOUD_MODEL
-    INPUT_CLOUD_MODEL="${INPUT_CLOUD_MODEL:-gpt-4o-mini}"
+  openai)
+    INPUT_CLOUD_MODEL="gpt-4o-mini"
     INPUT_CLOUD_KEY_NAME="OPENAI_API_KEY"
-    ask "  OpenAI API key:"; read -r INPUT_CLOUD_KEY
+    if ! $USE_DEFAULTS; then
+      ask "  OpenAI API key:"; read -r INPUT_CLOUD_KEY
+    fi
     ;;
-  4)
-    INPUT_LLM_PROVIDER="anthropic"
-    ask "  Anthropic model [claude-haiku-4-5-20251001]:"; read -r INPUT_CLOUD_MODEL
-    INPUT_CLOUD_MODEL="${INPUT_CLOUD_MODEL:-claude-haiku-4-5-20251001}"
+  anthropic)
+    INPUT_CLOUD_MODEL="claude-haiku-4-5-20251001"
     INPUT_CLOUD_KEY_NAME="ANTHROPIC_API_KEY"
-    ask "  Anthropic API key:"; read -r INPUT_CLOUD_KEY
+    if ! $USE_DEFAULTS; then
+      ask "  Anthropic API key:"; read -r INPUT_CLOUD_KEY
+    fi
     ;;
-  *) error "Invalid choice." ;;
 esac
 
-# Whisper model
-echo ""
-echo "  Whisper STT models (larger = more accurate, slower to load):"
-echo "    tiny / base / small (default) / medium / large"
-ask "Whisper model [small]:"
-read -r INPUT_WHISPER_MODEL
-INPUT_WHISPER_MODEL="${INPUT_WHISPER_MODEL:-small}"
+# ── Auto-detected defaults (no prompts) ──────────────────────────────────────
+INPUT_API_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+INPUT_WHISPER_MODEL="small"
+INPUT_PIPER_VOICE="en_US-lessac-medium"
+INPUT_PORT="8001"
+INPUT_SPEAKERS=""
+INPUT_HOME_LABEL="$(hostname)"
+INPUT_TIMEZONE="$(default_timezone)"
+INPUT_PRIMARY_USERS="${SUDO_USER:-$(whoami)}"
+INPUT_OTHER_MEMBERS=""
+INPUT_VEHICLES=""
+INPUT_HOME_NOTES=""
 
-# Piper voice
-ask "Piper TTS voice [en_US-lessac-medium]:"
-read -r INPUT_PIPER_VOICE
-INPUT_PIPER_VOICE="${INPUT_PIPER_VOICE:-en_US-lessac-medium}"
-
-# Port
-ask "Backend port [8001]:"
-read -r INPUT_PORT
-INPUT_PORT="${INPUT_PORT:-8001}"
-
-# Speakers (optional)
-ask "HA speaker entity IDs — comma separated (blank to skip):"
-read -r INPUT_SPEAKERS
-
+success "API key auto-generated"
+info "Whisper: ${INPUT_WHISPER_MODEL} | Voice: ${INPUT_PIPER_VOICE} | Port: ${INPUT_PORT}"
+info "All settings can be changed later in the admin panel or .env"
 echo ""
 
 # ── Create directory structure ────────────────────────────────────────────────
@@ -319,6 +341,8 @@ rsync -a --exclude='.env' --exclude='.venv' --exclude='__pycache__' \
   "${SCRIPT_DIR}/requirements.txt" \
   "${SCRIPT_DIR}/docker-compose.yml" \
   "${SCRIPT_DIR}/scripts" \
+  "${SCRIPT_DIR}/deploy.sh" \
+  "${SCRIPT_DIR}/.env.example" \
   "${INSTALL_DIR}/"
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 success "Source files copied"
@@ -342,14 +366,62 @@ if [[ ! -f "${INSTALL_DIR}/config/acl.yaml" ]]; then
   cp "${SCRIPT_DIR}/config/acl.yaml" "${INSTALL_DIR}/config/acl.yaml" 2>/dev/null || \
   cat > "${INSTALL_DIR}/config/acl.yaml" << 'ACL_EOF'
 # Nova — Entity Access Control List
-# Grant unrestricted access to all HA entities and services.
+# Explicit domain allowlist — security-sensitive domains (lock, alarm) are denied by default.
 version: 1
 rules:
-  - domain: "*"
+  - domain: "light"
+    entities: "*"
+    services: "*"
+  - domain: "switch"
+    entities: "*"
+    services: "*"
+  - domain: "climate"
+    entities: "*"
+    services: "*"
+  - domain: "cover"
+    entities: "*"
+    services: "*"
+  - domain: "fan"
+    entities: "*"
+    services: "*"
+  - domain: "media_player"
+    entities: "*"
+    services: "*"
+  - domain: "sensor"
+    entities: "*"
+    services: "*"
+  - domain: "binary_sensor"
+    entities: "*"
+    services: "*"
+  - domain: "weather"
+    entities: "*"
+    services: "*"
+  - domain: "camera"
+    entities: "*"
+    services: "*"
+  - domain: "automation"
+    entities: "*"
+    services: "*"
+  - domain: "scene"
+    entities: "*"
+    services: "*"
+  - domain: "input_boolean"
+    entities: "*"
+    services: "*"
+  - domain: "input_number"
+    entities: "*"
+    services: "*"
+  - domain: "input_select"
+    entities: "*"
+    services: "*"
+  - domain: "notify"
+    entities: "*"
+    services: "*"
+  - domain: "homeassistant"
     entities: "*"
     services: "*"
 ACL_EOF
-  success "Created default acl.yaml"
+  success "Created default acl.yaml (security-sensitive domains denied)"
 else
   success "acl.yaml already exists — skipping"
 fi
@@ -541,7 +613,7 @@ if [[ "$INPUT_LLM_PROVIDER" == "ollama" ]]; then
 fi
 
 # ── Intron Afro TTS sidecar (optional) ────────────────────────────────────────
-if $DOCKER_OK && $GPU_FOUND; then
+if $DOCKER_OK && $GPU_FOUND && ! $USE_DEFAULTS; then
   echo ""
   ask "Install Intron Afro TTS sidecar? (accented voice cloning, requires GPU + Docker) [y/N]:"
   read -r INSTALL_INTRON
@@ -618,14 +690,63 @@ WhisperModel('${INPUT_WHISPER_MODEL}', device='cpu', compute_type='int8')
 print('Done.')
 " && success "Whisper model ready" || warn "Whisper model will download on first voice request."
 
+# ── Music Assistant (optional) ────────────────────────────────────────────────
+if $DOCKER_OK; then
+  INSTALL_MA="n"
+  if ! $USE_DEFAULTS; then
+    echo ""
+    ask "Install Music Assistant? (search & play Spotify, YouTube Music, etc.) [y/N]:"
+    read -r INSTALL_MA
+  fi
+  if [[ "${INSTALL_MA,,}" == "y" ]]; then
+    header "Music Assistant"
+    DC="$(docker_compose_cmd)"
+    cd "${INSTALL_DIR}"
+
+    info "Pulling Music Assistant container…"
+    sudo -u "${SERVICE_USER}" $DC pull music-assistant 2>&1 | tail -3
+
+    info "Starting Music Assistant…"
+    sudo -u "${SERVICE_USER}" $DC up -d music-assistant
+
+    info "Waiting for Music Assistant to be ready…"
+    for i in $(seq 1 30); do
+      if curl -sf http://localhost:8095/ &>/dev/null; then
+        success "Music Assistant is running at http://$(hostname -I | awk '{print $1}'):8095"
+        break
+      fi
+      sleep 2
+    done
+
+    if ! curl -sf http://localhost:8095/ &>/dev/null; then
+      warn "Music Assistant may still be starting. Check: docker compose logs -f music-assistant"
+    fi
+
+    # Add MUSIC_ASSISTANT_URL to .env if not present
+    if ! grep -q "^MUSIC_ASSISTANT_URL=" "${INSTALL_DIR}/.env" 2>/dev/null; then
+      echo "MUSIC_ASSISTANT_URL=http://localhost:8095" >> "${INSTALL_DIR}/.env"
+    fi
+
+    echo ""
+    echo -e "  ${CYAN}Next steps:${RESET}"
+    echo "    1. Open http://$(hostname -I | awk '{print $1}'):8095 to add music providers (Spotify, etc.)"
+    echo "    2. In HA: Settings → Integrations → Add → Music Assistant"
+    echo "    3. Search and play music from Nova's admin panel → Music"
+    echo ""
+  fi
+fi
+
 # ── Cloudflare Tunnel (optional — enables Alexa custom voice) ──────────────────
 header "Cloudflare Tunnel (optional)"
 echo ""
 echo -e "  ${CYAN}A public HTTPS URL is needed for Alexa Echo devices to play Nova's${RESET}"
 echo -e "  ${CYAN}custom voice. Without it, Echo devices use Alexa's built-in TTS.${RESET}"
 echo ""
-ask "Set up Cloudflare quick tunnel for Alexa custom voice? [y/N]:"
-read -r SETUP_TUNNEL
+SETUP_TUNNEL="n"
+if ! $USE_DEFAULTS; then
+  ask "Set up Cloudflare quick tunnel for Alexa custom voice? [y/N]:"
+  read -r SETUP_TUNNEL
+fi
 if [[ "${SETUP_TUNNEL,,}" == "y" ]]; then
   if ! command -v cloudflared &>/dev/null; then
     info "Installing cloudflared…"
@@ -744,8 +865,13 @@ echo ""
 
 # Copy HA component files if present in package
 if [[ -d "${SCRIPT_DIR}/ha/custom_components/ai_avatar" ]]; then
-  ask "Automatically copy HA component to /config/custom_components/? [y/N]:"
-  read -r COPY_HA
+  COPY_HA="n"
+  if $USE_DEFAULTS; then
+    COPY_HA="y"
+  else
+    ask "Automatically copy HA component to /config/custom_components/? [y/N]:"
+    read -r COPY_HA
+  fi
   if [[ "${COPY_HA,,}" == "y" ]]; then
     mkdir -p /config/custom_components
     cp -r "${SCRIPT_DIR}/ha/custom_components/ai_avatar" /config/custom_components/

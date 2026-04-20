@@ -19,7 +19,7 @@ Flow:
 from __future__ import annotations
 import asyncio
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from typing import Literal
 
 _AUDIO_CACHE_TTL = 60  # seconds before an unplayed cache entry expires
@@ -33,6 +33,9 @@ from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import uuid
+
+if TYPE_CHECKING:
+    from avatar_backend.bootstrap.container import AppContainer
 
 from avatar_backend.middleware.auth import verify_api_key
 from avatar_backend.services.home_runtime import load_home_runtime_config
@@ -83,6 +86,7 @@ class AnnounceRequest(BaseModel):
     message:  str = Field(..., min_length=1, max_length=2000)
     priority: Literal["normal", "alert"] = "normal"
     target_areas: list[str] = Field(default_factory=list)
+    room_id: str | None = None  # route to this room's avatar tablets only
     source: str = "announce"  # caller tag recorded in announcement log
 
 
@@ -108,10 +112,13 @@ async def announce_handler(body: AnnounceRequest, request: Request):
     """
     t0 = time.monotonic()
 
-    tts:    TTSService        = request.app.state.tts_service
-    speaker: SpeakerService   = getattr(request.app.state, "speaker_service", None)
-    ws_mgr:  ConnectionManager = request.app.state.ws_manager
-    surface_state = getattr(request.app.state, "surface_state_service", None)
+    # Support both direct container injection and internal calls passing request
+    container: AppContainer = request.app.state._container
+
+    tts:    TTSService        = container.tts_service
+    speaker: SpeakerService   = getattr(container, "speaker_service", None)
+    ws_mgr:  ConnectionManager = container.ws_manager
+    surface_state = getattr(container, "surface_state_service", None)
 
     text = body.message.strip()
     target_areas = [str(area).strip() for area in body.target_areas if str(area).strip()]
@@ -128,21 +135,26 @@ async def announce_handler(body: AnnounceRequest, request: Request):
     # 2. Synthesise speech with word timings
     try:
         wav_bytes, word_timings = await tts.synthesise_with_timing(text)
+        # Detect silent/failed TTS — check WAV duration vs text length
+        # Real speech: ~150 bytes per char at 22050Hz mono 16-bit. Silent fallback: ~100ms.
+        if wav_bytes and len(text) > 10:
+            expected_min = len(text) * 50  # very conservative minimum
+            if len(wav_bytes) < expected_min:
+                raise RuntimeError("TTS returned suspiciously short audio")
     except Exception as exc:
         _LOGGER.error("announce.tts_error", exc=str(exc))
-        if surface_state is not None:
-            await surface_state.set_avatar_state(ws_mgr, "error")
-        else:
-            await ws_mgr.broadcast_json({"type": "avatar_state", "state": "error"})
-        await asyncio.sleep(1)
+        # Fallback: send text-only to speakers via native Alexa/HA TTS
+        if speaker and speaker.is_configured:
+            try:
+                await speaker.speak(text, target_areas=target_areas, area_aware=bool(target_areas))
+                _LOGGER.info("announce.tts_fallback_to_speakers", chars=len(text))
+            except Exception as fb_exc:
+                _LOGGER.warning("announce.tts_fallback_failed", exc=str(fb_exc))
         if surface_state is not None:
             await surface_state.set_avatar_state(ws_mgr, "idle")
         else:
             await ws_mgr.broadcast_json({"type": "avatar_state", "state": "idle"})
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"TTS synthesis failed: {exc}",
-        )
+        return AnnounceResponse(status="fallback", message=text, wav_bytes=0)
 
     # 3. Transition to speaking state (in case we were in alert)
     if body.priority == "alert":
@@ -163,7 +175,7 @@ async def announce_handler(body: AnnounceRequest, request: Request):
             if public_url:
                 token = uuid.uuid4().hex
                 expiry = time.time() + _AUDIO_CACHE_TTL
-                cache = request.app.state.audio_cache
+                cache = container.audio_cache
                 # Prune expired entries before inserting
                 expired = [k for k, (_, exp) in cache.items() if time.time() > exp]
                 for k in expired:
@@ -188,12 +200,15 @@ async def announce_handler(body: AnnounceRequest, request: Request):
                 else:
                     _LOGGER.debug("announce.mp3_skipped_no_https", public_url=public_url)
 
+                # Use area-aware routing: prefer occupied rooms, fall back to all speakers
+                _area_aware = True
                 speaker_task = asyncio.create_task(
-                    speaker.speak_wav(text, audio_url, mp3_url=mp3_url, target_areas=target_areas, area_aware=True)
+                    speaker.speak_wav(text, audio_url, mp3_url=mp3_url, target_areas=target_areas, area_aware=_area_aware)
                 )
             else:
+                _area_aware = True
                 speaker_task = asyncio.create_task(
-                    speaker.speak(text, target_areas=target_areas, area_aware=True)
+                    speaker.speak(text, target_areas=target_areas, area_aware=_area_aware)
                 )
         except Exception as exc:
             _LOGGER.warning("announce.speaker_error", exc=str(exc))
@@ -203,13 +218,14 @@ async def announce_handler(body: AnnounceRequest, request: Request):
         await asyncio.sleep(offset_s)
 
     # 5. Push word timings then audio to connected browser voice clients
-    await ws_mgr.broadcast_to_voice_json({
+    _room_id = getattr(body, "room_id", None)
+    await ws_mgr.send_to_room_json(_room_id, {
         "type":         "announce",
         "text":         text,
         "priority":     body.priority,
         "word_timings": word_timings,
-    })
-    await ws_mgr.broadcast_to_voice_bytes(wav_bytes)
+    }, fallback_to_all=True)
+    await ws_mgr.send_to_room_bytes(_room_id, wav_bytes, fallback_to_all=True)
 
     # 6. Await speaker task
     if speaker_task is not None:
@@ -217,6 +233,20 @@ async def announce_handler(body: AnnounceRequest, request: Request):
             await speaker_task
         except Exception as exc:
             _LOGGER.warning("announce.speaker_error", exc=str(exc))
+    elif speaker and speaker.is_configured:
+        # No speakers resolved (nobody home) — send mobile notification
+        try:
+            from avatar_backend.services.home_runtime import load_home_runtime_config
+            _rt = load_home_runtime_config()
+            if _rt.phone_notify_services:
+                ha = container.ha_proxy
+                for svc in _rt.phone_notify_services:
+                    parts = svc.split("/")
+                    if len(parts) == 2:
+                        await ha.call_service(parts[0], parts[1], "", service_data={"title": "Nova", "message": text})
+                _LOGGER.info("announce.mobile_fallback", chars=len(text))
+        except Exception as exc:
+            _LOGGER.warning("announce.mobile_fallback_failed", exc=str(exc))
 
     # 6. Return to idle
     if surface_state is not None:
@@ -238,7 +268,7 @@ async def announce_handler(body: AnnounceRequest, request: Request):
 
 
 
-_LEGACY_DEFAULT_DOORBELL_CAMERA = "camera.reolink_video_doorbell_poe_fluent"
+_LEGACY_DEFAULT_DOORBELL_CAMERA = ""
 
 
 class DoorbellAnnounceRequest(BaseModel):
@@ -273,9 +303,10 @@ class VisualEventResponse(BaseModel):
 
 
 async def _broadcast_visual_event(
-    request: Request,
+    container: AppContainer,
     ws_mgr: ConnectionManager,
     *,
+    app,
     event: str,
     title: str | None = None,
     message: str | None = None,
@@ -286,10 +317,10 @@ async def _broadcast_visual_event(
     expires_in_ms: int = 30000,
 ) -> str:
     event_id = uuid.uuid4().hex
-    event_service = getattr(request.app.state, "event_service", None)
-    surface_state = getattr(request.app.state, "surface_state_service", None)
+    event_service = getattr(container, "event_service", None)
+    surface_state = getattr(container, "surface_state_service", None)
     await publish_visual_event(
-        app=request.app,
+        app=app,
         ws_mgr=ws_mgr,
         event_service=event_service,
         surface_state=surface_state,
@@ -319,10 +350,12 @@ def _parse_image_urls_csv(raw: str | None) -> list[str]:
     summary="Send a visual-only event card to connected avatar clients",
 )
 async def visual_event_handler(body: VisualEventRequest, request: Request):
-    ws_mgr: ConnectionManager = request.app.state.ws_manager
+    container: AppContainer = request.app.state._container
+    ws_mgr: ConnectionManager = container.ws_manager
     event_id = await _broadcast_visual_event(
-        request,
+        container,
         ws_mgr,
+        app=request.app,
         event=body.event,
         title=body.title,
         message=body.message,
@@ -351,8 +384,9 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
     Falls back to a generic "Someone is at the door" if the camera is unavailable.
     """
     t0 = time.monotonic()
-    ws_mgr: ConnectionManager = request.app.state.ws_manager
-    camera_events = getattr(request.app.state, "camera_event_service", None)
+    container: AppContainer = request.app.state._container
+    ws_mgr: ConnectionManager = container.ws_manager
+    camera_events = getattr(container, "camera_event_service", None)
     runtime = load_home_runtime_config()
     camera_entity_id = (
         body.camera_entity_id
@@ -362,8 +396,9 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
 
     _LOGGER.info("doorbell.triggered", camera=camera_entity_id)
     await _broadcast_visual_event(
-        request,
+        container,
         ws_mgr,
+        app=request.app,
         event="doorbell",
         title="Doorbell",
         message="Front door live view",
@@ -407,13 +442,14 @@ async def doorbell_announce_handler(body: DoorbellAnnounceRequest, request: Requ
     )
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
-    _LOGGER.info("doorbell.done", elapsed_ms=elapsed_ms, wav_bytes=announce_resp.wav_bytes)
+    wav_bytes = announce_resp.wav_bytes if hasattr(announce_resp, "wav_bytes") else 0
+    _LOGGER.info("doorbell.done", elapsed_ms=elapsed_ms, wav_bytes=wav_bytes)
 
     return DoorbellAnnounceResponse(
         status="ok",
         message=message,
         camera_used=result["camera_entity_id"],
-        wav_bytes=announce_resp.wav_bytes,
+        wav_bytes=wav_bytes,
         elapsed_ms=elapsed_ms,
     )
 
@@ -433,7 +469,8 @@ async def camera_stream_proxy(
     request: Request,
     entity_id: str = Query(..., min_length=1, description="HA camera entity ID"),
 ):
-    ha = request.app.state.ha_proxy
+    container: AppContainer = request.app.state._container
+    ha = container.ha_proxy
     resolved_entity_id = ha.resolve_camera_entity(entity_id)
     stream_url = f"{ha.ha_url}/api/camera_proxy_stream/{resolved_entity_id}"
 
@@ -472,7 +509,7 @@ class MotionAnnounceResponse(BaseModel):
 
 class PackageAnnounceRequest(BaseModel):
     camera_entity_id: str | None = None
-    trigger_entity_id: str = Field(default="binary_sensor.reolink_video_doorbell_poe_package")
+    trigger_entity_id: str = Field(default="")
     location: str = Field(default="front door", max_length=64)
     title: str = Field(default="Package Delivery", max_length=120)
     message: str = Field(default="A package was delivered.", max_length=300)
@@ -505,14 +542,12 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
     Falls back to a generic "Motion detected" message if the camera is unavailable.
     """
     t0 = time.monotonic()
-    camera_events = getattr(request.app.state, "camera_event_service", None)
+    container: AppContainer = request.app.state._container
+    camera_events = getattr(container, "camera_event_service", None)
 
     camera_id = camera_events.resolve_camera_entity(body.camera_entity_id)
     location  = body.location.strip() or "outdoors"
-    cooldowns: dict[str, float] = getattr(request.app.state, "motion_announce_cooldowns", None)
-    if cooldowns is None:
-        cooldowns = {}
-        request.app.state.motion_announce_cooldowns = cooldowns
+    cooldowns: dict[str, float] = container.motion_announce_cooldowns
 
     now_m = time.monotonic()
     since_last = now_m - cooldowns.get(camera_id, 0.0)
@@ -535,8 +570,8 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
 
     _LOGGER.info("motion.triggered", camera=camera_id, location=location)
 
-    system_prompt: str = getattr(request.app.state, "system_prompt", "")
-    motion_clip_service = request.app.state.motion_clip_service
+    system_prompt: str = getattr(container, "system_prompt", "")
+    motion_clip_service = container.motion_clip_service
     try:
         result = await camera_events.analyze_motion(
             camera_entity_id=camera_id,
@@ -589,8 +624,9 @@ async def motion_announce_handler(body: MotionAnnounceRequest, request: Request)
     summary="Package alert — send a shared package camera event to avatar clients",
 )
 async def package_announce_handler(body: PackageAnnounceRequest, request: Request):
-    ws_mgr: ConnectionManager = request.app.state.ws_manager
-    camera_events = getattr(request.app.state, "camera_event_service", None)
+    container: AppContainer = request.app.state._container
+    ws_mgr: ConnectionManager = container.ws_manager
+    camera_events = getattr(container, "camera_event_service", None)
     runtime = load_home_runtime_config()
     camera_entity_id = (
         body.camera_entity_id
@@ -616,8 +652,9 @@ async def package_announce_handler(body: PackageAnnounceRequest, request: Reques
         event_context["canonical_event"] = package_event["canonical_event"]
 
     event_id = await _broadcast_visual_event(
-        request,
+        container,
         ws_mgr,
+        app=request.app,
         event="package_delivery",
         title=package_event["title"],
         message=package_event["message"],
@@ -641,7 +678,8 @@ async def package_announce_handler(body: PackageAnnounceRequest, request: Reques
 )
 async def serve_tts_audio(token: str, request: Request):
     """Serve a pre-synthesised WAV to HA media players then delete it from cache."""
-    cache: dict = getattr(request.app.state, "audio_cache", {})
+    container: AppContainer = request.app.state._container
+    cache: dict = getattr(container, "audio_cache", {})
     entry = cache.pop(token, None)
     if entry is None:
         raise HTTPException(status_code=404, detail="Audio not found or already played")
@@ -662,7 +700,8 @@ async def serve_tts_audio_mp3(token: str, request: Request):
     Unlike the WAV endpoint, this does NOT pop the entry on first read because
     Amazon's servers may retry the fetch.  The entry expires naturally via TTL.
     """
-    cache: dict = getattr(request.app.state, "audio_cache", {})
+    container: AppContainer = request.app.state._container
+    cache: dict = getattr(container, "audio_cache", {})
     entry = cache.get(f"mp3:{token}")
     if entry is None:
         raise HTTPException(status_code=404, detail="Audio not found or expired")
@@ -762,7 +801,8 @@ async def media_fun_fact_handler(body: MediaFunFactRequest, request: Request):
     and announces it on living room speakers only.
     """
     t0 = time.monotonic()
-    llm = getattr(request.app.state, "llm_service", None)
+    container: AppContainer = request.app.state._container
+    llm = getattr(container, "llm_service", None)
     if llm is None:
         raise HTTPException(status_code=503, detail="LLM service unavailable")
 
@@ -803,7 +843,7 @@ async def media_fun_fact_handler(body: MediaFunFactRequest, request: Request):
     return MediaFunFactResponse(
         status="ok",
         fun_fact=fun_fact,
-        wav_bytes=announce_resp.wav_bytes,
+        wav_bytes=announce_resp.wav_bytes if hasattr(announce_resp, "wav_bytes") else 0,
         elapsed_ms=elapsed_ms,
     )
     

@@ -56,9 +56,10 @@ class PresenceContextService:
         # → "Penn home (4 min). Tangu away. Active: Kitchen Motion, Front Door (off 2 min ago)."
     """
 
-    def __init__(self, ha_url: str, ha_token: str) -> None:
+    def __init__(self, ha_url: str, ha_token: str, ha_ws_manager=None) -> None:
         self._ha_url  = ha_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {ha_token}"}
+        self._ha_ws_manager = ha_ws_manager
 
         # Layer 1 — discovered entity IDs (10 min TTL)
         self._entity_ids: list[str] = []
@@ -73,6 +74,11 @@ class PresenceContextService:
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     async def _fetch_all_states(self) -> list[dict] | None:
+        ws_mgr = self._ha_ws_manager
+        if ws_mgr and ws_mgr.is_connected:
+            states = ws_mgr.get_all_states()
+            if states:
+                return states
         try:
             async with httpx.AsyncClient(timeout=_HA_TIMEOUT) as client:
                 resp = await client.get(

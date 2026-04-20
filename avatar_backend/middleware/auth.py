@@ -53,10 +53,15 @@ async def verify_api_key(request: Request) -> None:
 
     settings = get_settings()
 
-    incoming = (
-        request.headers.get(_HEADER_NAME)
-        or request.query_params.get("api_key", "")
-    )
+    incoming = request.headers.get(_HEADER_NAME)
+    if not incoming:
+        incoming = request.query_params.get("api_key", "")
+        if incoming:
+            logger.info("auth.query_param_deprecated",
+                        path=str(request.url.path),
+                        hint="Use X-API-Key header instead of ?api_key= query param")
+    if not incoming:
+        incoming = request.cookies.get("nova_api_key", "")
 
     if not incoming or not secrets.compare_digest(
         incoming.encode(), settings.api_key.encode()

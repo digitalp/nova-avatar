@@ -52,16 +52,8 @@ def _is_heating_action_tool(function_name: str, arguments: dict | None) -> bool:
 # Motion sensor → camera mapping.
 # When a motion sensor fires, Nova fetches the associated camera and describes what it sees.
 # Duplicate sensors for the same camera share the same camera cooldown.
-_LEGACY_MOTION_CAMERA_MAP: dict[str, str] = {
-    # Driveway camera (Outdoor 2) — mainstream stream for 25fps clips
-    "binary_sensor.rlc_1224a_motion": "camera.outdoor2_profile000_mainstream",
-    "binary_sensor.rlc_1224a_person": "camera.outdoor2_profile000_mainstream",
-    # Outdoor 1 camera — mainstream stream for 25fps clips
-    "binary_sensor.rlc_410w_motion": "camera.reolink_profile000_mainstream",
-    # Doorbell — Tangu/Frigate stream for clips; person and visitor trigger Find Anything
-    "binary_sensor.reolink_video_doorbell_poe_person": "camera.tangu_home_door_bell",
-    "binary_sensor.reolink_video_doorbell_poe_visitor": "camera.tangu_home_door_bell",
-}
+_LEGACY_MOTION_CAMERA_MAP: dict[str, str] = {}
+# Populated from config/home_runtime.json — run install.sh to configure.
 
 # binary_sensor device_classes that represent motion/presence.
 # These are excluded from batch triage — they're either handled by the camera
@@ -73,15 +65,13 @@ _MOTION_DEVICE_CLASSES = {"motion", "occupancy", "presence", "moving"}
 # Cameras that bypass the global motion-announce cooldown.
 # Used for high-priority cameras (e.g. driveway delivery detection) that should
 # always announce regardless of how recently another motion event fired.
-_LEGACY_BYPASS_GLOBAL_MOTION_CAMERAS: set[str] = {"camera.outdoor2_profile000_mainstream"}
+_LEGACY_BYPASS_GLOBAL_MOTION_CAMERAS: set[str] = set()
 
 # Per-camera vision prompts — override _DEFAULT_IMAGE_PROMPT for specific cameras.
 _DRIVEWAY_IMAGE_PROMPT = (
     "This is a security camera snapshot of a residential driveway. "
-    "The owner\'s car (a blue Mercedes B200 2017 AMG, plate KO66EWX) is normally parked here — "
-    "ignore it as a motion cause unless it is moving or something unusual is happening with it. "
     "Only alert if you see: a person, an unfamiliar vehicle, an unexpected object, or unusual activity. "
-    "If motion was caused solely by the owner\'s parked car (e.g. lighting change) or has no obvious cause, "
+    "If motion was caused solely by a parked car (e.g. lighting change) or has no obvious cause, "
     "reply with exactly: NO_MOTION\n"
     "Otherwise describe what you see in 1-2 sentences. "
     "Do NOT mention age, race, gender or personal attributes. "
@@ -115,33 +105,15 @@ _DOORBELL_IMAGE_PROMPT = (
     "Only include the DELIVERY line if you are confident a delivery is taking place."
 )
 
-_LEGACY_CAMERA_VISION_PROMPTS: dict[str, str] = {
-    "camera.outdoor2_profile000_mainstream": _DRIVEWAY_IMAGE_PROMPT,
-    "camera.reolink_profile000_mainstream": _OUTDOOR1_IMAGE_PROMPT,
-    "camera.tangu_home_door_bell": _DOORBELL_IMAGE_PROMPT,
-    # Keep legacy fluent entries as fallback in case discovery overrides
-    "camera.reolink_video_doorbell_poe_fluent": _DOORBELL_IMAGE_PROMPT,
-}
+_LEGACY_CAMERA_VISION_PROMPTS: dict[str, str] = {}
+# Populated from config/home_runtime.json — map camera entity IDs to vision prompts.
 
 # Entity IDs to completely ignore — handled by dedicated HA automations or
 # too noisy to be useful in batch triage.
 # Reolink AI detection sensors have no device_class so they bypass the
 # _MOTION_DEVICE_CLASSES filter; list them explicitly here instead.
-_LEGACY_EXCLUDE_ENTITIES: set[str] = {
-    # Doorbell ancillary detections — vehicle/face/package handled separately;
-    # person and visitor are now wired to the camera vision path above.
-    "binary_sensor.reolink_video_doorbell_poe_vehicle",
-    "binary_sensor.reolink_video_doorbell_poe_face",
-    "binary_sensor.reolink_video_doorbell_poe_package",
-    # Outdoor cam 2 (driveway) — handled via _MOTION_CAMERA_MAP / vision path
-    # binary_sensor.rlc_1224a_person — NOT excluded; wired to camera vision
-    # Xbox Live / gaming sensors — not home relevant
-    "binary_sensor.terminator5704",
-    "binary_sensor.terminator5704_subscribed_to_xbox_game_pass",
-    # Android kiosk device sensors
-    "binary_sensor.rk3566_device_admin",
-    "binary_sensor.rk3566_kiosk_mode",
-}
+_LEGACY_EXCLUDE_ENTITIES: set[str] = set()
+# Populated from config/home_runtime.json — entities to ignore in batch triage.
 
 # Domains monitored for batch triage announcements.
 # 'sensor' excluded — numeric sensors emit constant updates and threshold alerts
@@ -162,7 +134,7 @@ _WATCH_DOMAINS = {
 _CLIMATE_ANNOUNCE_STATES = {"heat", "cool", "heat_cool", "auto", "dry", "fan_only", "off"}
 
 # ── Weather monitoring ────────────────────────────────────────────────────────
-_LEGACY_WEATHER_ENTITY = "weather.met_office_ince_in_makerfield"
+_LEGACY_WEATHER_ENTITY = ""
 
 # Weather conditions that are significant enough to warrant an announcement
 # when they start or end.
@@ -239,12 +211,13 @@ class ProactiveService:
         ha_proxy,
         llm_service,
         motion_clip_service,
-        announce_fn: Callable[[str, str], Awaitable[None]],
+        announce_fn: Callable[..., Awaitable[None]],
         system_prompt: str,
         event_service=None,
         camera_event_service=None,
         issue_autofix_service=None,
         coral_detector: CoralMotionDetector | None = None,
+        ha_ws_manager=None,
     ) -> None:
         self._ha_url = ha_url.rstrip("/")
         self._ha_token = ha_token
@@ -256,6 +229,7 @@ class ProactiveService:
         self._event_service = event_service
         self._camera_event_service = camera_event_service
         self._issue_autofix_service = issue_autofix_service
+        self._ha_ws_manager = ha_ws_manager
         self._coral = coral_detector or CoralMotionDetector.build()
         if self._coral.enabled:
             _LOGGER.info("coral.enabled", detail="Edge TPU pre-filter active for camera motion events")
@@ -269,12 +243,18 @@ class ProactiveService:
         self._bypass_global_motion_cameras.update(runtime.bypass_global_motion_cameras)
         self._camera_vision_prompts = dict(_LEGACY_CAMERA_VISION_PROMPTS)
         self._camera_vision_prompts.update(runtime.camera_vision_prompts)
+        self._vision_enabled_cameras = set(getattr(runtime, 'vision_enabled_cameras', []))
+        self._camera_room_map: dict[str, str] = dict(getattr(runtime, 'camera_room_map', {}))
+        self._camera_labels = dict(getattr(runtime, 'camera_labels', {}))
         self._exclude_entities = set(_LEGACY_EXCLUDE_ENTITIES)
         self._exclude_entities.update(runtime.exclude_entities)
         self._weather_entity = runtime.weather_entity or _LEGACY_WEATHER_ENTITY
+        self._phone_notify_services = runtime.phone_notify_services
         self._cooldowns: dict[str, float] = {}
         self._queue_seen: dict[str, float] = {}   # queue-time dedup cooldown
         self._camera_cooldowns: dict[str, float] = {}
+        from avatar_backend.config import get_settings as _gs
+        self._camera_capture_cooldown_s = _gs().proactive_camera_capture_cooldown_s
         self._last_motion_announce_time: float = 0.0
         self._last_announce_time: float = 0.0
         self._queue: list[dict] = []
@@ -350,6 +330,24 @@ class ProactiveService:
             "llm_tag": f"{provider}:{model}",
         }
 
+    def _cam_label(self, camera_id: str) -> str:
+        """Return friendly camera label, falling back to entity ID."""
+        return self._camera_labels.get(camera_id, camera_id.replace("camera.", "").replace("_", " ").title())
+
+
+    def _cam_room(self, camera_id: str) -> str | None:
+        """Return a room_id slug for this camera, used to route tablet announcements.
+        Uses camera_room_map from home_runtime.json if configured,
+        otherwise derives from camera label (e.g. "Living Room Camera" -> "living_room").
+        """
+        room_map = getattr(self, "_camera_room_map", {})
+        if camera_id in room_map:
+            return room_map[camera_id]
+        label = self._cam_label(camera_id)
+        import re as _re
+        slug = _re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+        return slug or None
+
     def _motion_vision_llm_fields(self) -> dict[str, str]:
         """Return LLM fields reflecting the actual configured motion vision provider."""
         from avatar_backend.config import get_settings
@@ -357,8 +355,14 @@ class ProactiveService:
         if mvp == "ollama":
             provider = "ollama"
             model = getattr(self._llm, "_backend", None)
-            model = getattr(model, "_vision_model", "llama3.2-vision") if model else "llama3.2-vision"
+            model = getattr(model, "_vision_model", None) if model else None
+            if not model:
+                model = get_settings().ollama_vision_model or "unknown"
             return {"llm_provider": provider, "llm_model": model, "llm_tag": f"{provider}:{model}"}
+        if mvp == "ollama_remote":
+            s = get_settings()
+            model = s.ollama_vision_model or "moondream:1.8b"
+            return {"llm_provider": "ollama_remote", "llm_model": model, "llm_tag": f"ollama_remote:{model}"}
         return self._gemini_llm_fields()
 
     def update_system_prompt(self, prompt: str) -> None:
@@ -369,10 +373,28 @@ class ProactiveService:
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     async def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="proactive_monitor")
-        _LOGGER.info("proactive.started")
+        if self._ha_ws_manager is not None:
+            # Use shared WS manager — register callback and start background tasks
+            self._ha_ws_manager.register("proactive", self._on_message)
+            self._batch_task = asyncio.create_task(self._batch_loop(), name="proactive_batcher")
+            self._forecast_task = asyncio.create_task(self._daily_forecast_loop(), name="proactive_forecast")
+            self._heating_task = asyncio.create_task(self._heating_control_loop(), name="proactive_heating")
+            _LOGGER.info("proactive.started", mode="shared_ws")
+        else:
+            self._task = asyncio.create_task(self._run(), name="proactive_monitor")
+            _LOGGER.info("proactive.started", mode="own_ws")
 
     async def stop(self) -> None:
+        if self._ha_ws_manager is not None:
+            self._ha_ws_manager.unregister("proactive")
+            for attr in ("_batch_task", "_forecast_task", "_heating_task"):
+                task = getattr(self, attr, None)
+                if task:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
         if self._task:
             self._task.cancel()
             try:
@@ -508,15 +530,14 @@ class ProactiveService:
             if is_motion_sensor or is_camera_mapped:
                 if is_camera_mapped and new_val == "on":
                     camera_id = self._motion_camera_map[entity_id]
-                    # Minimum capture interval — prevents concurrent ffmpeg processes
-                    # for the same camera which produce 0-byte files and missing
-                    # thumbnails. Set to clip duration so the previous capture finishes
-                    # before starting a new one. This is NOT an announce cooldown.
-                    _MIN_CAPTURE_INTERVAL_S = self._motion_clip_service._clip_duration_s + 5
-                    if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) < _MIN_CAPTURE_INTERVAL_S:
+                    # Per-camera capture cooldown — prevents hammering vision APIs
+                    # (Gemini 429s, Ollama GPU OOM) when a camera fires repeatedly.
+                    # Set to 60s which is long enough for API rate limits to recover.
+                    _CAMERA_CAPTURE_COOLDOWN_S = self._camera_capture_cooldown_s
+                    if time.monotonic() - self._camera_cooldowns.get(camera_id, 0) < _CAMERA_CAPTURE_COOLDOWN_S:
                         _LOGGER.debug("proactive.motion_capture_interval",
-                                      entity_id=entity_id, camera=camera_id,
-                                      interval_s=_MIN_CAPTURE_INTERVAL_S)
+                                      entity_id=entity_id, camera=self._cam_label(camera_id),
+                                      interval_s=_CAMERA_CAPTURE_COOLDOWN_S)
                         return
                     self._camera_cooldowns[camera_id] = time.monotonic()
                     friendly = new_state.get("attributes", {}).get("friendly_name", entity_id)
@@ -604,13 +625,13 @@ class ProactiveService:
                               reason="global_cooldown",
                               seconds_remaining=int(_GLOBAL_MOTION_COOLDOWN_S - since_last))
 
-        _LOGGER.info("proactive.motion_triggered", entity_id=entity_id, camera=camera_id,
+        _LOGGER.info("proactive.motion_triggered", entity_id=entity_id, camera=self._cam_label(camera_id),
                      bypass_global=bypass_global, will_announce=_should_announce)
         if self._decision_log:
             self._decision_log.record(
                 "motion_triggered",
                 entity=entity_id,
-                camera=camera_id,
+                camera=self._cam_label(camera_id),
                 **self._motion_vision_llm_fields(),
             )
 
@@ -622,6 +643,7 @@ class ProactiveService:
         # to the Ollama vision call and are saved to Find Anything.
         _coral_detections: list[str] = []
         _coral_has_plate: bool = False
+        _coral_frame: bytes | None = None
         if self._coral.enabled:
             try:
                 frame = await self._ha.fetch_camera_image(camera_id)
@@ -631,29 +653,46 @@ class ProactiveService:
                         if self._decision_log:
                             self._decision_log.record(
                                 "motion_coral_filtered",
-                                camera=camera_id,
+                                camera=self._cam_label(camera_id),
                                 inference_ms=round(coral_result.inference_ms, 1),
                                 reason=coral_result.reason,
                                 **self._motion_vision_llm_fields(),
                             )
                         _LOGGER.info(
                             "coral.filtered_no_archive",
-                            camera=camera_id,
+                            camera=self._cam_label(camera_id),
                             inference_ms=round(coral_result.inference_ms, 1),
                             detail="no person or vehicle — clip not archived",
                         )
                         return
                     _coral_detections = coral_result.detections
                     _coral_has_plate = coral_result.has_plate_bearing
+                    _coral_frame = frame
+                    # YOLOv5 verification — get proper labels from CodeProject.AI
+                    _face_svc = getattr(self._camera_event_service, '_face_service', None)
+                    if _face_svc and _face_svc.available and frame:
+                        yolo_results = await _face_svc.detect_objects(frame)
+                        if yolo_results:
+                            _coral_detections = [f"{d['label']}({d['confidence']:.0%})" for d in yolo_results]
+                            _coral_has_plate = any(d['label'] in ('car', 'truck', 'bus') for d in yolo_results)
+                            _LOGGER.info("yolo.verified", camera=self._cam_label(camera_id), detections=_coral_detections)
+                    if self._decision_log:
+                        self._decision_log.record(
+                            "coral_detection",
+                            camera=self._cam_label(camera_id),
+                            detections=_coral_detections,
+                            has_plate_bearing=_coral_has_plate,
+                            inference_ms=round(coral_result.inference_ms, 1),
+                        )
                     _LOGGER.info(
                         "coral.passed_to_vision",
-                        camera=camera_id,
+                        camera=self._cam_label(camera_id),
                         detections=_coral_detections,
                         has_plate_bearing=_coral_has_plate,
                         inference_ms=round(coral_result.inference_ms, 1),
                     )
             except Exception as exc:
-                _LOGGER.warning("coral.check_failed", camera=camera_id, exc=str(exc),
+                _LOGGER.warning("coral.check_failed", camera=self._cam_label(camera_id), exc=str(exc),
                                 detail="falling through to Ollama vision")
         # ─────────────────────────────────────────────────────────────────────
 
@@ -672,19 +711,47 @@ class ProactiveService:
             },
         )
 
+        # Use the same frame Coral already fetched for vision analysis.
+        # No delay needed — the frame was captured at the moment of motion detection.
+
         try:
-            result = await self._camera_event_service.analyze_motion(
-                camera_entity_id=camera_id,
-                location=friendly,
-                trigger_entity_id=entity_id,
-                source="proactive_motion",
-                system_prompt=self._system_prompt or None,
-                vision_prompt=self._camera_vision_prompts.get(camera_id),
-                include_plate_ocr=_coral_has_plate,
-                prefetched_frame=frame if self._coral.enabled else None,
+            # Skip vision if camera is not in the enabled list
+            # Exception: doorbell ring events (visitor) always get vision
+            is_doorbell_ring = "visitor" in entity_id.lower()
+            skip_vision = (
+                self._vision_enabled_cameras
+                and camera_id not in self._vision_enabled_cameras
+                and not is_doorbell_ring
             )
+            if skip_vision:
+                # Use Coral detection labels as the description for archiving
+                coral_desc = ", ".join(_coral_detections) if _coral_detections else "Motion detected"
+                _LOGGER.info("proactive.vision_skipped", camera=self._cam_label(camera_id), reason="not in vision_enabled_cameras")
+                result = {
+                    "message": f"{coral_desc} on {friendly}.",
+                    "description": f"{coral_desc} on {friendly}.",
+                    "archive_description": f"{coral_desc} on {friendly}.",
+                    "suppressed": False,
+                    "is_delivery": False,
+                    "delivery_company": "",
+                    "plate_number": "",
+                    "raw_description": "",
+                    "canonical_event": None,
+                    "delivery": False,
+                }
+            else:
+                result = await self._camera_event_service.analyze_motion(
+                    camera_entity_id=camera_id,
+                    location=friendly,
+                    trigger_entity_id=entity_id,
+                    source="proactive_motion",
+                    system_prompt=self._system_prompt or None,
+                    vision_prompt=self._camera_vision_prompts.get(camera_id),
+                    include_plate_ocr=_coral_has_plate,
+                    prefetched_frame=_coral_frame,
+                )
         except Exception as exc:
-            _LOGGER.warning("proactive.motion_describe_failed", camera=camera_id, exc=str(exc))
+            _LOGGER.warning("proactive.motion_describe_failed", camera=self._cam_label(camera_id), exc=str(exc))
             result = {
                 "message": f"Motion detected by {friendly}.",
                 "description": "",
@@ -704,35 +771,36 @@ class ProactiveService:
         description = str(result["archive_description"] or result["description"] or message)
 
         if result["suppressed"]:
-            # Gemini confirmed nothing worth alerting — don't archive a clip.
-            # Coral may have triggered a false positive; Gemini is the final arbiter.
+            # Gemini confirmed nothing worth alerting — cancel the in-flight clip.
+            if clip_handle:
+                self._motion_clip_service.cancel_pending(clip_handle)
             _LOGGER.info(
                 "proactive.motion_suppressed_no_archive",
-                camera=camera_id,
+                camera=self._cam_label(camera_id),
                 reason="gemini_no_motion",
                 coral_detections=_coral_detections,
             )
             if self._decision_log:
                 self._decision_log.record(
                     "motion_suppressed",
-                    camera=camera_id,
+                    camera=self._cam_label(camera_id),
                     reason="NO_MOTION",
                     coral_detections=_coral_detections,
                     **self._motion_vision_llm_fields(),
                 )
             return
         elif result["raw_description"]:
-            _LOGGER.info("proactive.motion_described", camera=camera_id,
+            _LOGGER.info("proactive.motion_described", camera=self._cam_label(camera_id),
                          chars=len(result["raw_description"]), delivery=is_delivery)
             if plate_number:
-                _LOGGER.info("proactive.plate_read", camera=camera_id, plate=plate_number)
+                _LOGGER.info("proactive.plate_read", camera=self._cam_label(camera_id), plate=plate_number)
             if is_delivery:
-                _LOGGER.info("proactive.delivery_detected", camera=camera_id,
+                _LOGGER.info("proactive.delivery_detected", camera=self._cam_label(camera_id),
                              company=delivery_company)
                 if self._decision_log:
                     self._decision_log.record(
                         "delivery_detected",
-                        camera=camera_id,
+                        camera=self._cam_label(camera_id),
                         company=delivery_company,
                         scene=description[:200],
                         **self._motion_vision_llm_fields(),
@@ -766,7 +834,7 @@ class ProactiveService:
         if self._decision_log:
             self._decision_log.record(
                 "motion_clip_archived",
-                camera=camera_id,
+                camera=self._cam_label(camera_id),
                 message=description[:300],
                 delivery=is_delivery,
                 announced=_should_announce,
@@ -774,6 +842,7 @@ class ProactiveService:
             )
 
         # Only update the announce timestamp and notify if not cooldown-suppressed
+        _motion_room_id = self._cam_room(camera_id)
         if _should_announce:
             self._last_motion_announce_time = time.monotonic()
 
@@ -789,7 +858,7 @@ class ProactiveService:
             "Authorization": f"Bearer {self._ha_token}",
             "Content-Type": "application/json",
         }
-        for svc in ("notify/mobile_app_pixel_7", "notify/mobile_app_pixel_9_pro_xl"):
+        for svc in self._phone_notify_services:
             url = f"{self._ha_url}/api/services/{svc}"
             try:
                 async with _httpx.AsyncClient(timeout=10.0) as client:  # L3: removed verify=False
@@ -1184,27 +1253,54 @@ class ProactiveService:
             "Be concise — one sentence announcement only if something changed, silent otherwise."
         )
 
-        messages = [
-            {"role": "system", "content": self._system_prompt},
-            {"role": "user",   "content": task_msg},
-        ]
+        from avatar_backend.config import get_settings as _get_settings
+        _hlp = (_get_settings().heating_llm_provider or "gemini").strip().lower()
+        _use_ollama_primary = _hlp == "ollama" and hasattr(self._llm, "chat_local")
+        _heating_fields = self._local_llm_fields() if _use_ollama_primary else self._active_llm_fields()
+
+        # When Ollama is the primary, use the focused heating prompt (not the full 63KB system prompt)
+        if _use_ollama_primary:
+            messages = [
+                {"role": "system", "content": _HEATING_SHADOW_SYSTEM_PROMPT},
+                {"role": "user",   "content": task_msg},
+            ]
+        else:
+            messages = [
+                {"role": "system", "content": self._system_prompt},
+                {"role": "user",   "content": task_msg},
+            ]
 
         _MAX_ROUNDS = 6
-        _LOGGER.info("heating.eval_start")
+        _LOGGER.info("heating.eval_start", provider=_hlp)
         if self._decision_log:
             self._decision_log.record(
                 "heating_eval_start",
                 season=season,
                 time=now_str,
-                **self._active_llm_fields(),
+                provider=_hlp,
+                **_heating_fields,
             )
-        shadow_calls = await self._run_heating_shadow(messages, season=season, now_str=now_str)
+
+        # Shadow run: only when Gemini is primary and shadow is enabled
+        _shadow_enabled = _get_settings().heating_shadow_enabled
+        shadow_calls: list[dict] = []
+        if not _use_ollama_primary and _shadow_enabled:
+            try:
+                shadow_calls = await asyncio.wait_for(
+                    self._run_heating_shadow(messages, season=season, now_str=now_str),
+                    timeout=120.0,
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.warning("heating.shadow_eval_timeout", timeout_s=120.0)
 
         all_tool_calls: list[str] = []
         performed_action = False
 
         for round_num in range(_MAX_ROUNDS):
-            text, tool_calls = await self._llm.chat(messages, use_tools=True)
+            if _use_ollama_primary:
+                text, tool_calls = await self._llm.chat_local(messages, use_tools=True)
+            else:
+                text, tool_calls = await self._llm.chat(messages, use_tools=True)
 
             if not tool_calls:
                 # LLM gave a final text response
@@ -1221,7 +1317,7 @@ class ProactiveService:
                             "heating_action",
                             message=text.strip()[:300],
                             tool_calls=all_tool_calls,
-                            **self._active_llm_fields(),
+                            **_heating_fields,
                         )
                     await self._announce(text.strip(), "normal")
                 else:
@@ -1236,7 +1332,7 @@ class ProactiveService:
                             ),
                             tool_calls=all_tool_calls,
                             performed_action=performed_action,
-                            **self._active_llm_fields(),
+                            **_heating_fields,
                         )
                 break
 
@@ -1271,7 +1367,7 @@ class ProactiveService:
                         args={k: str(v)[:80] for k, v in tc.arguments.items()},
                         success=result.success,
                         result=(result.message or "")[:200],
-                        **self._active_llm_fields(),
+                        **_heating_fields,
                     )
                 messages.append({
                     "role":         "tool",
@@ -1313,7 +1409,13 @@ class ProactiveService:
             return []
 
         _MAX_SHADOW_ROUNDS = 6
-        shadow_messages = list(messages)   # isolated copy — never mutates primary
+        # Use the compact heating-specific system prompt for Ollama — the full Nova
+        # system prompt is ~15k tokens and makes inference very slow (causes timeouts).
+        shadow_messages = list(messages)
+        if shadow_messages and shadow_messages[0].get("role") == "system":
+            shadow_messages = [
+                {"role": "system", "content": _HEATING_SHADOW_SYSTEM_PROMPT}
+            ] + shadow_messages[1:]
         shadow_records: list[dict] = []
 
         _LOGGER.info("heating.shadow_eval_start", season=season, shadow_only=shadow_only)

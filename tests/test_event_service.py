@@ -6,6 +6,14 @@ import pytest
 from avatar_backend.services.event_service import EventService, publish_visual_event
 
 
+def _make_state(**kwargs):
+    from types import SimpleNamespace
+    ns = SimpleNamespace(**kwargs)
+    ns._container = ns
+    return ns
+
+
+
 def test_event_service_builds_canonical_event_record():
     service = EventService()
     event = service.build_event(
@@ -36,7 +44,7 @@ async def test_publish_visual_event_records_context_and_surface_payload():
     fake_db = SimpleNamespace(insert_event_history=MagicMock())
     fake_event_store = SimpleNamespace(create_event=MagicMock())
     fake_event_bus = SimpleNamespace(publish=AsyncMock())
-    app = SimpleNamespace(state=SimpleNamespace(
+    app = SimpleNamespace(state=_make_state(
         recent_event_contexts={},
         metrics_db=fake_db,
         event_store=fake_event_store,

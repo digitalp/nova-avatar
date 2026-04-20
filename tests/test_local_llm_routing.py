@@ -298,6 +298,20 @@ async def test_sensor_watch_uses_preferred_local_model_and_timeout(monkeypatch):
             ollama_model="llama3.1:8b-instruct-q4_K_M",
         ),
     )
+
+    class FakeResponse:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"models": [{"name": "qwen2.5:7b"}, {"name": "gemma2:9b"}]}
+
+    class FakeClient:
+        def __init__(self, timeout): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url): return FakeResponse()
+
+    monkeypatch.setattr("avatar_backend.services.sensor_watch_service.httpx.Client", FakeClient)
+
     service = SensorWatchService(
         ha_url="http://ha.local",
         ha_token="token",

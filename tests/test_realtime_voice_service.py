@@ -25,6 +25,13 @@ from avatar_backend.services.realtime_voice_service import (
 from avatar_backend.services.ws_manager import ConnectionManager
 
 
+def _make_state(**kwargs):
+    """Create a SimpleNamespace with _container pointing to itself."""
+    ns = SimpleNamespace(**kwargs)
+    ns._container = ns
+    return ns
+
+
 class FakeWebSocket:
     def __init__(self) -> None:
         self.text_messages: list[str] = []
@@ -73,7 +80,7 @@ async def test_send_initial_state_includes_adapter_metadata():
     ws_mgr = MagicMock(spec=ConnectionManager)
     ws_mgr.broadcast_json = AsyncMock()
     ws.app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             realtime_voice_adapter=OpenAIChatRealtimeVoiceAdapter(),
         )
     )
@@ -157,7 +164,7 @@ async def test_send_initial_state_uses_custom_adapter_capabilities():
     adapter.supports_turn_context = False
     adapter.supported_output_audio_formats = ("wav",)
     ws.app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             realtime_voice_adapter=adapter,
         )
     )
@@ -179,7 +186,7 @@ async def test_handle_text_frame_rejects_streamed_input_when_adapter_disables_it
     ws = FakeWebSocket()
     adapter = MagicMock()
     adapter.supports_input_streaming = False
-    ws.app = SimpleNamespace(state=SimpleNamespace(realtime_voice_adapter=adapter))
+    ws.app = SimpleNamespace(state=_make_state(realtime_voice_adapter=adapter))
 
     handled = await service.handle_text_frame(
         ws,
@@ -199,7 +206,7 @@ async def test_handle_text_frame_falls_back_to_supported_output_format():
     adapter = MagicMock()
     adapter.supports_output_streaming = True
     adapter.supported_output_audio_formats = ("wav",)
-    ws.app = SimpleNamespace(state=SimpleNamespace(realtime_voice_adapter=adapter))
+    ws.app = SimpleNamespace(state=_make_state(realtime_voice_adapter=adapter))
 
     handled = await service.handle_text_frame(
         ws,
@@ -228,7 +235,7 @@ async def test_process_audio_happy_path_emits_expected_messages():
     stt.transcribe = AsyncMock(return_value="turn on the kitchen light")
 
     tts = MagicMock()
-    tts.synthesise_with_timing = AsyncMock(return_value=(b"RIFF" + b"\x00" * 40, []))
+    tts.synthesise_with_timing = AsyncMock(return_value=(_pcm_wav_bytes(4000), []))
 
     speaker = MagicMock()
     speaker.is_configured = True
@@ -239,13 +246,14 @@ async def test_process_audio_happy_path_emits_expected_messages():
     session_manager.clear = AsyncMock()
     ha_proxy = MagicMock()
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             conversation_service=MagicMock(),
             llm_service=llm,
             session_manager=session_manager,
             ha_proxy=ha_proxy,
             decision_log=None,
             memory_service=None,
+            audio_cache={},
         )
     )
     ws.app = app
@@ -325,7 +333,7 @@ async def test_start_audio_turn_cancels_prior_turn_before_reply():
     session_manager = MagicMock()
     session_manager.clear = AsyncMock()
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             conversation_service=MagicMock(),
             llm_service=MagicMock(),
             session_manager=session_manager,
@@ -410,7 +418,7 @@ async def test_turn_context_routes_next_voice_turn_to_event_followup():
     ))
 
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             conversation_service=conversation_service,
             llm_service=MagicMock(),
             session_manager=MagicMock(),
@@ -484,7 +492,7 @@ async def test_streaming_input_buffers_binary_frames_until_commit():
     ))
 
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             conversation_service=conversation_service,
             llm_service=MagicMock(),
             session_manager=MagicMock(),
@@ -556,7 +564,7 @@ async def test_streaming_input_cancel_discards_buffered_audio():
     tts.synthesise_with_timing = AsyncMock(return_value=(b"RIFF" + b"\x00" * 40, []))
 
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             conversation_service=MagicMock(),
             llm_service=MagicMock(),
             session_manager=MagicMock(),
@@ -631,7 +639,7 @@ async def test_client_output_streaming_sends_chunked_audio_messages():
     ))
 
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             conversation_service=conversation_service,
             llm_service=MagicMock(),
             session_manager=MagicMock(),
@@ -698,13 +706,18 @@ async def test_client_output_streaming_starts_with_first_sentence_before_full_re
     tts = MagicMock()
     first_wav = _pcm_wav_bytes(4000)
     rest_wav = _pcm_wav_bytes(6000)
+    third_wav = _pcm_wav_bytes(3000)
+
+    # The reply text below splits into 3 segments at sentence boundaries.
+    # Provide enough side_effect entries for all segments.
     tts.synthesise_with_timing = AsyncMock(side_effect=[
         (first_wav, [{"word": "Hello", "start_ms": 0, "end_ms": 300}]),
         (rest_wav, [{"word": "there", "start_ms": 0, "end_ms": 300}]),
+        (third_wav, [{"word": "extra", "start_ms": 0, "end_ms": 200}]),
     ])
 
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             speaker_service=None,
         )
     )
@@ -725,19 +738,40 @@ async def test_client_output_streaming_starts_with_first_sentence_before_full_re
     session.output_streaming_enabled = True
     session.output_audio_format = "pcm_s16le"
 
+    # This text has 3 sentence boundaries, producing 3 segments
+    reply_text = (
+        "Hello there, I have started processing your request. "
+        "This is the rest of a longer reply for streaming. "
+        "With enough extra detail to trigger multi-sentence audio delivery."
+    )
+
     streamed = await service._send_sentence_first_audio(
         ctx,
         DefaultRealtimeVoiceAdapter(),
         session_key="voice_test:socket",
         turn_id=1,
-        reply_text="Hello there, I have started processing your request. This is the rest of a longer reply for streaming, with enough extra detail to trigger sentence-first audio delivery.",
+        reply_text=reply_text,
         offset_s=0.0,
     )
 
     assert streamed is True
-    assert tts.synthesise_with_timing.await_count == 2
+    assert tts.synthesise_with_timing.await_count == 3
     assert _messages_of_type(ws, "output_audio_start")
     assert _messages_of_type(ws, "output_audio_end")
+
+    # Verify word_timings: first has append=False, subsequent have append=True
+    wt_messages = _messages_of_type(ws, "word_timings")
+    assert wt_messages[0]["append"] is False
+    for wt in wt_messages[1:]:
+        assert wt["append"] is True
+
+    # Verify cumulative offsets: second segment offset = first wav duration
+    first_duration_ms = service._wav_duration_ms(first_wav)
+    assert wt_messages[1]["word_timings"][0]["start_ms"] == first_duration_ms
+
+    # Third segment offset = first + second wav duration
+    second_duration_ms = service._wav_duration_ms(rest_wav)
+    assert wt_messages[2]["word_timings"][0]["start_ms"] == first_duration_ms + second_duration_ms
 
 
 @pytest.mark.asyncio
@@ -767,7 +801,7 @@ async def test_realtime_voice_service_uses_custom_app_adapter():
     conversation_service.handle_voice_turn = AsyncMock()
 
     app = SimpleNamespace(
-        state=SimpleNamespace(
+        state=_make_state(
             realtime_voice_adapter=custom_adapter,
             conversation_service=conversation_service,
             llm_service=MagicMock(),

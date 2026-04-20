@@ -1,6 +1,6 @@
 services:
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.19.0
     container_name: avatar_ollama
     restart: unless-stopped
     runtime: nvidia
@@ -71,8 +71,24 @@ services:
       retries: 3
       start_period: 60s
 
+  music-assistant:
+    image: ghcr.io/music-assistant/server@sha256:f25ab51703e81e18c90d023916d2bc7c8b1ef98b99503644fc12277bacc69ecd
+    container_name: nova_music_assistant
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - music_assistant_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8095/api"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 volumes:
   ollama_data:
     driver: local
   intron_afro_tts_models:
+    driver: local
+  music_assistant_data:
     driver: local

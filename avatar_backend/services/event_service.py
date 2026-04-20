@@ -110,10 +110,10 @@ def remember_recent_event_context(
     event_context: dict[str, Any] | None = None,
 ) -> None:
     now = time.time()
-    store: dict[str, tuple[float, dict[str, Any]]] = getattr(app.state, "recent_event_contexts", None)
+    store: dict[str, tuple[float, dict[str, Any]]] = getattr(app.state._container, "recent_event_contexts", None)
     if store is None:
         store = {}
-        app.state.recent_event_contexts = store
+        app.state._container.recent_event_contexts = store
     expired = [key for key, (ts, _) in store.items() if now - ts > _RECENT_EVENT_CONTEXT_TTL_S]
     for key in expired:
         store.pop(key, None)

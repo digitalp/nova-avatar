@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 import structlog
 
 from avatar_backend.runtime_paths import data_dir
+from avatar_backend.services.perceptual_hash import compute_phash, hamming_distance
 
 _LOGGER = structlog.get_logger()
 _SAFE_PATH_CHARS = re.compile(r"[^a-z0-9_-]+")
@@ -48,7 +50,19 @@ class MotionClipService:
         self._clips_dir_ready = self._ensure_clips_dir_ready()
         self._tasks: set[asyncio.Task] = set()
         self._pending_updates: dict[str, dict[str, Any]] = {}  # clip_handle → {description, extra}
+        self._cancelled_handles: set[str] = set()
+        from avatar_backend.services.home_runtime import load_home_runtime_config
+        _rt = load_home_runtime_config()
+        self._POLLING_ONLY_CAMERAS = set(getattr(_rt, 'polling_only_cameras', []))
         self._capture_semaphore: asyncio.Semaphore | None = None  # initialised lazily in async context
+        self._phash_cache: dict[str, tuple[int, float]] = {}  # camera_entity_id → (hash, monotonic_ts)
+        self._handle_to_clip_id: dict[str, int] = {}  # clip_handle → clip_id after DB insert
+
+    @property
+    def _local_ha_url(self) -> str:
+        """Return a local URL for HA — avoids DNS/NAT hairpin for camera streams."""
+        from avatar_backend.config import get_settings
+        return get_settings().ha_local_url_resolved
 
     async def refresh_storage_status(self) -> bool:
         self._clips_dir_ready = self._ensure_clips_dir_ready()
@@ -115,6 +129,11 @@ class MotionClipService:
         task.add_done_callback(self._on_task_done)
         return clip_handle
 
+    def cancel_pending(self, clip_handle: str) -> None:
+        """Mark a pending clip as cancelled — it will be deleted after capture completes."""
+        if clip_handle:
+            self._cancelled_handles.add(clip_handle)
+
     def update_pending_description(
         self,
         clip_handle: str,
@@ -122,11 +141,35 @@ class MotionClipService:
         description: str = "",
         extra: dict[str, Any] | None = None,
     ) -> None:
-        """Update the description/extra for a clip that's still being captured."""
+        """Update the description/extra for a clip. Works whether clip is still
+        being captured (pending) or already stored in DB."""
         self._pending_updates[clip_handle] = {
             "description": description,
             **(extra or {}),
         }
+        # If clip is already in DB, update it directly
+        clip_id = self._handle_to_clip_id.get(clip_handle)
+        if clip_id and description:
+            import json as _json
+            self._db._write(
+                "UPDATE motion_clips SET description = ? WHERE id = ?",
+                (description, clip_id),
+            )
+            if extra:
+                try:
+                    row = self._db._conn().execute(
+                        "SELECT extra_json FROM motion_clips WHERE id = ?", (clip_id,)
+                    ).fetchone()
+                    merged = _json.loads(row["extra_json"]) if row else {}
+                    merged.update(extra)
+                    self._db._write(
+                        "UPDATE motion_clips SET extra_json = ? WHERE id = ?",
+                        (_json.dumps(merged), clip_id),
+                    )
+                except Exception:
+                    pass
+            _LOGGER.info("motion_clip.description_updated_post_store",
+                         clip_id=clip_id, chars=len(description))
 
     async def capture_and_store(
         self,
@@ -152,6 +195,36 @@ class MotionClipService:
                     details={"camera_entity_id": camera_entity_id, "clips_dir": str(self._clips_dir)},
                 )
             return None
+
+        # --- Perceptual hash dedup check ---
+        try:
+            import httpx as _httpx
+            frame_url = f"{self._ha.ha_url}/api/camera_proxy/{camera_entity_id}"
+            async with _httpx.AsyncClient(timeout=_httpx.Timeout(connect=3.0, read=5.0, write=3.0, pool=5.0)) as client:
+                resp = await client.get(frame_url, headers=self._ha.auth_headers)
+            if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
+                new_hash = await compute_phash(resp.content)
+                cached = self._phash_cache.get(camera_entity_id)
+                if cached is not None:
+                    old_hash, old_ts = cached
+                    cache_age = time.monotonic() - old_ts
+                    dist = hamming_distance(old_hash, new_hash)
+                    if dist <= 5 and cache_age < 120:
+                        _LOGGER.info(
+                            "motion_clip.dedup_skipped",
+                            camera=camera_entity_id,
+                            hamming_distance=dist,
+                            cache_age_s=round(cache_age, 1),
+                        )
+                        return None
+                self._phash_cache[camera_entity_id] = (new_hash, time.monotonic())
+        except Exception as exc:
+            _LOGGER.debug(
+                "motion_clip.phash_skipped",
+                camera=camera_entity_id,
+                exc=_format_exc(exc),
+            )
+
         now = datetime.now(timezone.utc)
         relpath = self._build_relpath(camera_entity_id, now)
         fullpath = self._clips_dir / relpath
@@ -221,6 +294,20 @@ class MotionClipService:
                 if _attempt == 0:
                     await asyncio.sleep(2)  # brief pause before retry
 
+        # If vision determined NO_MOTION, discard the clip instead of archiving
+        if clip_handle and clip_handle in self._cancelled_handles:
+            self._cancelled_handles.discard(clip_handle)
+            self._pending_updates.pop(clip_handle, None)
+            if fullpath.exists():
+                fullpath.unlink(missing_ok=True)
+            if thumb_relpath:
+                thumb_file = self._clips_dir / thumb_relpath
+                if thumb_file.exists():
+                    thumb_file.unlink(missing_ok=True)
+            _LOGGER.info("motion_clip.cancelled", camera=camera_entity_id,
+                         detail="vision returned NO_MOTION — clip discarded")
+            return
+
         clip_id = self._db.insert_motion_clip({
             "ts": now.isoformat(),
             "camera_entity_id": camera_entity_id,
@@ -235,6 +322,8 @@ class MotionClipService:
             "llm_model": getattr(self._llm, "gemini_vision_effective_model_name", getattr(self._llm, "model_name", "")),
             "extra": extra or {},
         })
+        if clip_handle:
+            self._handle_to_clip_id[clip_handle] = clip_id
         _LOGGER.info(
             "motion_clip.stored",
             clip_id=clip_id,
@@ -328,24 +417,25 @@ class MotionClipService:
             return None
         return fullpath
 
-    async def _capture_clip(self, camera_entity_id: str, output_path: Path) -> bool:
-        # Mainstream/profile000 cameras don't support MJPEG streaming via HA proxy.
-        # Go straight to polling to avoid a 40-second timeout waiting for a stream
-        # that will never arrive.
-        if "mainstream" in camera_entity_id or "profile000" in camera_entity_id:
-            _LOGGER.info("motion_clip.mainstream_polling", camera=camera_entity_id,
-                         detail="Mainstream camera — using polling for clip capture")
-            return await self._capture_clip_polling(camera_entity_id, output_path)
+    # Cameras whose MJPEG proxy stream always times out — skip straight to polling.
+    _POLLING_ONLY_CAMERAS: set[str] = set()  # Loaded from home_runtime.json
 
+    async def _capture_clip(self, camera_entity_id: str, output_path: Path) -> bool:
+        # Use polling for all cameras — MJPEG proxy consistently times out
+        # on HTTPS with self-signed certificates. Polling via httpx with
+        # verify=False works reliably at 4-5 FPS.
+        return await self._capture_clip_polling(camera_entity_id, output_path)
         # Stream directly from HA's MJPEG proxy endpoint.
+        # Use local HTTP URL for camera streams — avoids TLS overhead and timeouts.
         token = self._ha.auth_headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        stream_url = f"{self._ha.ha_url}/api/camera_proxy_stream/{camera_entity_id}"
+        stream_url = f"{self._local_ha_url}/api/camera_proxy_stream/{camera_entity_id}"
 
         cmd = [
             "/usr/bin/ffmpeg",
             "-nostdin",
             "-y",
             "-loglevel", "error",
+            "-tls_verify", "0",
             # Short connection timeout — fail fast if stream doesn't start
             "-timeout", "5000000",  # 5 seconds in microseconds
             "-headers", f"Authorization: Bearer {token}\r\n",
@@ -414,8 +504,18 @@ class MotionClipService:
         loop = asyncio.get_running_loop()
         started = loop.time()
         deadline = started + self._clip_duration_s
-        url = f"{self._ha.ha_url}/api/camera_proxy/{camera_entity_id}"
+        url = f"{self._local_ha_url}/api/camera_proxy/{camera_entity_id}"
         headers = self._ha.auth_headers
+
+        # Prefer Blue Iris direct URL — plain HTTP, no TLS overhead, faster polling
+        bi = getattr(self._ha, '_blueiris_service', None)
+        bi_url = bi.mjpeg_url(camera_entity_id) if bi and bi.available else None
+        if bi_url:
+            # Use snapshot endpoint for polling (mjpeg is for streaming)
+            bi_name = bi.resolve_camera(camera_entity_id)
+            if bi_name:
+                url = f"{bi._bi_url}/image/{bi_name}?q=60"
+                headers = {}  # Blue Iris doesn't need auth for images
 
         # Sequential polling with keep-alive — one request at a time to avoid
         # corrupted frames from overloading the HA camera proxy. Keep-alive
@@ -425,6 +525,7 @@ class MotionClipService:
             async with _httpx.AsyncClient(
                 timeout=_httpx.Timeout(connect=3.0, read=5.0, write=3.0, pool=5.0),
                 limits=_httpx.Limits(max_keepalive_connections=1, max_connections=1),
+                verify=False,
             ) as client:
                 while loop.time() < deadline:
                     try:
@@ -458,13 +559,9 @@ class MotionClipService:
             elapsed_s=round(elapsed, 2),
             actual_fps=round(actual_fps, 2),
         )
-        # Use minterpolate for any capture rate ≥1.5 fps — produces smooth 25fps
-        # output by synthesizing intermediate frames via motion compensation.
-        # Below 1.5 fps the gaps are too large for useful interpolation.
-        if actual_fps >= 1.5:
-            vf_filters = "minterpolate=fps=25:mi_mode=mci:mc_mode=obmc"
-        else:
-            vf_filters = "fps=fps=25"
+        # Frame duplication is the correct approach for surveillance footage —
+        # minterpolate creates morphing artefacts at the low fps typical of HA proxy polling.
+        vf_filters = "fps=fps=25"
         cmd = [
             "/usr/bin/ffmpeg",
             "-nostdin", "-y", "-loglevel", "error",

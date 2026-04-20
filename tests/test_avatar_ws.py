@@ -14,7 +14,9 @@ from avatar_backend.services.ws_manager import ConnectionManager
 class FakeWebSocket:
     def __init__(self) -> None:
         self.sent_texts: list[str] = []
-        self.app = SimpleNamespace(state=SimpleNamespace())
+        state = SimpleNamespace()
+        state._container = state  # routers access ws.app.state._container
+        self.app = SimpleNamespace(state=state)
         self._messages = [{"type": "websocket.disconnect"}]
 
     async def send_text(self, text: str) -> None:

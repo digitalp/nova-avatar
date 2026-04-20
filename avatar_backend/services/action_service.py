@@ -469,7 +469,7 @@ class ActionService:
                 tone="info",
                 requires_confirmation=False,
                 extra={
-                    "target_camera_entity_id": "camera.outdoor_2",
+                    "target_camera_entity_id": "",
                     "target_event": "related_camera",
                     "target_title": "Driveway",
                     "target_message": "Driveway live view",

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from avatar_backend.bootstrap.container import AppContainer
 from avatar_backend.routers.admin import (
     EventHistoryDomainActionBody,
     EventHistoryWorkflowRunBody,
@@ -14,6 +15,14 @@ from avatar_backend.routers.admin import (
 )
 from avatar_backend.services.metrics_db import MetricsDB
 from avatar_backend.services.open_loop_workflow_service import OpenLoopWorkflowService
+
+
+def _make_container(**kwargs) -> AppContainer:
+    """Build an AppContainer with the given service overrides."""
+    c = AppContainer()
+    for k, v in kwargs.items():
+        setattr(c, k, v)
+    return c
 
 
 def test_serialize_motion_clip_exposes_canonical_event_fields():
@@ -136,21 +145,22 @@ class _FakeDB:
 
 @pytest.mark.asyncio
 async def test_event_history_combines_motion_and_surface_events(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
 
-    data = await get_event_history(request, limit=10)
+    data = await get_event_history(request, limit=10, container=container)
     assert len(data["events"]) == 5
     assert data["events"][0]["kind"] == "canonical_event"
     assert data["events"][0]["event_type"] == "package_delivery"
@@ -174,21 +184,22 @@ async def test_event_history_combines_motion_and_surface_events(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_event_history_filters_by_kind_and_source(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, kind="canonical_event", event_source="package_announce")
+    data = await get_event_history(request, limit=10, kind="canonical_event", event_source="package_announce", container=container)
     assert len(data["events"]) == 1
     assert data["events"][0]["kind"] == "canonical_event"
     assert data["events"][0]["event_source"] == "package_announce"
@@ -196,41 +207,43 @@ async def test_event_history_filters_by_kind_and_source(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_event_history_supports_before_ts_window(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, before_ts="2026-04-08T20:03:00+00:00", window="30d")
+    data = await get_event_history(request, limit=10, before_ts="2026-04-08T20:03:00+00:00", window="30d", container=container)
     assert all(event["ts"] < "2026-04-08T20:03:00+00:00" for event in data["events"])
 
 
 @pytest.mark.asyncio
 async def test_event_history_can_filter_open_loops(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, open_loop_only=True, open_loop_state="active")
+    data = await get_event_history(request, limit=10, open_loop_only=True, open_loop_state="active", container=container)
     assert len(data["events"]) >= 1
     assert all(event["open_loop_active"] is True for event in data["events"])
     assert all(event["open_loop_state"] == "active" for event in data["events"])
@@ -238,83 +251,87 @@ async def test_event_history_can_filter_open_loops(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_event_history_can_filter_stale_open_loops(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, open_loop_stale_only=True)
+    data = await get_event_history(request, limit=10, open_loop_stale_only=True, container=container)
     assert len(data["events"]) >= 1
     assert all(event["open_loop_stale"] is True for event in data["events"])
 
 
 @pytest.mark.asyncio
 async def test_event_history_can_filter_open_loop_priority(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, open_loop_priority="high")
+    data = await get_event_history(request, limit=10, open_loop_priority="high", container=container)
     assert all(event["open_loop_priority"] == "high" for event in data["events"])
 
 
 @pytest.mark.asyncio
 async def test_event_history_can_filter_reminder_due_open_loops(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, open_loop_reminder_due_only=True)
+    data = await get_event_history(request, limit=10, open_loop_reminder_due_only=True, container=container)
     assert len(data["events"]) >= 1
     assert all(event["open_loop_reminder_due"] is True for event in data["events"])
 
 
 @pytest.mark.asyncio
 async def test_event_history_exposes_workflow_actions(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, kind="persisted_event")
+    data = await get_event_history(request, limit=10, kind="persisted_event", container=container)
     persisted = data["events"][0]
     actions = {action["action"]: action for action in persisted["available_actions"]}
     assert actions["ask_about_event"]["label"]
@@ -326,22 +343,24 @@ async def test_event_history_exposes_workflow_actions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_event_history_workflow_summary_reports_due_queue(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-                open_loop_workflow_service=OpenLoopWorkflowService(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(),
+        surface_state_service=_FakeSurfaceState(),
+        open_loop_workflow_service=OpenLoopWorkflowService(),
     )
 
-    data = await get_event_history_workflow_summary(request, limit=5)
+    data = await get_event_history_workflow_summary(request, limit=5, container=container)
     assert data["counts"]["total_open_loops"] >= 1
     assert data["counts"]["reminder_due"] >= 1
     assert data["counts"]["escalation_due"] >= 1
@@ -350,7 +369,8 @@ async def test_event_history_workflow_summary_reports_due_queue(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_event_history_workflow_run_applies_planned_actions(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
 
     class _FakeActionService:
         def __init__(self) -> None:
@@ -365,7 +385,8 @@ async def test_event_history_workflow_run_applies_planned_actions(monkeypatch):
                 "workflow_action": kwargs["workflow_action"],
             }
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
 
     async def _fake_get_event_history(request, **kwargs):
         return {
@@ -389,21 +410,19 @@ async def test_event_history_workflow_run_applies_planned_actions(monkeypatch):
             ]
         }
 
-    monkeypatch.setattr(admin_module, "get_event_history", _fake_get_event_history)
+    monkeypatch.setattr(admin_events_module, "get_event_history", _fake_get_event_history)
     action_service = _FakeActionService()
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                open_loop_workflow_service=OpenLoopWorkflowService(),
-                action_service=action_service,
-                ws_manager=None,
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        open_loop_workflow_service=OpenLoopWorkflowService(),
+        action_service=action_service,
+        ws_manager=None,
     )
 
     result = await run_event_history_workflow(
         EventHistoryWorkflowRunBody(include_reminders=True, include_escalations=True, limit=5, dry_run=False),
         request,
+        container=container,
     )
 
     assert len(result["planned"]) == 1
@@ -414,34 +433,34 @@ async def test_event_history_workflow_run_applies_planned_actions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_event_history_workflow_status_exposes_automation_state(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                open_loop_automation_service=SimpleNamespace(
-                    get_status=lambda: {
-                        "running": True,
-                        "interval_s": 900,
-                        "startup_delay_s": 120,
-                        "max_actions_per_run": 4,
-                        "last_run_ts": "2026-04-09T18:00:00+00:00",
-                        "last_run_summary": {"planned": 2, "applied": 1, "applied_actions": [{"event_id": "evt-1"}]},
-                    }
-                )
-            )
-        )
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        open_loop_automation_service=SimpleNamespace(
+            get_status=lambda: {
+                "running": True,
+                "interval_s": 900,
+                "startup_delay_s": 120,
+                "max_actions_per_run": 4,
+                "last_run_ts": "2026-04-09T18:00:00+00:00",
+                "last_run_summary": {"planned": 2, "applied": 1, "applied_actions": [{"event_id": "evt-1"}]},
+            }
+        ),
     )
 
-    status = await get_event_history_workflow_status(request)
+    status = await get_event_history_workflow_status(request, container=container)
     assert status["running"] is True
     assert status["last_run_summary"]["applied"] == 1
 
 
 @pytest.mark.asyncio
 async def test_event_history_domain_action_runs_followup(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
 
     class _FakeActionService:
         async def handle_event_history_domain_action(self, **kwargs):
@@ -452,11 +471,13 @@ async def test_event_history_domain_action_runs_followup(monkeypatch):
                 "text": "It looks like a normal delivery.",
             }
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
         ws_manager=None,
         action_service=_FakeActionService(),
-    )))
+    )
 
     result = await run_event_history_domain_action(
         EventHistoryDomainActionBody(
@@ -471,6 +492,7 @@ async def test_event_history_domain_action_runs_followup(monkeypatch):
             followup_prompt="Focus on where the package is.",
         ),
         request,
+        container=container,
     )
 
     assert result["ok"] is True
@@ -480,21 +502,22 @@ async def test_event_history_domain_action_runs_followup(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_event_history_can_filter_escalation_due_open_loops(monkeypatch):
-    from avatar_backend.routers import admin as admin_module
+    from avatar_backend.routers.admin import events as admin_events_module
+    from avatar_backend.routers.admin import common as admin_common_module
+    from avatar_backend.routers.admin import motion as admin_motion_module
 
-    monkeypatch.setattr(admin_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
-    monkeypatch.setattr(admin_module, "_motion_clip_is_playable", lambda request, clip: True)
+    monkeypatch.setattr(admin_common_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_events_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    monkeypatch.setattr(admin_motion_module, "_require_session", lambda request, min_role="viewer": {"role": "viewer"})
+    async def _always_playable(request, clip): return True
+    monkeypatch.setattr(admin_motion_module, "_motion_clip_is_playable", _always_playable)
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                metrics_db=_FakeDB(),
-                surface_state_service=_FakeSurfaceState(),
-            )
-        )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    container = _make_container(
+        metrics_db=_FakeDB(), surface_state_service=_FakeSurfaceState(),
     )
 
-    data = await get_event_history(request, limit=10, open_loop_escalation_due_only=True)
+    data = await get_event_history(request, limit=10, open_loop_escalation_due_only=True, container=container)
     assert len(data["events"]) >= 1
     assert all(event["open_loop_escalation_due"] is True for event in data["events"])
 

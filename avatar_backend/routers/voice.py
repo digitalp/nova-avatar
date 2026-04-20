@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisc
 from fastapi.responses import JSONResponse
 
 from avatar_backend.middleware.auth import verify_api_key, verify_api_key_ws, issue_ws_token
+from avatar_backend.bootstrap.container import AppContainer, get_container
 from avatar_backend.services.coral_wake_detector import CoralWakeDetector, WakeResult
 from avatar_backend.services.realtime_voice_service import (
     RealtimeVoiceService,
@@ -62,19 +63,25 @@ async def get_ws_token() -> dict:
 async def voice_websocket(
     ws: WebSocket,
     session_id: str = Query(default="voice_default", max_length=128),
+    room: str = Query(default="", max_length=64),
     _: None = Depends(verify_api_key_ws),
 ):
     """Full-duplex voice pipeline: audio in → transcript → LLM → TTS → audio out."""
     app = ws.app
-    stt: STTService            = app.state.stt_service
-    tts: TTSService            = app.state.tts_service
-    ws_mgr: ConnectionManager  = app.state.ws_manager
-    speaker: SpeakerService    = getattr(app.state, "speaker_service", None)
-    voice_service: RealtimeVoiceService = getattr(app.state, "realtime_voice_service", None) or RealtimeVoiceService()
+    _c = app.state._container
+    stt: STTService            = _c.stt_service
+    tts: TTSService            = _c.tts_service
+    ws_mgr: ConnectionManager  = _c.ws_manager
+    speaker: SpeakerService    = getattr(_c, "speaker_service", None)
+    voice_service: RealtimeVoiceService = getattr(_c, "realtime_voice_service", None) or RealtimeVoiceService()
 
     await ws.accept()
     setattr(ws, "_nova_session_id", session_id)
     await ws_mgr.connect_voice(ws)
+    _room = room.strip().lower() if room else None
+    if _room:
+        ws_mgr.set_room(ws, _room)
+        setattr(ws, "_nova_room_id", _room)
     session_key = f"{session_id}:{id(ws)}"
     await voice_service.connect_session(session_key)
     await voice_service.send_initial_state(ws, ws_mgr)
@@ -149,7 +156,7 @@ def _is_wake_word(transcript: str) -> bool:
 
 
 @router.post("/stt/wake", dependencies=[Depends(verify_api_key)])
-async def check_wake_word(request: Request):
+async def check_wake_word(request: Request, container: AppContainer = Depends(get_container)):
     """
     3-stage wake word detection:
       1. Coral Edge TPU TFLite model (if nova_wakeword_edgetpu.tflite present, ~1ms)
@@ -160,9 +167,9 @@ async def check_wake_word(request: Request):
     Web Speech Recognition API.
     """
     body = await request.body()
-    stt: STTService = request.app.state.stt_service
+    stt: STTService = container.stt_service
     detector: CoralWakeDetector = getattr(
-        request.app.state, "coral_wake_detector", None
+        container, "coral_wake_detector", None
     )
     if detector is None:
         # Fallback: direct Whisper (original behaviour if detector not wired up)
@@ -182,3 +189,18 @@ async def check_wake_word(request: Request):
         "method":     result.method,
         "elapsed_ms": round(result.elapsed_ms, 1),
     })
+
+
+# ── Face recognition from browser webcam ──────────────────────────────────────
+
+@router.post("/face/recognize", dependencies=[Depends(verify_api_key)])
+async def recognize_face(request: Request, container: AppContainer = Depends(get_container)):
+    """Accept a JPEG frame from the browser webcam and return recognized faces."""
+    face_service = getattr(container, "face_service", None)
+    if not face_service or not face_service.available:
+        return JSONResponse({"faces": [], "error": "Face recognition not configured"})
+    body = await request.body()
+    if not body:
+        return JSONResponse({"faces": []})
+    faces = await face_service.recognize(body)
+    return JSONResponse({"faces": faces})

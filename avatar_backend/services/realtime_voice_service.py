@@ -51,6 +51,8 @@ class VoiceSessionState:
     current_task: asyncio.Task[None] | None = None
     pending_event_id: str | None = None
     pending_followup_prompt: str | None = None
+    pending_speaker_name: str | None = None
+    room_id: str | None = None
     input_stream_open: bool = False
     input_audio_chunks: list[bytes] = field(default_factory=list)
     input_audio_bytes: int = 0
@@ -58,6 +60,9 @@ class VoiceSessionState:
     output_audio_format: str = "wav"
     state: str = IDLE
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Streaming STT: queue feeds audio chunks to transcribe_streaming
+    stt_stream_queue: asyncio.Queue[bytes | None] | None = None
+    stt_partial_text: str = ""
 
 
 @dataclass
@@ -88,6 +93,7 @@ class RealtimeVoiceAdapter(Protocol):
         *,
         event_id: str | None = None,
         followup_prompt: str | None = None,
+        speaker_name: str | None = None,
     ) -> VoiceTurnResult:
         ...
 
@@ -119,12 +125,16 @@ class DefaultRealtimeVoiceAdapter:
         *,
         event_id: str | None = None,
         followup_prompt: str | None = None,
+        speaker_name: str | None = None,
+        room_id: str | None = None,
     ) -> VoiceTurnResult:
         result = await _run_default_conversation_turn(
             ctx,
             transcript,
             event_id=event_id,
             followup_prompt=followup_prompt,
+            speaker_name=speaker_name,
+            room_id=room_id,
         )
         return VoiceTurnResult(
             text=result.text,
@@ -147,15 +157,17 @@ async def _run_default_conversation_turn(
     *,
     event_id: str | None = None,
     followup_prompt: str | None = None,
+    speaker_name: str | None = None,
+    room_id: str | None = None,
 ) -> Any:
     if event_id:
         recent_events: dict[str, tuple[float, dict[str, Any]]] = getattr(
-            ctx.app.state, "recent_event_contexts", {}
+            ctx.app.state._container, "recent_event_contexts", {}
         )
         stored = recent_events.get(event_id)
         if stored:
             _, event_context = stored
-            await ctx.app.state.conversation_service.set_event_followup_context(
+            await ctx.app.state._container.conversation_service.set_event_followup_context(
                 ctx.session_id,
                 PendingEventFollowupContext(
                     event_type=str(event_context.get("event_type", "event")),
@@ -164,9 +176,11 @@ async def _run_default_conversation_turn(
                     followup_prompt=followup_prompt,
                 )
             )
-    return await ctx.app.state.conversation_service.handle_voice_turn(
+    return await ctx.app.state._container.conversation_service.handle_voice_turn(
         session_id=ctx.session_id,
         user_text=transcript,
+        speaker_name=speaker_name,
+        room_id=room_id,
     )
 
 
@@ -207,8 +221,11 @@ class RealtimeVoiceService:
             turn_id = session.current_turn_id
             event_id = session.pending_event_id
             followup_prompt = session.pending_followup_prompt
+            speaker_name = session.pending_speaker_name
+            room_id = session.room_id
             session.pending_event_id = None
             session.pending_followup_prompt = None
+            session.pending_speaker_name = None
             await self._send_json(ctx.ws, {"type": "turn_started"}, turn_id=turn_id)
             session.current_task = asyncio.create_task(
                 self.process_audio(
@@ -218,6 +235,8 @@ class RealtimeVoiceService:
                     turn_id=turn_id,
                     event_id=event_id,
                     followup_prompt=followup_prompt,
+                    speaker_name=speaker_name,
+                    room_id=room_id,
                 )
             )
 
@@ -241,13 +260,16 @@ class RealtimeVoiceService:
                 return True
             event_id = str(data.get("event_id") or "").strip()
             followup_prompt = str(data.get("followup_prompt") or "").strip()
+            speaker_name = str(data.get("speaker_name") or "").strip()
             session = await self._get_or_create_session(session_key)
             session.pending_event_id = event_id or None
             session.pending_followup_prompt = followup_prompt or None
+            session.pending_speaker_name = speaker_name or None
             await self._send_json(ws, {
                 "type": "turn_context_ack",
                 "event_id": session.pending_event_id,
                 "followup_prompt": session.pending_followup_prompt,
+                "speaker_name": session.pending_speaker_name,
             })
             return True
 
@@ -271,10 +293,18 @@ class RealtimeVoiceService:
                 session_manager = getattr(app.state, "session_manager", None)
                 if session_manager is not None:
                     await session_manager.set_metadata(session_id, metadata)
+            room_id_cap = str(capabilities.get("room_id") or "").strip().lower() or None
+            if room_id_cap:
+                session.room_id = room_id_cap
+                if app is not None:
+                    _ws_mgr = getattr(getattr(app.state, "_container", None), "ws_manager", None)
+                    if _ws_mgr is not None:
+                        _ws_mgr.set_room(ws, room_id_cap)
             await self._send_json(ws, {
                 "type": "client_capabilities_ack",
                 "output_streaming": session.output_streaming_enabled,
                 "output_audio_format": session.output_audio_format,
+                "room_id": session.room_id,
             })
             return True
 
@@ -291,6 +321,14 @@ class RealtimeVoiceService:
                 session.input_stream_open = True
                 session.input_audio_chunks = []
                 session.input_audio_bytes = 0
+                session.stt_stream_queue = asyncio.Queue()
+                session.stt_partial_text = ""
+            # Start background streaming STT task
+            ctx = self._extract_turn_context(ws)
+            if ctx is not None and hasattr(ctx.stt, "transcribe_streaming"):
+                asyncio.create_task(
+                    self._run_streaming_stt(ws, session_key, session, ctx.stt)
+                )
             await self._send_json(ws, {"type": "input_audio_start_ack"})
             return True
 
@@ -305,9 +343,14 @@ class RealtimeVoiceService:
                     return True
                 audio_bytes = b"".join(session.input_audio_chunks)
                 buffered_bytes = session.input_audio_bytes
+                stt_queue = session.stt_stream_queue
                 session.input_stream_open = False
                 session.input_audio_chunks = []
                 session.input_audio_bytes = 0
+                session.stt_stream_queue = None
+            # Signal end-of-stream to the streaming STT queue
+            if stt_queue is not None:
+                await stt_queue.put(None)
             await self._send_json(ws, {
                 "type": "input_audio_commit_ack",
                 "byte_length": buffered_bytes,
@@ -326,9 +369,14 @@ class RealtimeVoiceService:
             session = await self._get_or_create_session(session_key)
             async with session.lock:
                 had_stream = session.input_stream_open
+                stt_queue = session.stt_stream_queue
                 session.input_stream_open = False
                 session.input_audio_chunks = []
                 session.input_audio_bytes = 0
+                session.stt_stream_queue = None
+            # Signal cancellation to the streaming STT queue
+            if stt_queue is not None:
+                await stt_queue.put(None)
             await self._send_json(ws, {
                 "type": "input_audio_cancel_ack",
                 "active": had_stream,
@@ -352,6 +400,9 @@ class RealtimeVoiceService:
             if session.input_stream_open:
                 session.input_audio_chunks.append(audio_bytes)
                 session.input_audio_bytes += len(audio_bytes)
+                # Feed chunk to streaming STT if active
+                if session.stt_stream_queue is not None:
+                    await session.stt_stream_queue.put(audio_bytes)
                 return
         await self.start_audio_turn(session_key, ctx, audio_bytes)
 
@@ -364,6 +415,8 @@ class RealtimeVoiceService:
         turn_id: int | None = None,
         event_id: str | None = None,
         followup_prompt: str | None = None,
+        speaker_name: str | None = None,
+        room_id: str | None = None,
     ) -> None:
         speaker_task: asyncio.Task[None] | None = None
         finish_reason = "completed"
@@ -411,6 +464,8 @@ class RealtimeVoiceService:
                     transcript,
                     event_id=event_id,
                     followup_prompt=followup_prompt,
+                    speaker_name=speaker_name,
+                    room_id=room_id,
                 )
             except RuntimeError as exc:
                 err = str(exc)
@@ -419,13 +474,15 @@ class RealtimeVoiceService:
                     fallback_text = LLM_TIMEOUT_MSG
                 elif "400" in err and "bad request" in err.lower():
                     _LOGGER.warning("voice_ws.clearing_corrupt_session", session_id=ctx.session_id)
-                    await ctx.app.state.conversation_service.clear_session_state(ctx.session_id)
+                    await ctx.app.state._container.conversation_service.clear_session_state(ctx.session_id)
                     try:
                         result = await adapter.run_turn(
                             ctx,
                             transcript,
                             event_id=event_id,
                             followup_prompt=followup_prompt,
+                            speaker_name=speaker_name,
+                            room_id=room_id,
                         )
                     except Exception as retry_exc:
                         _LOGGER.error("voice_ws.llm_retry_failed", exc=str(retry_exc))
@@ -458,61 +515,91 @@ class RealtimeVoiceService:
                     from avatar_backend.config import get_settings as _get_settings
                     _settings = _get_settings()
                     offset_s = _settings.speaker_audio_offset_ms / 1000.0
-                    wav_bytes, word_timings = await adapter.synthesise_reply(ctx, reply_text)
-                    try:
-                        from avatar_backend.routers.announce import _log_announcement
-                        _log_announcement(reply_text, "normal", [], source="voice", query=transcript)
-                        ctx.ws_mgr.increment_message_count(ctx.ws)
-                    except Exception:
-                        pass
-                    if session_key and not await self._is_current_turn(session_key, turn_id):
-                        finish_reason = "superseded"
-                        await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
-                        finish_sent = True
-                        return
-                    if ctx.speaker and ctx.speaker.is_configured:
-                        public_url = (_settings.public_url or "").rstrip("/")
-                        if public_url:
-                            token = uuid.uuid4().hex
-                            expiry = time.time() + _AUDIO_CACHE_TTL
-                            cache = ctx.app.state.audio_cache
-                            expired = [k for k, (_, exp) in cache.items() if time.time() > exp]
-                            for k in expired:
-                                cache.pop(k, None)
-                            cache[token] = (wav_bytes, expiry)
-                            audio_url = f"{public_url}/tts/audio/{token}"
 
-                            # Convert WAV to Alexa-compatible MP3 for Echo SSML playback
-                            mp3_url = None
+                    # Try progressive sentence-level streaming first
+                    progressive_done = False
+                    try:
+                        progressive_done = await self._send_sentence_first_audio(
+                            ctx, adapter,
+                            session_key=session_key,
+                            turn_id=turn_id,
+                            reply_text=reply_text,
+                            offset_s=offset_s,
+                        )
+                    except Exception as exc:
+                        _LOGGER.debug("voice_ws.progressive_audio_failed", exc=repr(exc))
+
+                    if progressive_done:
+                        # Progressive streaming handled everything — log and skip single-pass
+                        try:
+                            from avatar_backend.routers.announce import _log_announcement
+                            _log_announcement(reply_text, "normal", [], source="voice", query=transcript)
+                            ctx.ws_mgr.increment_message_count(ctx.ws)
+                        except Exception:
+                            pass
+                        # Speaker broadcast for progressive path
+                        if ctx.speaker and ctx.speaker.is_configured:
                             try:
-                                from avatar_backend.routers.announce import _wav_to_alexa_mp3
-                                mp3_bytes = await _wav_to_alexa_mp3(wav_bytes)
-                                if mp3_bytes:
-                                    mp3_token = uuid.uuid4().hex
-                                    cache[f"mp3:{mp3_token}"] = (mp3_bytes, time.time() + 120)
-                                    mp3_url = f"{public_url}/tts/audio_mp3/{mp3_token}"
+                                await ctx.speaker.speak(reply_text, area_aware=True)
                             except Exception:
                                 pass
+                    else:
+                        # Single-pass TTS fallback
+                        wav_bytes, word_timings = await adapter.synthesise_reply(ctx, reply_text)
+                        try:
+                            from avatar_backend.routers.announce import _log_announcement
+                            _log_announcement(reply_text, "normal", [], source="voice", query=transcript)
+                            ctx.ws_mgr.increment_message_count(ctx.ws)
+                        except Exception:
+                            pass
+                        if session_key and not await self._is_current_turn(session_key, turn_id):
+                            finish_reason = "superseded"
+                            await self._finish_turn(ctx.ws, session_key, turn_id, finish_reason)
+                            finish_sent = True
+                            return
+                        if ctx.speaker and ctx.speaker.is_configured:
+                            public_url = (_settings.public_url or "").rstrip("/")
+                            if public_url:
+                                token = uuid.uuid4().hex
+                                expiry = time.time() + _AUDIO_CACHE_TTL
+                                cache = ctx.app.state._container.audio_cache
+                                expired = [k for k, (_, exp) in cache.items() if time.time() > exp]
+                                for k in expired:
+                                    cache.pop(k, None)
+                                cache[token] = (wav_bytes, expiry)
+                                audio_url = f"{public_url}/tts/audio/{token}"
 
-                            speaker_task = asyncio.create_task(ctx.speaker.speak_wav(reply_text, audio_url, mp3_url=mp3_url, area_aware=True))
-                        else:
-                            speaker_task = asyncio.create_task(ctx.speaker.speak(reply_text, area_aware=True))
+                                # Convert WAV to Alexa-compatible MP3 for Echo SSML playback
+                                mp3_url = None
+                                try:
+                                    from avatar_backend.routers.announce import _wav_to_alexa_mp3
+                                    mp3_bytes = await _wav_to_alexa_mp3(wav_bytes)
+                                    if mp3_bytes:
+                                        mp3_token = uuid.uuid4().hex
+                                        cache[f"mp3:{mp3_token}"] = (mp3_bytes, time.time() + 120)
+                                        mp3_url = f"{public_url}/tts/audio_mp3/{mp3_token}"
+                                except Exception:
+                                    pass
 
-                    if offset_s > 0 and speaker_task is not None:
-                        await asyncio.sleep(offset_s)
+                                speaker_task = asyncio.create_task(ctx.speaker.speak_wav(reply_text, audio_url, mp3_url=mp3_url, area_aware=True))
+                            else:
+                                speaker_task = asyncio.create_task(ctx.speaker.speak(reply_text, area_aware=True))
 
-                    await self._send_json(ctx.ws, {
-                        "type": "audio_start",
-                        "byte_length": len(wav_bytes),
-                    }, turn_id=turn_id)
-                    await self._send_json(ctx.ws, {
-                        "type": "word_timings",
-                        "word_timings": word_timings,
-                    }, turn_id=turn_id)
-                    await self._send_audio_output(ctx.ws, session_key, wav_bytes, turn_id=turn_id)
+                        if offset_s > 0 and speaker_task is not None:
+                            await asyncio.sleep(offset_s)
 
-                    if speaker_task is not None:
-                        await speaker_task
+                        await self._send_json(ctx.ws, {
+                            "type": "audio_start",
+                            "byte_length": len(wav_bytes),
+                        }, turn_id=turn_id)
+                        await self._send_json(ctx.ws, {
+                            "type": "word_timings",
+                            "word_timings": word_timings,
+                        }, turn_id=turn_id)
+                        await self._send_audio_output(ctx.ws, session_key, wav_bytes, turn_id=turn_id)
+
+                        if speaker_task is not None:
+                            await speaker_task
                 except Exception as exc:
                     _LOGGER.error("voice_ws.tts_error", exc=str(exc))
                     await self._send_json(ctx.ws, {"type": "error", "detail": f"TTS failed: {exc}"}, turn_id=turn_id)
@@ -640,14 +727,30 @@ class RealtimeVoiceService:
         if not session.output_streaming_enabled or session.output_audio_format != "pcm_s16le":
             return False
 
-        first_text, remaining_text = segment_texts
-        remainder_task = asyncio.create_task(adapter.synthesise_reply(ctx, remaining_text))
-        first_wav, first_word_timings = await adapter.synthesise_reply(ctx, first_text)
+        # Queue synthesis of segments 2..N concurrently while segment 1 synthesises
+        remainder_tasks = [
+            asyncio.create_task(adapter.synthesise_reply(ctx, seg_text))
+            for seg_text in segment_texts[1:]
+        ]
+
+        try:
+            first_wav, first_word_timings = await adapter.synthesise_reply(ctx, segment_texts[0])
+        except Exception as exc:
+            _LOGGER.warning("tts.segment_failed", segment_index=0, text=segment_texts[0][:60], exc=repr(exc))
+            # Cancel remaining tasks and bail
+            for t in remainder_tasks:
+                t.cancel()
+            for t in remainder_tasks:
+                with suppress(asyncio.CancelledError):
+                    await t
+            return False
 
         if session_key and not await self._is_current_turn(session_key, turn_id):
-            remainder_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await remainder_task
+            for t in remainder_tasks:
+                t.cancel()
+            for t in remainder_tasks:
+                with suppress(asyncio.CancelledError):
+                    await t
             return True
 
         pcm_bytes, sample_rate, channels, sample_width_bytes = self._extract_pcm_stream(first_wav)
@@ -678,44 +781,108 @@ class RealtimeVoiceService:
         for chunk in first_chunks:
             await self._send_wav(ctx.ws, chunk)
 
-        remaining_wav, remaining_word_timings = await remainder_task
-        if session_key and not await self._is_current_turn(session_key, turn_id):
-            return True
+        # Stream remaining segments sequentially, with cumulative offset
+        cumulative_offset_ms = self._wav_duration_ms(first_wav)
 
-        remaining_pcm, _, _, _ = self._extract_pcm_stream(remaining_wav)
-        remaining_chunks = [remaining_pcm[i:i + chunk_size] for i in range(0, len(remaining_pcm), chunk_size)] or [b""]
-        offset_ms = self._wav_duration_ms(first_wav)
-        adjusted_word_timings = [
-            {
-                "word": str(item.get("word") or ""),
-                "start_ms": int(item.get("start_ms", 0) + offset_ms),
-                "end_ms": int(item.get("end_ms", 0) + offset_ms),
-            }
-            for item in (remaining_word_timings or [])
-        ]
-        if adjusted_word_timings:
-            await self._send_json(ctx.ws, {
-                "type": "word_timings",
-                "word_timings": adjusted_word_timings,
-                "append": True,
-            }, turn_id=turn_id)
-        for chunk in remaining_chunks:
-            await self._send_wav(ctx.ws, chunk)
+        for seg_idx, task in enumerate(remainder_tasks, start=1):
+            try:
+                seg_wav, seg_word_timings = await task
+            except Exception as exc:
+                _LOGGER.warning(
+                    "tts.segment_failed",
+                    segment_index=seg_idx,
+                    text=segment_texts[seg_idx][:60],
+                    exc=repr(exc),
+                )
+                continue
+
+            if session_key and not await self._is_current_turn(session_key, turn_id):
+                # Cancel any remaining tasks
+                for remaining_task in remainder_tasks[seg_idx:]:
+                    remaining_task.cancel()
+                for remaining_task in remainder_tasks[seg_idx:]:
+                    with suppress(asyncio.CancelledError):
+                        await remaining_task
+                return True
+
+            seg_pcm, _, _, _ = self._extract_pcm_stream(seg_wav)
+            seg_chunks = [seg_pcm[i:i + chunk_size] for i in range(0, len(seg_pcm), chunk_size)] or [b""]
+            adjusted_word_timings = [
+                {
+                    "word": str(item.get("word") or ""),
+                    "start_ms": int(item.get("start_ms", 0) + cumulative_offset_ms),
+                    "end_ms": int(item.get("end_ms", 0) + cumulative_offset_ms),
+                }
+                for item in (seg_word_timings or [])
+            ]
+            if adjusted_word_timings:
+                await self._send_json(ctx.ws, {
+                    "type": "word_timings",
+                    "word_timings": adjusted_word_timings,
+                    "append": True,
+                }, turn_id=turn_id)
+            for chunk in seg_chunks:
+                await self._send_wav(ctx.ws, chunk)
+
+            cumulative_offset_ms += self._wav_duration_ms(seg_wav)
+
         await self._send_json(ctx.ws, {"type": "output_audio_end"}, turn_id=turn_id)
         return True
 
-    def _split_reply_for_progressive_audio(self, reply_text: str) -> tuple[str, str] | None:
+    # ── Streaming STT helpers ─────────────────────────────────────────────────
+
+    @staticmethod
+    async def _queue_to_async_iter(queue: asyncio.Queue[bytes | None]):
+        """Yield bytes from an asyncio.Queue until None (sentinel) is received."""
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                return
+            yield chunk
+
+    async def _run_streaming_stt(
+        self,
+        ws: WebSocket,
+        session_key: str,
+        session: VoiceSessionState,
+        stt: STTService,
+    ) -> None:
+        """Background task: consume the STT stream queue and emit partial_transcript messages."""
+        queue = session.stt_stream_queue
+        if queue is None:
+            return
+        try:
+            async for partial_text in stt.transcribe_streaming(
+                self._queue_to_async_iter(queue)
+            ):
+                if partial_text:
+                    session.stt_partial_text = partial_text
+                    await self._send_json(ws, {
+                        "type": "partial_transcript",
+                        "text": partial_text,
+                    })
+        except Exception as exc:
+            _LOGGER.debug("voice_ws.streaming_stt_error", exc=repr(exc))
+
+    def _split_reply_for_progressive_audio(self, reply_text: str) -> list[str] | None:
         text = (reply_text or "").strip()
         if len(text) < 80:
             return None
-        match = _STREAMING_SENTENCE_RE.match(text)
-        if not match:
+        # Split at all sentence boundaries (.!? followed by whitespace or end)
+        parts = re.split(r"(?<=[.!?])(?:\s+|$)", text)
+        segments = [p.strip() for p in parts if p.strip()]
+        if len(segments) < 2:
             return None
-        first = match.group(1).strip()
-        rest = match.group(2).strip()
-        if len(first) < 24 or len(rest) < 24:
+        # Merge trailing short segments into the previous one
+        merged: list[str] = [segments[0]]
+        for seg in segments[1:]:
+            if len(seg) < 24:
+                merged[-1] = merged[-1] + " " + seg
+            else:
+                merged.append(seg)
+        if len(merged) < 2 or len(merged[0]) < 24:
             return None
-        return first, rest
+        return merged
 
     def _wav_duration_ms(self, wav_bytes: bytes) -> int:
         with wave.open(io.BytesIO(wav_bytes), "rb") as wf:

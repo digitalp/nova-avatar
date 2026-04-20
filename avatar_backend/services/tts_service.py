@@ -227,17 +227,23 @@ class AfroTTSService(BaseTTSService):
         import io as _io
         import wave as _wave
         import numpy as np
-        with _suppress_python_output():
-            pipeline = self._get_pipeline()
-            chunks: list = []
-            with _suppress_process_stderr():
-                for _, _, audio in pipeline(text, voice=self._voice, speed=self._speed):
-                    if audio is not None:
-                        # Kokoro yields PyTorch tensors — convert to numpy
-                        if hasattr(audio, 'detach'):
-                            audio = audio.detach().cpu().numpy()
-                        chunks.append(audio)
+        try:
+            with _suppress_python_output():
+                pipeline = self._get_pipeline()
+                chunks: list = []
+                with _suppress_process_stderr():
+                    for _, _, audio in pipeline(text, voice=self._voice, speed=self._speed):
+                        if audio is not None:
+                            if hasattr(audio, 'detach'):
+                                audio = audio.detach().cpu().numpy()
+                            chunks.append(audio)
+        except Exception as exc:
+            _LOGGER.warning('tts.afrotts.synthesis_error', exc=str(exc)[:100])
+            self._pipeline = None  # Force reload on next attempt
+            return _silent_wav(self._sample_rate)
         if not chunks:
+            _LOGGER.warning('tts.afrotts.no_audio_chunks', text_len=len(text), voice=self._voice)
+            self._pipeline = None  # Force reload
             return _silent_wav(self._sample_rate)
         audio_np = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
         pcm16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)

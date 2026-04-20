@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from typing import Any
 
+import httpx
 import structlog
 
 from avatar_backend.services.llm_service import LLMService
@@ -31,9 +33,36 @@ _ALLOWED_CATEGORIES = {
 class PersistentMemoryService:
     """Long-term household memory stored in SQLite and injected into chat context."""
 
-    def __init__(self, db: MetricsDB) -> None:
+    def __init__(self, db: MetricsDB, ollama_url: str = "http://localhost:11434") -> None:
         self._db = db
+        self._ollama_url = ollama_url.rstrip("/")
+        self._embedding_cache: dict[tuple[int, str], list[float]] = {}
         _LOGGER.info("persistent_memory.initialized")
+
+    async def _get_embedding(self, text: str) -> list[float] | None:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    f"{self._ollama_url}/api/embed",
+                    json={"model": "qwen2.5:7b", "input": text},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                embeddings = data.get("embeddings")
+                if embeddings and len(embeddings) > 0:
+                    return embeddings[0]
+        except Exception as exc:
+            _LOGGER.debug("persistent_memory.embedding_failed", exc=str(exc))
+        return None
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(x * x for x in b))
+        if na == 0 or nb == 0:
+            return 0.0
+        return dot / (na * nb)
 
     def list_memories(self, limit: int = 200) -> list[dict]:
         return self._db.list_memories(limit=limit)
@@ -70,13 +99,54 @@ class PersistentMemoryService:
         confidence: float = 0.9,
         pinned: bool = False,
     ) -> dict:
-        return self._db.upsert_memory(
+        result = self._db.upsert_memory(
             summary=summary,
             category=category,
             source=source,
             confidence=confidence,
             pinned=pinned,
         )
+        if result and result.get("id"):
+            self.invalidate_embedding_cache(int(result["id"]))
+        return result
+
+    async def build_context_async(self, query: str, limit: int = 5) -> tuple[str, list[int]]:
+        memories = self._db.list_memories(limit=300)
+        if not memories:
+            return "", []
+
+        # Try embedding-based ranking
+        query_emb = await self._get_embedding(query)
+        if query_emb:
+            scored: list[tuple[float, dict]] = []
+            for mem in memories:
+                summary = mem.get("summary", "")
+                cache_key = (int(mem["id"]), summary)
+                if cache_key in self._embedding_cache:
+                    mem_emb = self._embedding_cache[cache_key]
+                else:
+                    mem_emb = await self._get_embedding(summary)
+                    if mem_emb:
+                        self._embedding_cache[cache_key] = mem_emb
+                if mem_emb:
+                    sim = self._cosine_similarity(query_emb, mem_emb)
+                    # Boost pinned and high-confidence memories
+                    if mem.get("pinned"):
+                        sim += 0.1
+                    sim += min(float(mem.get("confidence", 0.0)), 1.0) * 0.05
+                    scored.append((sim, mem))
+                else:
+                    # Fallback: keyword score for this memory
+                    kw_score = self._keyword_score(query, mem)
+                    if kw_score > 0:
+                        scored.append((kw_score * 0.3, mem))
+
+            chosen = [m for score, m in sorted(scored, key=lambda x: x[0], reverse=True) if score > 0.3][:limit]
+            if chosen:
+                return self._format_context(chosen)
+
+        # Fallback to keyword scoring
+        return self.build_context(query, limit)
 
     def build_context(self, query: str, limit: int = 5) -> tuple[str, list[int]]:
         memories = self._db.list_memories(limit=300)
@@ -166,6 +236,36 @@ class PersistentMemoryService:
             + "\n".join(lines)
         )
         return context, ids
+
+    def _keyword_score(self, query: str, mem: dict) -> float:
+        q = self._normalize(query)
+        q_tokens = self._tokens(q)
+        summary = self._normalize(mem.get("summary", ""))
+        tokens = self._tokens(summary) | self._tokens(self._normalize(mem.get("category", "")))
+        overlap = len(q_tokens & tokens)
+        score = overlap * 2.0
+        if mem.get("pinned"):
+            score += 1.0
+        score += min(float(mem.get("confidence", 0.0)), 1.0)
+        return score
+
+    @staticmethod
+    def _format_context(chosen: list[dict]) -> tuple[str, list[int]]:
+        lines = []
+        ids: list[int] = []
+        for mem in chosen:
+            ids.append(int(mem["id"]))
+            category = mem.get("category", "general")
+            lines.append(f"- [{category}] {mem.get('summary', '')}")
+        context = (
+            "Long-term household memory. Use only when relevant and do not treat it as newer than live Home Assistant state.\n"
+            + "\n".join(lines)
+        )
+        return context, ids
+    def invalidate_embedding_cache(self, memory_id: int) -> None:
+        keys_to_remove = [k for k in self._embedding_cache if k[0] == memory_id]
+        for k in keys_to_remove:
+            del self._embedding_cache[k]
 
     def mark_referenced(self, memory_ids: list[int]) -> None:
         self._db.mark_memories_referenced(memory_ids)

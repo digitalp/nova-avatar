@@ -110,8 +110,8 @@ class PromptSyncService:
         self._prompt_file.write_text(updated_prompt)
 
         # Hot-reload session manager + proactive service
-        self._app.state.session_manager = SessionManager(updated_prompt)
-        proactive = getattr(self._app.state, "proactive_service", None)
+        self._app.state._container.session_manager = SessionManager(updated_prompt)
+        proactive = getattr(self._app.state._container, "proactive_service", None)
         if proactive is not None:
             proactive.update_system_prompt(updated_prompt)
 

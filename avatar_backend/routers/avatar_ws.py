@@ -43,10 +43,10 @@ async def avatar_state_websocket(
     Joins the broadcast group; state updates arrive automatically
     whenever the voice pipeline changes state.
     """
-    ws_mgr: ConnectionManager = ws.app.state.ws_manager
+    ws_mgr: ConnectionManager = ws.app.state._container.ws_manager
 
     await ws_mgr.connect(ws)
-    surface_state = await ws.app.state.surface_state_service.get_snapshot()
+    surface_state = await ws.app.state._container.surface_state_service.get_snapshot()
     await ws.send_text(json.dumps({"type": "avatar_state", "state": surface_state["avatar_state"]}))
     await ws.send_text(json.dumps({"type": "surface_state", **surface_state}))
 
@@ -65,7 +65,7 @@ async def avatar_state_websocket(
                     elif data.get("type") == "surface_action":
                         action = str(data.get("action") or "")
                         event_id = str(data.get("event_id") or "").strip()
-                        action_service = getattr(ws.app.state, "action_service", None) or ActionService()
+                        action_service = getattr(ws.app.state._container, "action_service", None) or ActionService()
                         ack = await action_service.handle_surface_action(
                             app=ws.app,
                             ws_mgr=ws_mgr,

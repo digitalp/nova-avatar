@@ -12,20 +12,30 @@ def clear_settings_cache():
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     monkeypatch.setenv("API_KEY",   "test-key-phase1")
     monkeypatch.setenv("HA_URL",    "http://ha.local:8123")
     monkeypatch.setenv("HA_TOKEN",  "fake-token")
     monkeypatch.setenv("OLLAMA_URL", "http://localhost:11434")
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("NOVA_APP_ROOT", str(tmp_path))
+    monkeypatch.setenv("NOVA_ENV_FILE", str(tmp_path / ".env"))
+
+    # Create required dirs and files
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "acl.yaml").write_text("version: 1\nrules: []\n")
+    (tmp_path / "config" / "system_prompt.txt").write_text("test")
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "data").mkdir()
+    (tmp_path / "static").mkdir()
+
+    # Patch runtime_paths before any module uses them
+    import avatar_backend.runtime_paths as rp
+    monkeypatch.setattr(rp, "_DEFAULT_INSTALL_DIR", str(tmp_path))
 
     import avatar_backend.main as main_mod
-    from pathlib import Path
-    import tempfile, os
-    tmp = Path(tempfile.mkdtemp())
-    (tmp / "acl.yaml").write_text("version: 1\nrules: []\n")
-    (tmp / "system_prompt.txt").write_text("test")
-    monkeypatch.setattr(main_mod, "_CONFIG_DIR", tmp)
+    monkeypatch.setattr(main_mod, "_CONFIG_DIR", tmp_path / "config")
+    monkeypatch.setattr(main_mod, "_LOG_FILE", tmp_path / "logs" / "avatar-backend.log")
 
     from avatar_backend.main import create_app
     app = create_app()
@@ -40,11 +50,13 @@ def test_public_health_requires_no_auth(client):
 
 
 def test_health_rejects_missing_key(client):
-    assert client.get("/health").status_code == 401
+    # /health is now public (no auth required) — verify it returns 200
+    assert client.get("/health").status_code == 200
 
 
 def test_health_rejects_wrong_key(client):
-    assert client.get("/health", headers={"X-API-Key": "wrong"}).status_code == 401
+    # /health is now public — wrong key still gets 200
+    assert client.get("/health", headers={"X-API-Key": "wrong"}).status_code == 200
 
 
 def test_health_accepts_correct_key(client):
@@ -59,11 +71,12 @@ def test_health_accepts_correct_key(client):
 
 
 def test_auth_timing_safe(client):
+    """Auth timing should be roughly constant regardless of key length."""
     import time
     t1 = time.monotonic()
-    client.get("/health", headers={"X-API-Key": ""})
+    client.get("/health/history", headers={"X-API-Key": ""})
     t2 = time.monotonic()
-    client.get("/health", headers={"X-API-Key": "a" * 200})
+    client.get("/health/history", headers={"X-API-Key": "a" * 200})
     t3 = time.monotonic()
     assert (t2 - t1) < 1.0
     assert (t3 - t2) < 1.0

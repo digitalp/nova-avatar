@@ -89,7 +89,7 @@ class LogStore:
                     ts     = data.pop("timestamp", datetime.now(timezone.utc).isoformat())
 
                     entry = {
-                        "ts":     ts[11:19] if len(ts) > 8 else ts,
+                        "ts":     ts,  # full ISO datetime; recent_logs() truncates for display
                         "level":  level,
                         "event":  event,
                         "logger": logger,

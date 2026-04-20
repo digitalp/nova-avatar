@@ -18,6 +18,8 @@ _MAX_FAILS   = 10        # block after this many failures within the window
 
 def is_rate_limited(ip: str) -> bool:
     """Return True if *ip* has exceeded the failure threshold."""
+    if ip.startswith(("127.", "192.168.", "10.", "172.16.", "172.17.", "172.18.")):
+        return False
     now = time.monotonic()
     with _lock:
         _attempts[ip] = [t for t in _attempts[ip] if now - t < _WINDOW]

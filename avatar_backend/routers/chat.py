@@ -1,9 +1,10 @@
 from __future__ import annotations
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 import structlog
 
+from avatar_backend.bootstrap.container import AppContainer, get_container
 from avatar_backend.middleware.auth import verify_api_key
 from avatar_backend.models.messages import ChatRequest, ChatResponse
 from avatar_backend.services.conversation_service import (
@@ -24,9 +25,9 @@ class EventFollowupChatRequest(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(verify_api_key)])
-async def chat(body: ChatRequest, request: Request) -> ChatResponse:
+async def chat(body: ChatRequest, container: AppContainer = Depends(get_container)) -> ChatResponse:
     """Full tool-execution chat endpoint."""
-    llm = request.app.state.llm_service
+    llm = container.llm_service
 
     if not await llm.is_ready():
         raise HTTPException(
@@ -36,7 +37,7 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
 
     logger.info("chat.request", session_id=body.session_id, text_len=len(body.text))
     try:
-        result = await request.app.state.conversation_service.handle_text_turn(
+        result = await container.conversation_service.handle_text_turn(
             ConversationTurnRequest(
                 session_id=body.session_id,
                 user_text=body.text,
@@ -67,8 +68,8 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
 
 
 @router.post("/chat/followup-event", response_model=ChatResponse, dependencies=[Depends(verify_api_key)])
-async def chat_followup_event(body: EventFollowupChatRequest, request: Request) -> ChatResponse:
-    llm = request.app.state.llm_service
+async def chat_followup_event(body: EventFollowupChatRequest, container: AppContainer = Depends(get_container)) -> ChatResponse:
+    llm = container.llm_service
 
     if not await llm.is_ready():
         raise HTTPException(
@@ -76,7 +77,7 @@ async def chat_followup_event(body: EventFollowupChatRequest, request: Request) 
             detail="LLM not ready — model may still be loading.",
         )
 
-    recent_events: dict[str, tuple[float, dict[str, Any]]] = getattr(request.app.state, "recent_event_contexts", {})
+    recent_events: dict[str, tuple[float, dict[str, Any]]] = getattr(container, "recent_event_contexts", {})
     stored = recent_events.get(body.event_id)
     if not stored:
         raise HTTPException(
@@ -87,7 +88,7 @@ async def chat_followup_event(body: EventFollowupChatRequest, request: Request) 
     _, event_context = stored
     logger.info("chat.followup_event", session_id=body.session_id, event_id=body.event_id)
     try:
-        await request.app.state.conversation_service.set_event_followup_context(
+        await container.conversation_service.set_event_followup_context(
             body.session_id,
             PendingEventFollowupContext(
                 event_type=str(event_context.get("event_type", "event")),
@@ -95,7 +96,7 @@ async def chat_followup_event(body: EventFollowupChatRequest, request: Request) 
                 event_context=dict(event_context.get("event_context", {})),
             )
         )
-        result = await request.app.state.conversation_service.handle_text_turn(
+        result = await container.conversation_service.handle_text_turn(
             ConversationTurnRequest(
                 session_id=body.session_id,
                 user_text=body.text,
@@ -118,12 +119,12 @@ async def chat_followup_event(body: EventFollowupChatRequest, request: Request) 
 
 
 @router.delete("/chat/{session_id}", dependencies=[Depends(verify_api_key)])
-async def clear_session(session_id: str, request: Request) -> dict:
-    await request.app.state.conversation_service.clear_session_state(session_id)
+async def clear_session(session_id: str, container: AppContainer = Depends(get_container)) -> dict:
+    await container.conversation_service.clear_session_state(session_id)
     return {"cleared": session_id}
 
 
 @router.get("/chat/sessions/stats", dependencies=[Depends(verify_api_key)])
-async def session_stats(request: Request) -> dict:
-    sm: SessionManager = request.app.state.session_manager
+async def session_stats(container: AppContainer = Depends(get_container)) -> dict:
+    sm: SessionManager = container.session_manager
     return {"active_sessions": sm.active_count()}

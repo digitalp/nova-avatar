@@ -12,6 +12,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from avatar_backend.services.prompt_bootstrap import (  # noqa: E402
     build_home_runtime_config,
+    fetch_area_mapping,
     fetch_ha_states,
     generate_prompt,
     parse_notes,
@@ -60,6 +61,7 @@ def main() -> int:
     notes = parse_notes(args.notes)
 
     states: list[dict] | None = None
+    area_map: dict[str, str] = {}
     source_label = "Manual installer inputs only"
     if args.ha_url and args.ha_token:
         try:
@@ -70,6 +72,14 @@ def main() -> int:
             print(f"Warning: {exc}", file=sys.stderr)
             print("Continuing with installer-provided context only.", file=sys.stderr)
 
+        try:
+            import asyncio as _asyncio
+            area_map = _asyncio.run(fetch_area_mapping(args.ha_url, args.ha_token))
+            if area_map:
+                print(f"Fetched area assignments for {len(area_map)} entities.")
+        except Exception as exc:
+            print(f"Warning: Could not fetch areas: {exc}", file=sys.stderr)
+
     generated = generate_prompt(
         template_text=template_text,
         address=args.address,
@@ -79,6 +89,7 @@ def main() -> int:
         extra_notes=notes,
         states=states,
         source_label=source_label,
+        area_by_entity=area_map,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

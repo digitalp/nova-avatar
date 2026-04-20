@@ -143,6 +143,31 @@ HA_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "play_music",
+            "description": (
+                "Search for and play music on a speaker. Searches Music Assistant "
+                "for the artist/song/album, then plays the first result on the specified speaker. "
+                "Use this instead of call_ha_service for music playback."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "What to search for — artist name, song title, or album.",
+                    },
+                    "entity_id": {
+                        "type": "string",
+                        "description": "The media_player entity ID to play on, e.g. media_player.living_room_sonos.",
+                    },
+                },
+                "required": ["query", "entity_id"],
+            },
+        },
+    },
 ]
 
 # Anthropic uses a slightly different tool schema format
@@ -281,14 +306,25 @@ class _OllamaBackend:
         elif use_tools:
             logger.info("llm.ollama_tools_disabled", model=self._model)
 
+        _GPU_GATE.chat_started()
         t0 = time.monotonic()
-        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
-            resp = await client.post(f"{self._base_url}/api/chat", json=payload)
-            resp.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(90.0)) as client:
+                resp = await client.post(f"{self._base_url}/api/chat", json=payload)
+                resp.raise_for_status()
+        finally:
+            _GPU_GATE.chat_finished()
 
         data    = resp.json()
         message = data.get("message", {})
-        text    = (message.get("content") or "").strip()
+        _raw_content = message.get("content")
+        if isinstance(_raw_content, list):
+            text = " ".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in _raw_content
+            ).strip()
+        else:
+            text = (_raw_content or "").strip()
         tools   = _parse_tool_calls_openai(message.get("tool_calls") or [])
         _log("ollama", self._model, t0, text, tools,
              input_tokens=data.get("prompt_eval_count", 0),
@@ -624,6 +660,41 @@ class _AnthropicBackend:
 
 # ── Vision helpers ───────────────────────────────────────────────────────────
 
+from avatar_backend.services.gpu_gate import GPUMemoryGate as _GPUMemoryGate
+_GPU_GATE = _GPUMemoryGate(min_free_mb=200)  # Ollama swaps models dynamically — just need enough for CUDA overhead
+
+# Gemini key pool — set by bootstrap, used by vision calls
+_gemini_key_pool = None
+
+# Limit concurrent vision API calls to prevent server overload
+_VISION_SEMAPHORE = asyncio.Semaphore(2)
+
+def set_gemini_key_pool(pool) -> None:
+    global _gemini_key_pool
+    _gemini_key_pool = pool
+
+def _get_gemini_key(camera_id: str | None = None) -> str | None:
+    """Get a Gemini API key from the pool, or fall back to settings."""
+    if _gemini_key_pool and _gemini_key_pool.size:
+        return _gemini_key_pool.get_key(camera_id)
+    return get_settings().google_api_key or None
+
+def _report_gemini_429(key: str) -> None:
+    if _gemini_key_pool:
+        _gemini_key_pool.report_429(key)
+
+
+def _vision_ollama_url() -> str:
+    """Return the Ollama URL for vision calls — remote if configured, local otherwise."""
+    from avatar_backend.config import get_settings
+    s = get_settings()
+    return (s.ollama_vision_url or "").strip() or s.ollama_url
+
+
+def _vision_is_remote() -> bool:
+    from avatar_backend.config import get_settings
+    return bool((get_settings().ollama_vision_url or "").strip())
+
 _DEFAULT_IMAGE_PROMPT = (
     "Describe what you see in this security camera image in 2-3 sentences. "
     "Focus on people, vehicles, objects, and any notable activity."
@@ -646,22 +717,81 @@ _MOTION_IMAGE_PROMPT = (
     "Otherwise reply with a single concise sentence describing what you see."
 )
 
+_MOONDREAM_MOTION_PROMPT = (
+    "Describe what you see in this outdoor security camera image in one sentence. "
+    "Focus on people, vehicles, and activity."
+)
+
+_MOONDREAM_DEFAULT_PROMPT = (
+    "Describe what you see in this image in one sentence."
+)
+
+_MOONDREAM_DOORBELL_PROMPT = (
+    "Describe the person at the door. Mention clothing and any items they carry."
+)
+
+
+def _is_moondream(model: str) -> bool:
+    return "moondream" in (model or "").lower()
+
+def _resize_for_ollama(image_bytes: bytes, max_width: int = 1280) -> bytes:
+    """Downscale image to max_width if wider, preserving aspect ratio.
+
+    llama3.2-vision tiles images at 560×560.  A 2560×1440 camera frame creates
+    ~15 tiles, which takes >60 s to process on an RTX 2060.  Capping at 1280 px
+    wide reduces that to ~4 tiles and keeps inference well under 60 s with no
+    meaningful quality loss for security-camera analysis.
+    """
+    try:
+        import io
+        from PIL import Image as _PILImage  # type: ignore[import]
+        img = _PILImage.open(io.BytesIO(image_bytes))
+        if img.width <= max_width:
+            return image_bytes
+        ratio = max_width / img.width
+        new_size = (max_width, int(img.height * ratio))
+        img = img.resize(new_size, _PILImage.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        return buf.getvalue()
+    except Exception:
+        return image_bytes  # fall back to original if Pillow unavailable
+
+
 async def _ollama_describe_image(image_bytes: bytes, base_url: str, model: str, prompt: str = _DEFAULT_IMAGE_PROMPT) -> str:
-    import base64 as _b64
-    b64 = _b64.b64encode(image_bytes).decode()
-    payload = {
-        "model": model,
-        "messages": [{
-            "role": "user",
-            "content": prompt,
-            "images": [b64],
-        }],
-        "stream": False,
-    }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
-        resp = await client.post(f"{base_url}/api/chat", json=payload)
-        resp.raise_for_status()
-    return resp.json()["message"]["content"].strip()
+    # Swap to simpler prompts for small models like Moondream
+    if _is_moondream(model):
+        if prompt == _MOTION_IMAGE_PROMPT:
+            prompt = _MOONDREAM_MOTION_PROMPT
+        elif prompt == _DOORBELL_IMAGE_PROMPT:
+            prompt = _MOONDREAM_DOORBELL_PROMPT
+        elif prompt == _DEFAULT_IMAGE_PROMPT:
+            prompt = _MOONDREAM_DEFAULT_PROMPT
+    # Only gate local GPU — remote Ollama has its own resources
+    if not _vision_is_remote():
+        acquired = await _GPU_GATE.acquire(caller="ollama_vision")
+        if not acquired:
+            raise RuntimeError("Insufficient GPU memory for vision model")
+    try:
+        import base64 as _b64
+        image_bytes = _resize_for_ollama(image_bytes)
+        b64 = _b64.b64encode(image_bytes).decode()
+        payload = {
+            "model": model,
+            "messages": [{
+                "role": "user",
+                "content": prompt,
+                "images": [b64],
+            }],
+            "stream": False,
+        }
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            resp = await client.post(f"{base_url}/api/chat", json=payload)
+            resp.raise_for_status()
+        return resp.json()["message"]["content"].strip()
+    finally:
+        if not _vision_is_remote():
+            _GPU_GATE.release()
 
 
 async def _gemini_describe_image(image_bytes: bytes, api_key: str, model: str, prompt: str = _DEFAULT_IMAGE_PROMPT, system_instruction: str | None = None) -> str:
@@ -679,10 +809,13 @@ async def _gemini_describe_image(image_bytes: bytes, api_key: str, model: str, p
     if system_instruction:
         payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as client:
         resp = await client.post(url, json=payload,
                                  headers={"Content-Type": "application/json",
                                           "X-goog-api-key": api_key})
+        if resp.status_code == 429:
+            _report_gemini_429(api_key)
+            resp.raise_for_status()
         resp.raise_for_status()
     data = resp.json()
     parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
@@ -703,7 +836,7 @@ async def _openai_describe_image(image_bytes: bytes, api_key: str, model: str, p
         }],
         "max_tokens": 300,
     }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(8.0)) as client:
         resp = await client.post("https://api.openai.com/v1/chat/completions",
                                   json=payload,
                                   headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"})
@@ -733,9 +866,13 @@ class _OllamaFallbackBackend:
             payload["tools"] = HA_TOOLS
 
         t0 = time.monotonic()
-        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
-            resp = await client.post(f"{self._base_url}/api/chat", json=payload)
-            resp.raise_for_status()
+        _GPU_GATE.chat_started()
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+                resp = await client.post(f"{self._base_url}/api/chat", json=payload)
+                resp.raise_for_status()
+        finally:
+            _GPU_GATE.chat_finished()
 
         data    = resp.json()
         message = data.get("message", {})
@@ -770,17 +907,29 @@ class _OllamaFallbackBackend:
         return self._model
 
 
+_ollama_tags_cache: set[str] | None = None
+
+
+def _get_ollama_installed_models(ollama_url: str) -> set[str]:
+    """Return installed Ollama model names. Cached after first call."""
+    global _ollama_tags_cache
+    if _ollama_tags_cache is not None:
+        return _ollama_tags_cache
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            resp = client.get(f"{ollama_url.rstrip('/')}/api/tags")
+            resp.raise_for_status()
+        _ollama_tags_cache = {str(m.get("name") or "").strip() for m in resp.json().get("models", [])}
+    except Exception:
+        _ollama_tags_cache = set()
+    return _ollama_tags_cache
+
+
 def _select_local_text_model(settings) -> str:
     configured = (getattr(settings, "ollama_local_text_model", "") or "").strip()
     if configured:
         return configured
-    try:
-        with httpx.Client(timeout=2.0) as client:
-            resp = client.get(f"{settings.ollama_url.rstrip('/')}/api/tags")
-            resp.raise_for_status()
-        installed = {str(model.get("name") or "").strip() for model in resp.json().get("models", [])}
-    except Exception:
-        installed = set()
+    installed = _get_ollama_installed_models(settings.ollama_url)
     for candidate in _LOCAL_TEXT_MODEL_PREFERENCES:
         if candidate in installed:
             return candidate
@@ -791,13 +940,7 @@ def _select_fast_local_text_model(settings) -> str:
     configured = (getattr(settings, "proactive_ollama_model", "") or "").strip()
     if configured:
         return configured
-    try:
-        with httpx.Client(timeout=2.0) as client:
-            resp = client.get(f"{settings.ollama_url.rstrip('/')}/api/tags")
-            resp.raise_for_status()
-        installed = {str(model.get("name") or "").strip() for model in resp.json().get("models", [])}
-    except Exception:
-        installed = set()
+    installed = _get_ollama_installed_models(settings.ollama_url)
     for candidate in _FAST_LOCAL_TEXT_MODEL_PREFERENCES:
         if candidate in installed:
             return candidate
@@ -1116,36 +1259,77 @@ class LLMService:
         )
 
     async def describe_image(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None) -> str:
-        """Describe a camera image using vision capability of the active LLM provider."""
+        """Describe a camera image using vision capability of the active LLM provider.
+        Falls back to Ollama vision if the primary provider fails."""
         _prompt = prompt or _DEFAULT_IMAGE_PROMPT
         try:
             if self._provider == "google":
-                return await _gemini_describe_image(image_bytes, self._backend._api_key, self._backend._model, _prompt, system_instruction)
+                api_key = _get_gemini_key() or self._backend._api_key
+                return await _gemini_describe_image(image_bytes, api_key, self._backend._model, _prompt, system_instruction)
             if self._provider == "openai":
                 return await _openai_describe_image(image_bytes, self._backend._api_key, self._backend._model, _prompt)
             if self._provider == "ollama":
+                # Use remote Ollama if motion_vision_provider is ollama_remote
+                settings = get_settings()
+                if (settings.motion_vision_provider or "").strip().lower() == "ollama_remote":
+                    return await _ollama_describe_image(image_bytes, _vision_ollama_url(), settings.ollama_vision_model, _prompt)
                 return await _ollama_describe_image(image_bytes, self._backend._base_url, self._backend._vision_model, _prompt)
             return "Camera vision is not supported with the current LLM provider."
         except Exception as exc:
             _log_struct = structlog.get_logger()
             _log_struct.error("llm.describe_image_error", exc=str(exc))
+            # Fallback to Ollama vision if primary provider failed and we're not already on Ollama
+            if self._provider != "ollama":
+                try:
+                    settings = get_settings()
+                    _log_struct.info("llm.describe_image_ollama_fallback")
+                    return await _ollama_describe_image(image_bytes, _vision_ollama_url(), settings.ollama_vision_model, _prompt)
+                except Exception as fb_exc:
+                    _log_struct.error("llm.describe_image_ollama_fallback_failed", exc=str(fb_exc))
             return "I couldn't analyze the camera image right now."
 
-    async def describe_image_with_gemini(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None) -> str:
+    async def describe_image_with_gemini(self, image_bytes: bytes, prompt: str | None = None, system_instruction: str | None = None, camera_id: str | None = None) -> str:
         """
         Describe a camera image using Gemini vision, regardless of the active LLM provider.
-        Falls back to the active provider if Google API key is not configured.
+        Uses the key pool for rotation across multiple API keys.
+        Falls back to Ollama vision if all keys exhausted.
+        Limited to 2 concurrent calls to prevent server overload.
         """
-        settings = get_settings()
-        api_key = settings.google_api_key
-        model = settings.cloud_model if settings.llm_provider.lower() == "google" else _DEFAULT_MODELS["google"]
-        if api_key:
-            try:
-                return await _gemini_describe_image(image_bytes, api_key, model, prompt or _DEFAULT_IMAGE_PROMPT, system_instruction)
-            except Exception as exc:
-                structlog.get_logger().error("llm.describe_image_gemini_error", exc=str(exc))
-        # Fallback to active provider
-        return await self.describe_image(image_bytes, prompt, system_instruction)
+        # Non-blocking: if 2 vision calls already in-flight, fall back immediately
+        if _VISION_SEMAPHORE.locked():
+            structlog.get_logger().warning("gemini_pool.vision_busy")
+            return await self._fallback_to_ollama_vision(image_bytes, prompt)
+
+        async with _VISION_SEMAPHORE:
+            settings = get_settings()
+            model = settings.cloud_model if settings.llm_provider.lower() == "google" else _DEFAULT_MODELS["google"]
+            _prompt = prompt or _DEFAULT_IMAGE_PROMPT
+
+            # Try up to 3 different keys from the pool
+            for _attempt in range(3):
+                api_key = _get_gemini_key(camera_id)
+                if not api_key:
+                    break
+                try:
+                    return await _gemini_describe_image(image_bytes, api_key, model, _prompt, system_instruction)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 429:
+                        _report_gemini_429(api_key)
+                        structlog.get_logger().warning("gemini_pool.retrying_next_key", attempt=_attempt + 1)
+                        continue
+                    raise
+
+            # All keys exhausted — fall back to Ollama
+            return await self._fallback_to_ollama_vision(image_bytes, prompt)
+
+    async def _fallback_to_ollama_vision(self, image_bytes: bytes, prompt: str | None = None) -> str:
+        try:
+            settings = get_settings()
+            structlog.get_logger().info("llm.describe_image_gemini_to_ollama_fallback")
+            return await _ollama_describe_image(image_bytes, _vision_ollama_url(), settings.ollama_vision_model, prompt or _DEFAULT_IMAGE_PROMPT)
+        except Exception as fb_exc:
+            structlog.get_logger().error("llm.describe_image_all_failed", exc=str(fb_exc))
+            return "I couldn't analyze the camera image right now."
 
     @property
     def model_name(self) -> str:

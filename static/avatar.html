@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Nova — AI Avatar</title>
 
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
   <script type="importmap">
   {
     "imports": {
@@ -121,6 +124,12 @@
       background: linear-gradient(90deg, #6366f1, #38bdf8); transition: width 0.08s;
     }
     #energy-fill.speaking { background: linear-gradient(90deg, #10b981, #38bdf8); }
+    #waveform-canvas {
+      position: absolute; top: 78px; left: 50%; transform: translateX(-50%);
+      width: 180px; height: 32px; z-index: 5;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+    #waveform-canvas.on { opacity: 1; }
     #wake-flash {
       position: absolute; inset: 0; z-index: 6; pointer-events: none;
       background: rgba(99,102,241,0.2); opacity: 0; transition: opacity 0.12s;
@@ -148,6 +157,7 @@
       font-family: 'Roboto', sans-serif;
     }
     #subtitle.on { opacity: 1; }
+
     /* ── Event Popup — Light Frosted Glass ────────────────────────────── */
     #event-popup {
       position: absolute; bottom: 88px; left: 20px; z-index: 8;
@@ -661,6 +671,7 @@
   <div id="name-badge">Nova</div>
   <div id="wake-pill">🎤 Listening for "Nova"…</div>
   <div id="energy-wrap"><div id="energy-fill"></div></div>
+  <canvas id="waveform-canvas" width="180" height="32"></canvas>
 
   <div id="loading-overlay">
     <div class="spinner"></div>
@@ -739,6 +750,7 @@
 <div id="bottom-bar">
   <div id="status-dot"></div>
   <span id="status-text">Tap to Start</span>
+  <span id="roomBadge" style="display:none;margin-left:8px;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,0.15);font-size:0.7rem;letter-spacing:0.05em;text-transform:capitalize;opacity:0.8;"></span>
   <button id="btn-mic" disabled>🎙 Hold to Talk</button>
 </div>
 
@@ -747,10 +759,34 @@ import { TalkingHead } from 'talkinghead';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const params  = new URLSearchParams(location.search);
-const API_KEY = params.get('api_key')    || '';
+let API_KEY = params.get('api_key') || '';
 const SESSION = params.get('session_id') || 'avatar';
+const ROOM    = (params.get('room') || '').trim().toLowerCase();
 const SERVER  = (params.get('server') || location.origin).replace(/\/$/, '');
-const WS_BASE = SERVER.replace(/^http/, 'ws') + `/ws/voice?session_id=${encodeURIComponent(SESSION)}`;
+
+// If api_key in URL: save to HttpOnly cookie via server + localStorage, strip from URL
+if (API_KEY) {
+  localStorage.setItem('nova_api_key', API_KEY);
+  fetch(SERVER + '/auth/set-cookie', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({api_key:API_KEY}), credentials:'include'}).catch(()=>{});
+  params.delete('api_key');
+  const qs = params.toString();
+  history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+}
+
+// API key resolved from: URL param → localStorage → admin session
+if (!API_KEY) API_KEY = localStorage.getItem('nova_api_key') || '';
+
+async function _resolveApiKey() {
+  if (API_KEY) return;
+  API_KEY = localStorage.getItem('nova_api_key') || '';
+  if (API_KEY) return;
+  try {
+    const r = await fetch(SERVER + '/admin/api-key', {credentials:'include'});
+    if (r.ok) { const d = await r.json(); if (d && d.api_key) { API_KEY = d.api_key; localStorage.setItem('nova_api_key', API_KEY); } }
+  } catch {}
+}
+const WS_BASE = SERVER.replace(/^http/, 'ws') + `/ws/voice?session_id=${encodeURIComponent(SESSION)}`
+  + (ROOM ? `&room=${encodeURIComponent(ROOM)}` : '');
 function _avatarClientMetadata() {
   const ua = navigator.userAgent || '';
   const platform = navigator.userAgentData?.platform || navigator.platform || '';
@@ -775,22 +811,119 @@ let _skinToneIndex = 0;
 const SKIN_TONE_COLORS = [
   0xfdebd0,  // 0 Porcelain
   0xf1c27d,  // 1 Light
-  0xc68642,  // 2 Medium
-  0x8d5524,  // 3 Dark
-  0x4a2c0a,  // 4 Deep
+  0xd4a574,  // 2 Warm Beige
+  0xc68642,  // 3 Medium
+  0xa0622e,  // 4 Caramel
+  0x8d5524,  // 5 Brown
+  0x6b3a1f,  // 6 Dark Brown
+  0x4a2c0a,  // 7 Deep
+  0x3b1e08,  // 8 Espresso
+  0x2d1606,  // 9 Ebony
 ];
 
-// Material names that correspond to skin in the brunette.glb RPM avatar
-const SKIN_MATERIAL_NAMES = new Set(['Wolf3D_Skin', 'Wolf3D_Body']);
+// Material names that correspond to skin in common avatar formats
+const SKIN_MATERIAL_NAMES = new Set([
+  'Wolf3D_Skin', 'Wolf3D_Body',                    // Ready Player Me
+  'Skin', 'Body', 'skin', 'body',                  // Generic
+  'AvaturnSkin', 'avaturn_skin', 'Avaturn_Skin',   // Avaturn
+  'Head', 'head', 'Face', 'face', 'Hands', 'hands', 'Arms', 'arms',
+]);
+
+// Fallback: if no named materials match, detect skin by texture/color heuristic
+function _detectSkinMaterials(scene) {
+  const found = new Set();
+  scene.traverse(obj => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(mat => {
+      if (!mat) return;
+      // Match by name
+      if (SKIN_MATERIAL_NAMES.has(mat.name)) { found.add(mat.name); return; }
+      // Match by partial name (case-insensitive)
+      const lower = (mat.name || '').toLowerCase();
+      if (lower.includes('skin') || lower.includes('body') || lower.includes('head') || lower.includes('face')) {
+        found.add(mat.name);
+      }
+    });
+  });
+  return found;
+}
+
+let _resolvedSkinMaterials = null;
+
+// ── Hair colour ──────────────────────────────────────────────────────────────
+let _hairColorIndex = 0;
+const HAIR_COLOR_VALUES = [
+  0x1a1a1a,  // 0 Black
+  0x3b2314,  // 1 Dark Brown
+  0x6a4420,  // 2 Brown
+  0x8b3a1a,  // 3 Auburn
+  0xa52a2a,  // 4 Red
+  0xc45c28,  // 5 Ginger
+  0xc8a951,  // 6 Blonde
+  0xe8dcc8,  // 7 Platinum
+  0x9e9e9e,  // 8 Grey
+  0xe8e8e8,  // 9 White
+];
+
+const HAIR_MATERIAL_NAMES = new Set([
+  'Wolf3D_Hair', 'Hair', 'hair', 'Wolf3D_Headwear',
+  'AvaturnHair', 'avaturn_hair', 'Avaturn_Hair',
+]);
+
+let _resolvedHairMaterials = null;
+
+function _detectHairMaterials(scene) {
+  const found = new Set();
+  scene.traverse(obj => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(mat => {
+      if (!mat) return;
+      if (HAIR_MATERIAL_NAMES.has(mat.name)) { found.add(mat.name); return; }
+      const lower = (mat.name || '').toLowerCase();
+      if (lower.includes('hair')) found.add(mat.name);
+    });
+  });
+  return found;
+}
+
+function applyHairColor() {
+  if (!head?.scene || _hairColorIndex < 0) return;
+  if (!_resolvedHairMaterials) {
+    _resolvedHairMaterials = _detectHairMaterials(head.scene);
+    if (_resolvedHairMaterials.size === 0) return;
+  }
+  const color = HAIR_COLOR_VALUES[_hairColorIndex] ?? HAIR_COLOR_VALUES[0];
+  head.scene.traverse(obj => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(mat => {
+      if (mat && _resolvedHairMaterials.has(mat.name)) {
+        mat.color.setHex(color);
+        mat.needsUpdate = true;
+      }
+    });
+  });
+}
 
 function applySkinTone() {
-  if (!head?.scene) return;
+  if (!head?.scene || _skinToneIndex < 0) return;
+  // Resolve skin materials once per model
+  if (!_resolvedSkinMaterials) {
+    _resolvedSkinMaterials = _detectSkinMaterials(head.scene);
+    if (_resolvedSkinMaterials.size === 0) {
+      console.warn('No skin materials detected in model — skin tone adjustment unavailable');
+      return;
+    }
+    console.log('Skin materials detected:', [..._resolvedSkinMaterials]);
+  }
   const color = SKIN_TONE_COLORS[_skinToneIndex] ?? SKIN_TONE_COLORS[0];
   head.scene.traverse(obj => {
     if (!obj.isMesh) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
     mats.forEach(mat => {
-      if (mat && SKIN_MATERIAL_NAMES.has(mat.name)) {
+      if (mat && _resolvedSkinMaterials.has(mat.name)) {
         mat.color.setHex(color);
         mat.needsUpdate = true;
       }
@@ -891,6 +1024,54 @@ let _micSrcNode    = null;
 let wakeVadFallbackTimer = null;  // detects SR black-hole (starts but never fires events)
 let wakeVadHealthTimer = null;    // periodically refreshes the wake listener if it goes stale
 
+// ── Webcam face recognition state ────────────────────────────────────────────
+let webcamStream = null;
+let webcamVideo  = null;
+let lastRecognizedName = null;
+let _faceRecogCooldownUntil = 0;  // avoid spamming face recognition
+let _pendingFaceRecog = null;     // promise from captureAndRecognizeFace()
+
+async function initWebcam() {
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 320, height: 240 }, audio: false });
+    webcamVideo = document.createElement('video');
+    webcamVideo.srcObject = webcamStream;
+    webcamVideo.setAttribute('playsinline', '');
+    webcamVideo.muted = true;
+    await webcamVideo.play();
+  } catch (_) {
+    // Webcam not available — face recognition silently disabled
+    webcamStream = null;
+    webcamVideo = null;
+  }
+}
+
+async function captureAndRecognizeFace() {
+  if (!webcamVideo || !webcamStream || Date.now() < _faceRecogCooldownUntil) return null;
+  _faceRecogCooldownUntil = Date.now() + 5000;  // 5s cooldown between recognitions
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = webcamVideo.videoWidth || 320;
+    canvas.height = webcamVideo.videoHeight || 240;
+    canvas.getContext('2d').drawImage(webcamVideo, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.8));
+    if (!blob) return null;
+    const resp = await fetch(`${SERVER}/face/recognize`, {
+      method: 'POST',
+      body: blob,
+      headers: { 'X-API-Key': API_KEY, 'Content-Type': 'image/jpeg' },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const faces = data.faces || [];
+    if (faces.length > 0) {
+      lastRecognizedName = faces[0].name;
+      return lastRecognizedName;
+    }
+  } catch (_) {}
+  return null;
+}
+
 // ── Start gate ───────────────────────────────────────────────────────────────
 $btnStart.addEventListener('click', async () => {
   $gate.classList.add('hidden');
@@ -926,6 +1107,7 @@ $btnStart.addEventListener('click', async () => {
   try {
     const s = await fetch(`${SERVER}/admin/avatar-settings`, { headers: { "X-API-Key": API_KEY } }).then(r => r.json());
     if (typeof s.skin_tone === 'number') _skinToneIndex = s.skin_tone;
+    if (typeof s.hair_color === 'number') _hairColorIndex = s.hair_color;
     // Apply background from settings
     if (s.bg_type === 'image' && s.bg_image_url) {
       document.body.style.background = '#080d16';
@@ -940,6 +1122,15 @@ $btnStart.addEventListener('click', async () => {
     }
     if (s.avatar_url) AVATAR_URL = s.avatar_url.startsWith("/") ? SERVER + s.avatar_url : s.avatar_url;
   } catch (_) {}
+
+  // Room-specific GLB overrides global setting
+  if (ROOM) {
+    try {
+      const rooms = await fetch(`${SERVER}/admin/rooms`, { headers: { 'X-API-Key': API_KEY } }).then(r => r.json());
+      const roomCfg = (rooms.rooms || []).find(r => r.id === ROOM);
+      if (roomCfg?.glb_url) AVATAR_URL = roomCfg.glb_url;
+    } catch (_) {}
+  }
 
   initHead().catch(e => {
     console.error('[Nova] initHead failed:', e);
@@ -1051,6 +1242,7 @@ async function _tryUnlockAudio(ctx) {
     const s = await fetch(`${SERVER}/admin/avatar-settings`,
       { headers: { 'X-API-Key': API_KEY } }).then(r => r.json());
     if (typeof s.skin_tone === 'number') _skinToneIndex = s.skin_tone;
+    if (typeof s.hair_color === 'number') _hairColorIndex = s.hair_color;
     // Apply background from settings
     if (s.bg_type === 'image' && s.bg_image_url) {
       document.body.style.background = '#080d16';
@@ -1065,6 +1257,7 @@ async function _tryUnlockAudio(ctx) {
     if (s.avatar_url) AVATAR_URL = s.avatar_url.startsWith("/") ? SERVER + s.avatar_url : s.avatar_url;
   } catch (_) {}
 
+  initWebcam();  // non-blocking — face recognition silently disabled if no camera
   initHead().catch(e => {
     console.error('[Nova] initHead failed:', e);
     $overlay.classList.remove('show');   // hide loading spinner
@@ -1097,41 +1290,67 @@ async function initHead() {
     jwtGet: () => Promise.resolve(''),
     lipsyncModules: ['en'], lipsyncLang: 'en',
     modelFPS: 30, cameraView: 'upper', avatarMute: false, avatarMood: 'neutral',
+    avatarIdleEyeContact: 0.4, avatarIdleHeadMove: 0.6,
+    avatarSpeakingEyeContact: 0.7, avatarSpeakingHeadMove: 0.5,
   });
   $loadText.textContent = 'Loading avatar model…';
-  await head.showAvatar({ url: AVATAR_URL, body: 'F', avatarMood: 'neutral', lipsyncLang: 'en' });
+  await head.showAvatar({
+    url: AVATAR_URL, body: 'F', avatarMood: 'neutral', lipsyncLang: 'en',
+    onprogress: (ev) => {
+      if (ev.lengthComputable) {
+        const pct = Math.round(ev.loaded / ev.total * 100);
+        $loadText.textContent = `Loading avatar… ${pct}%`;
+      }
+    },
+  });
+  // Force avatar to look straight at camera
+  try { head.lookAtCamera(1000); } catch(_) {}
   // Apply skin tone to the loaded Three.js materials (skin meshes only)
   applySkinTone();
+  applyHairColor();
   $overlay.classList.add('fade-out');
   setTimeout(() => $overlay.classList.remove('show'), 700);
+  await _resolveApiKey();
   connectWs();
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 async function connectWs() {
-  if (!API_KEY) {
-    setStatus('Avatar link is missing api_key', '');
-    return;
-  }
+  // Try to resolve API key from admin session if not set
+  if (!API_KEY) await _resolveApiKey();
 
   let wsUrl = WS_BASE;
   try {
+    // Send with credentials so HttpOnly cookie is included as fallback
+    const headers = {};
+    if (API_KEY) headers['X-API-Key'] = API_KEY;
     const r = await fetch(`${SERVER}/ws/token`, {
       method: 'POST',
-      headers: { 'X-API-Key': API_KEY },
+      headers,
+      credentials: 'include',
     });
     if (!r.ok) {
       if (r.status === 401) {
-        setStatus('Avatar auth failed', '');
-        return; // auth failures are permanent — do not retry
+        // Try admin session to get API key and set cookie
+        await _resolveApiKey();
+        if (API_KEY) {
+          // Set the HttpOnly cookie for future reconnects
+          fetch(SERVER + '/auth/set-cookie', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({api_key:API_KEY}), credentials:'include'}).catch(()=>{});
+          setTimeout(connectWs, 1000);
+          return;
+        }
+        setStatus('Not authenticated — open /admin/login first, or add ?api_key= to the URL', '');
+        return;
       }
       setStatus('Reconnecting…', '');
+      _startReconnectCountdown(reconnectDelay);
       setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
       return;
     }
     const d = await r.json();
     if (!d?.token) {
       setStatus('Reconnecting…', '');
+      _startReconnectCountdown(reconnectDelay);
       setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
       return;
     }
@@ -1139,6 +1358,7 @@ async function connectWs() {
   } catch (_) {
     // Backend unreachable (still booting after restart) — keep retrying
     setStatus('Reconnecting…', '');
+    _startReconnectCountdown(reconnectDelay);
     setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
     return;
   }
@@ -1147,12 +1367,19 @@ async function connectWs() {
 
   ws.onopen = () => {
     wsReady = true; reconnectDelay = 1000;
+    _clearReconnectCountdown();
     $btnMic.disabled = false;
+    setStatus('Connected', '');
+    if (ROOM) {
+      const rb = document.getElementById('roomBadge');
+      if (rb) { rb.textContent = ROOM.replace(/_/g,' '); rb.style.display = 'inline'; }
+    }
     ws.send(JSON.stringify({
       type: 'client_capabilities',
       output_streaming: false,
       output_audio_format: 'wav',
       client_metadata: _avatarClientMetadata(),
+      ...(ROOM ? { room_id: ROOM } : {}),
     }));
     startWakeWord();
   };
@@ -1190,6 +1417,8 @@ async function connectWs() {
       if (msg.type === 'response') {
         showSub('Nova: ' + msg.text);
         lastResponseWasQuestion = /[\u003f]\s*$/.test((msg.text || '').trim());
+        // Set avatar mood based on response sentiment
+        if (head) try { head.setMood(_detectSentiment(msg.text)); } catch(_) {}
       }
       if (msg.type === 'audio_start') pendingAudioTurnId = msg.turn_id ?? null;
       if (msg.type === 'output_audio_start') {
@@ -1258,11 +1487,17 @@ async function connectWs() {
     wsReady = false; $btnMic.disabled = true;
     stopWakeWord(); stopRecording(false);
     if (evt && evt.code === 1008) {
-      setStatus('Avatar auth failed', '');
+      // Auth failed — try re-resolving API key then retry once
+      setStatus('Re-authenticating…', '');
+      _resolveApiKey().then(() => {
+        if (API_KEY) { setTimeout(connectWs, 2000); }
+        else { setStatus('Avatar auth failed — reload page', ''); }
+      });
       return;
     }
     setStatus('Reconnecting…', '');
-    setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 2, 30000); connectWs(); }, reconnectDelay);
+    _startReconnectCountdown(reconnectDelay);
+    setTimeout(() => { reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); connectWs(); }, reconnectDelay);
   };
   ws.onerror = () => ws.close();
   // Single persistent ping interval — clear any previous one before creating
@@ -1277,6 +1512,7 @@ function handleState(state) {
   if (head) try { head.setMood({idle:'neutral',listening:'happy',thinking:'neutral',speaking:'happy',alert:'angry',error:'sad'}[state]||'neutral'); } catch(_){}
 
   if (state === 'idle') {
+    const wasBusy = isBusy;
     isBusy = false;
     if (!recording && wsReady) {
       if (lastResponseWasQuestion) {
@@ -1287,8 +1523,10 @@ function handleState(state) {
         setTimeout(startRecording, 400);
       } else {
         wakeSupported ? setStatus('Say "Nova" to talk', 'dot-waking') : setStatus('Ready', 'dot-online');
-        if (!wakeActive && !wakeVadActive) setTimeout(startWakeWord, 300);
-        else restartWakeWordListener(300);
+        // Delay wake word restart after speaking to avoid echo false-triggers
+        const delay = wasBusy ? 1500 : 300;
+        if (!wakeActive && !wakeVadActive) setTimeout(startWakeWord, delay);
+        else restartWakeWordListener(delay);
       }
     }
   } else if (state === 'thinking') {
@@ -1299,6 +1537,33 @@ function handleState(state) {
     setStatus('Listening…', 'dot-recding');
   }
 }
+
+// ── Wake word recovery watchdog ────────────────────────────────────────────────
+// Detects when wake word has silently died (all flags look idle but no listener
+// is active) and restarts it. This catches all edge cases: stuck isBusy, stuck
+// wakeVadChecking, getUserMedia failures, SR zombie states, etc.
+let _wakeWatchdog = null;
+function _startWakeWatchdog() {
+  if (_wakeWatchdog) return;
+  _wakeWatchdog = setInterval(() => {
+    if (!wsReady) return;
+    if (recording || isBusy) return;
+    if (wakeActive || wakeVadActive) return;
+    // Wake word should be running but isn't — force restart
+    console.warn('[Nova] Wake watchdog: listener dead, restarting');
+    // Clear any stuck flags
+    wakeVadChecking = false;
+    wakeVadCooldown = false;
+    wakeTriggered = false;
+    startWakeWord();
+  }, 10000);
+}
+// Start watchdog once WS is ready
+const _origHandleState = handleState;
+handleState = function(state) {
+  _origHandleState(state);
+  if (wsReady && !_wakeWatchdog) _startWakeWatchdog();
+};
 
 function stopActiveSpeechPlayback() {
   pendingWordTimings = null;
@@ -1743,9 +2008,13 @@ async function startRecording() {
   if (recording || !wsReady) return;
   recording = true; mediaChunks = []; speechSeen = false; silenceStart = null;
 
+  // Fire face recognition in parallel with recording (non-blocking)
+  _pendingFaceRecog = captureAndRecognizeFace();
+
   $btnMic.classList.add('rec');
   $btnMic.textContent = '⏺ Recording…';
   $ew.classList.add('on');
+  $waveCanvas.classList.add('on');
 
   // Resume AudioContext (may have been suspended)
   if (!audioCtx) audioCtx = new AudioContext();
@@ -1762,6 +2031,7 @@ async function startRecording() {
     $btnMic.classList.remove('rec');
     $btnMic.textContent = wakeSupported ? '🎙 Or Hold to Talk' : '🎙 Hold to Talk';
     $ew.classList.remove('on');
+    $waveCanvas.classList.remove('on');
     showSub('Microphone access denied');
     if (wakeSupported) setTimeout(startWakeWord, 1000);
     return;
@@ -1797,9 +2067,10 @@ async function startRecording() {
       for (let i = 0; i < timeDomain.length; i++) sum += timeDomain[i] * timeDomain[i];
       const rms = Math.sqrt(sum / timeDomain.length);
 
-      // Update energy bar
+      // Update energy bar + waveform
       $ef.style.width = Math.min(100, (rms / 0.05) * 100) + '%';
       $ef.className = rms > VAD_THRESHOLD ? 'speaking' : '';
+      _drawWaveform(timeDomain, rms);
 
       if (rms > VAD_THRESHOLD) {
         speechSeen = true; silenceStart = null;
@@ -1822,6 +2093,7 @@ function stopRecording(send) {
   $btnMic.classList.remove('rec');
   $btnMic.textContent = wakeSupported ? '🎙 Or Hold to Talk' : '🎙 Hold to Talk';
   $ew.classList.remove('on');
+  $waveCanvas.classList.remove('on');
   $ef.style.width = '0%';
 
   if (mediaRec && mediaRec.state !== 'inactive') {
@@ -1855,8 +2127,18 @@ async function sendAudio() {
   const buffer = await blob.arrayBuffer();
   console.log('[Nova] Sending', buffer.byteLength, 'bytes, type:', blob.type);
   if (ws?.readyState === WebSocket.OPEN) {
+    // Resolve face recognition (started at recording begin, should be done by now)
+    let speakerName = null;
+    if (_pendingFaceRecog) {
+      try { speakerName = await Promise.race([_pendingFaceRecog, new Promise(r => setTimeout(() => r(null), 500))]); } catch (_) {}
+      _pendingFaceRecog = null;
+    }
+    if (speakerName) lastRecognizedName = speakerName;
     const turnContext = pendingTurnContext || (activeEventId ? { event_id: activeEventId } : null);
-    if (turnContext) ws.send(JSON.stringify({ type: 'turn_context', ...turnContext }));
+    const effectiveName = speakerName || lastRecognizedName;
+    if (turnContext || effectiveName) {
+      ws.send(JSON.stringify({ type: 'turn_context', ...(turnContext || {}), ...(effectiveName ? { speaker_name: effectiveName } : {}), ...(ROOM ? { room_id: ROOM } : {}) }));
+    }
   }
   ws.send(buffer);
   setStatus('Processing…', 'dot-online');
@@ -1912,6 +2194,63 @@ function showSub(text) {
   $sub.textContent = text; $sub.classList.add('on');
   clearTimeout(subTimer);
   subTimer = setTimeout(() => $sub.classList.remove('on'), 6000);
+}
+
+// ── Reconnect countdown ──────────────────────────────────────────────────────
+let _reconnectCountdownId = null;
+function _startReconnectCountdown(delayMs) {
+  _clearReconnectCountdown();
+  let remaining = Math.ceil(delayMs / 1000);
+  setStatus(`Reconnecting in ${remaining}s…`, '');
+  _reconnectCountdownId = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) { _clearReconnectCountdown(); setStatus('Reconnecting…', ''); }
+    else setStatus(`Reconnecting in ${remaining}s…`, '');
+  }, 1000);
+}
+function _clearReconnectCountdown() {
+  if (_reconnectCountdownId) { clearInterval(_reconnectCountdownId); _reconnectCountdownId = null; }
+}
+
+// ── Waveform visualizer ──────────────────────────────────────────────────────
+
+// ── Sentiment → mood mapping ─────────────────────────────────────────────────
+const _SENTIMENT_MAP = [
+  { mood: 'sad',     words: /\b(sorry|unfortunately|sad|bad news|apolog|regret|afraid not|can't help)\b/i },
+  { mood: 'happy',   words: /\b(great|awesome|wonderful|fantastic|perfect|excellent|happy|glad|love it|sure thing|absolutely|of course)\b/i },
+  { mood: 'angry',   words: /\b(warning|danger|critical|urgent|emergency|alert|immediately)\b/i },
+  { mood: 'love',    words: /\b(love|heart|sweet|beautiful|miss you|care about)\b/i },
+  { mood: 'fear',    words: /\b(careful|watch out|risk|threat|unsafe)\b/i },
+];
+function _detectSentiment(text) {
+  if (!text) return 'neutral';
+  for (const { mood, words } of _SENTIMENT_MAP) {
+    if (words.test(text)) return mood;
+  }
+  return 'neutral';
+}
+const $waveCanvas = document.getElementById('waveform-canvas');
+const _waveCtx = $waveCanvas.getContext('2d');
+function _drawWaveform(timeDomain, rms) {
+  const w = $waveCanvas.width, h = $waveCanvas.height;
+  _waveCtx.clearRect(0, 0, w, h);
+  const bars = 24;
+  const gap = 2;
+  const barW = (w - (bars - 1) * gap) / bars;
+  const step = Math.floor(timeDomain.length / bars);
+  const speaking = rms > VAD_THRESHOLD;
+  for (let i = 0; i < bars; i++) {
+    let sum = 0;
+    for (let j = 0; j < step; j++) { const v = timeDomain[i * step + j] || 0; sum += v * v; }
+    const barRms = Math.sqrt(sum / step);
+    const barH = Math.max(2, Math.min(h - 2, (barRms / 0.06) * h));
+    const x = i * (barW + gap);
+    const y = (h - barH) / 2;
+    _waveCtx.fillStyle = speaking ? 'rgba(56,189,248,0.8)' : 'rgba(99,102,241,0.5)';
+    _waveCtx.beginPath();
+    _waveCtx.roundRect(x, y, barW, barH, 2);
+    _waveCtx.fill();
+  }
 }
 function hideVisualEvent() {
   clearTimeout(visualEventTimer);
@@ -2395,6 +2734,23 @@ $btnMic.addEventListener('mouseup',    ()  => { if (recording && holdMode) stopR
 $btnMic.addEventListener('mouseleave', ()  => { if (recording && holdMode) stopRecording(true); });
 $btnMic.addEventListener('touchstart', (e) => { e.preventDefault(); holdMode = true; stopWakeWord(); if (!recording) startRecording(); }, { passive: false });
 $btnMic.addEventListener('touchend',   ()  => { if (recording && holdMode) stopRecording(true); });
+
+// ── Spacebar push-to-talk ─────────────────────────────────────────────────────
+let _spaceHeld = false;
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.repeat || _spaceHeld) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  _spaceHeld = true;
+  holdMode = true; stopWakeWord();
+  if (!recording) startRecording();
+});
+document.addEventListener('keyup', (e) => {
+  if (e.code !== 'Space' || !_spaceHeld) return;
+  e.preventDefault();
+  _spaceHeld = false;
+  if (recording && holdMode) stopRecording(true);
+});
 
 
 

@@ -7,8 +7,10 @@ Accepts:
   - Raw PCM16 mono bytes — decoded at the given sample_rate
 """
 from __future__ import annotations
+import asyncio
 import io
 import wave
+from collections.abc import AsyncIterator
 from typing import Optional
 
 import numpy as np
@@ -16,6 +18,12 @@ import structlog
 
 _LOGGER = structlog.get_logger()
 _WHISPER_RATE = 16000
+
+# ── Streaming STT constants ──────────────────────────────────────────────────
+# Minimum audio duration (seconds) before running the first partial transcription.
+_STREAM_MIN_WINDOW_S = 1.0
+# How often (in seconds of new audio) to run a partial transcription pass.
+_STREAM_STEP_S = 0.5
 
 
 class STTService:
@@ -147,6 +155,102 @@ class STTService:
                      text=transcript[:60])
         return transcript
 
+    async def transcribe_streaming(
+        self,
+        audio_chunks: AsyncIterator[bytes],
+        sample_rate: int = 16000,
+    ) -> AsyncIterator[str]:
+        """Yield partial transcript segments as audio chunks arrive.
+
+        Buffers incoming PCM16/WAV chunks, runs faster-whisper on the
+        accumulated buffer at regular intervals, and yields only the *new*
+        text that extends beyond the previous partial.
+
+        Falls back to batch transcription (via ``transcribe``) if the model
+        is unavailable or an error occurs mid-stream.
+        """
+        if self._model is None:
+            await asyncio.get_running_loop().run_in_executor(None, self._load_model)
+
+        loop = asyncio.get_running_loop()
+        model = self._model
+        accumulated_f32: list[np.ndarray] = []
+        total_samples = 0
+        previous_text = ""
+        min_samples = int(_STREAM_MIN_WINDOW_S * _WHISPER_RATE)
+        step_samples = int(_STREAM_STEP_S * _WHISPER_RATE)
+        samples_since_last_run = 0
+
+        try:
+            async for chunk in audio_chunks:
+                chunk_f32, _ = _decode_audio(chunk, sample_rate)
+                if chunk_f32 is None or len(chunk_f32) == 0:
+                    continue
+                accumulated_f32.append(chunk_f32)
+                total_samples += len(chunk_f32)
+                samples_since_last_run += len(chunk_f32)
+
+                # Wait until we have enough audio for a meaningful transcription
+                if total_samples < min_samples:
+                    continue
+                # Only run a new pass every _STREAM_STEP_S of new audio
+                if samples_since_last_run < step_samples:
+                    continue
+
+                samples_since_last_run = 0
+                audio_window = np.concatenate(accumulated_f32)
+
+                def _do_partial(audio=audio_window):
+                    segs, _ = model.transcribe(
+                        audio, language="en", beam_size=1, vad_filter=False,
+                    )
+                    return " ".join(s.text.strip() for s in segs).strip()
+
+                try:
+                    current_text = await loop.run_in_executor(None, _do_partial)
+                except Exception as exc:
+                    _LOGGER.warning("stt.streaming_partial_error", exc=repr(exc))
+                    continue
+
+                # Yield only the new portion of the transcript
+                if current_text and current_text != previous_text:
+                    if current_text.startswith(previous_text) and len(current_text) > len(previous_text):
+                        new_text = current_text[len(previous_text):].strip()
+                    else:
+                        new_text = current_text
+                    if new_text:
+                        previous_text = current_text
+                        yield new_text
+
+            # Final pass on all accumulated audio with full beam search
+            if accumulated_f32:
+                final_audio = np.concatenate(accumulated_f32)
+
+                def _do_final(audio=final_audio):
+                    segs, info = model.transcribe(
+                        audio, language="en", beam_size=5, vad_filter=False,
+                    )
+                    return " ".join(s.text.strip() for s in segs).strip(), info
+
+                final_text, info = await loop.run_in_executor(None, _do_final)
+                _LOGGER.info("stt.streaming_final",
+                             chars=len(final_text),
+                             duration_s=round(info.duration, 1),
+                             text=final_text[:80])
+                if final_text and final_text != previous_text:
+                    yield final_text
+
+        except Exception as exc:
+            _LOGGER.warning("stt.streaming_fallback", exc=repr(exc),
+                            exc_type=type(exc).__name__)
+            # Fall back to batch transcription of whatever we have
+            if accumulated_f32:
+                fallback_audio = np.concatenate(accumulated_f32)
+                fallback_wav = _f32_to_wav(fallback_audio)
+                fallback_text = await self.transcribe(fallback_wav)
+                if fallback_text:
+                    yield fallback_text
+
     @property
     def is_ready(self) -> bool:
         return self._model is not None
@@ -156,6 +260,8 @@ class STTService:
 
 def _decode_audio(data: bytes, sample_rate: int) -> tuple[Optional[np.ndarray], int]:
     """Return (float32 at 16 kHz, original sample rate). Handles WAV, WebM, OGG, MP4, PCM."""
+    if not data:
+        return None, 0
     if _is_wav(data):
         return _decode_wav(data)
     if len(data) >= 4:
@@ -167,10 +273,10 @@ def _decode_audio(data: bytes, sample_rate: int) -> tuple[Optional[np.ndarray], 
     # data misread as PCM (binary garbage has max_amp very close to 1.0 because
     # arbitrary bytes span the full int16 range; real speech is rarely above 0.95).
     pcm = _decode_pcm(data, sample_rate)
-    if pcm is not None and float(np.max(np.abs(pcm))) < 0.95:
+    if pcm is not None and len(pcm) > 0 and float(np.max(np.abs(pcm))) < 0.95:
         return pcm, sample_rate
     _LOGGER.debug("stt.pcm_rejected_likely_binary", size=len(data),
-                  max_amp=round(float(np.max(np.abs(pcm))), 4) if pcm is not None else None)
+                  max_amp=round(float(np.max(np.abs(pcm))), 4) if pcm is not None and len(pcm) > 0 else None)
     return None, 0
 
 
@@ -247,3 +353,15 @@ def _resample(audio: np.ndarray, orig_rate: int) -> np.ndarray:
     from math import gcd
     g = gcd(orig_rate, _WHISPER_RATE)
     return resample_poly(audio, _WHISPER_RATE // g, orig_rate // g).astype(np.float32)
+
+
+def _f32_to_wav(audio_f32: np.ndarray, sample_rate: int = _WHISPER_RATE) -> bytes:
+    """Convert float32 audio array back to WAV bytes for batch fallback."""
+    pcm16 = (audio_f32 * 32768.0).clip(-32768, 32767).astype(np.int16)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm16.tobytes())
+    return buf.getvalue()

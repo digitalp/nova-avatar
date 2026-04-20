@@ -93,6 +93,7 @@ def _build_test_app() -> FastAPI:
     sm_mock = MagicMock()
     sm_mock.add_message = AsyncMock()
     sm_mock.get_messages = AsyncMock(return_value=[])
+    sm_mock.set_metadata = AsyncMock()
 
     # HAProxy mock (not called in this flow — no tool calls)
     ha_mock = MagicMock()
@@ -111,6 +112,9 @@ def _build_test_app() -> FastAPI:
     app.state.decision_log = None
     app.state.memory_service = None
     app.state.recent_event_contexts = {}
+
+    # Routers access app.state._container — point it at state itself
+    app.state._container = app.state
 
     return app
 

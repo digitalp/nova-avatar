@@ -5,14 +5,13 @@ httpx==0.28.1
 structlog==24.4.0
 python-dotenv==1.0.1
 pyyaml==6.0.2
-pytest==8.3.4
-pytest-asyncio==0.24.0
-# Phase 4 additions
 faster-whisper==1.1.0
-numpy>=1.26.0
+numpy==2.4.4
 websockets==13.1
-psutil>=5.9
-nvidia-ml-py>=12.0
-python-multipart>=0.0.9
-ai-edge-litert>=2.1.4
-pillow>=10.0
+psutil==7.2.2
+nvidia-ml-py==13.595.45
+python-multipart==0.0.24
+ai-edge-litert==2.1.4
+pillow==12.2.0
+scipy==1.15.3
+pygltflib==1.16.3

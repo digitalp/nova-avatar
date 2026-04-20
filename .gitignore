@@ -15,6 +15,8 @@ config/avatar_settings.json
 *.bak
 data/
 config/users.json
+config/speaker_settings.json
+config/system_prompt.txt
 config/*.swp
 logs/
 static/admin.html.bak_*
@@ -25,3 +27,12 @@ models/coral/*.pkl
 models/coral/*.npz
 models/coral/*.zip
 models/coral/mobilenet_ssd/
+
+# Large binaries — 3D avatar models
+*.glb
+
+# SQLite databases
+*.db
+
+# Hypothesis test cache
+.hypothesis/

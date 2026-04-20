@@ -92,13 +92,13 @@ async def test_issue_autofix_refreshes_motion_clip_storage():
 async def test_health_check_reports_timeout_issue(monkeypatch):
     monkeypatch.setattr(health_module, "_probe_ollama", AsyncMock(return_value="reachable"))
     monkeypatch.setattr(health_module, "_probe_ha", AsyncMock(return_value="timeout"))
-    monkeypatch.setattr(health_module, "_probe_whisper", lambda request: "ready")
-    monkeypatch.setattr(health_module, "_probe_piper", lambda request: "ready")
+    monkeypatch.setattr(health_module, "_probe_whisper", lambda container: "ready")
+    monkeypatch.setattr(health_module, "_probe_piper", lambda container: "ready")
 
     issue_service = SimpleNamespace(report_issue=AsyncMock(), resolve_issue=AsyncMock())
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(issue_autofix_service=issue_service)))
+    container = SimpleNamespace(issue_autofix_service=issue_service, health_history_service=None)
 
-    result = await health_module.health_check(request)
+    result = await health_module.health_check(container)
 
     assert result["status"] == "degraded"
     issue_service.report_issue.assert_awaited_once()

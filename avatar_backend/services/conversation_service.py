@@ -64,10 +64,10 @@ class ConversationService:
             user_text=user_text,
         )
 
-    async def handle_voice_turn(self, *, session_id: str, user_text: str) -> ChatResult:
+    async def handle_voice_turn(self, *, session_id: str, user_text: str, speaker_name: str | None = None, room_id: str | None = None) -> ChatResult:
         return await self._run_turn(
             session_id=session_id,
-            user_text=await self._build_user_text(session_id=session_id, user_text=user_text),
+            user_text=await self._build_user_text(session_id=session_id, user_text=user_text, speaker_name=speaker_name, room_id=room_id),
         )
 
     async def handle_event_followup(self, turn: EventFollowupRequest) -> ChatResult:
@@ -103,7 +103,7 @@ class ConversationService:
     async def clear_session_state(self, session_id: str) -> None:
         async with self._state_lock:
             self._session_states.pop(session_id, None)
-        await self._app.state.session_manager.clear(session_id)
+        await self._app.state._container.session_manager.clear(session_id)
 
     async def _build_user_text(
         self,
@@ -111,6 +111,8 @@ class ConversationService:
         session_id: str,
         user_text: str,
         context: dict[str, Any] | None = None,
+        speaker_name: str | None = None,
+        room_id: str | None = None,
     ) -> str:
         pending: PendingEventFollowupContext | None = None
         active_event: PendingEventFollowupContext | None = None
@@ -147,6 +149,11 @@ class ConversationService:
             else:
                 effective_context = sanitized_context or None
         shaped = self._context_builder.build_text_context(user_text, effective_context)
+        if room_id:
+            _room_label = room_id.replace("_", " ").replace("-", " ").title()
+            shaped = f"[Room: {_room_label}]\n{shaped}"
+        if speaker_name:
+            shaped = f"[Speaker identified via face recognition: {speaker_name}]\n{shaped}"
         event_context = pending or active_event
         if not event_context:
             return shaped
@@ -159,13 +166,15 @@ class ConversationService:
         )
 
     async def _run_turn(self, *, session_id: str, user_text: str) -> ChatResult:
+        c = self._app.state._container
         return await run_chat(
             session_id=session_id,
             user_text=user_text,
-            llm=self._app.state.llm_service,
-            sm=self._app.state.session_manager,
-            ha=self._app.state.ha_proxy,
-            decision_log=getattr(self._app.state, "decision_log", None),
-            memory_service=getattr(self._app.state, "memory_service", None),
-            presence_service=getattr(self._app.state, "presence_service", None),
+            llm=c.llm_service,
+            sm=c.session_manager,
+            ha=c.ha_proxy,
+            decision_log=getattr(c, "decision_log", None),
+            memory_service=getattr(c, "memory_service", None),
+            presence_service=getattr(c, "presence_service", None),
+            metrics_db=getattr(c, "metrics_db", None),
         )

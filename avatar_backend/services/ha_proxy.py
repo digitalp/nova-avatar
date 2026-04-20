@@ -33,22 +33,8 @@ _DENIED_SERVICES = frozenset({
 })
 _DOMAIN_SERVICE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _LEGACY_CAMERA_ALIASES: dict[str, str] = {
-    "camera.doorbell": "camera.reolink_video_doorbell_poe_fluent",
-    "camera.front_door": "camera.reolink_video_doorbell_poe_fluent",
-    "camera.front_door_camera": "camera.reolink_video_doorbell_poe_fluent",
-    "camera.reolink_doorbell": "camera.reolink_video_doorbell_poe_fluent",
-    "camera.doorbell_camera": "camera.reolink_video_doorbell_poe_fluent",
-    "camera.outdoor": "camera.rlc_410w_fluent",
-    "camera.outdoor_1": "camera.rlc_410w_fluent",
-    "camera.outdoor1": "camera.rlc_410w_fluent",
-    "camera.outdoor_camera": "camera.rlc_410w_fluent",
-    "camera.outside": "camera.rlc_410w_fluent",
-    "camera.outdoor_2": "camera.rlc_1224a_fluent",
-    "camera.outdoor2": "camera.rlc_1224a_fluent",
-    "camera.floodlight": "camera.rlc_1224a_fluent",
-    "camera.floodlight_camera": "camera.rlc_1224a_fluent",
-    "camera.living_room": "camera.reolink_living_room_profile000_mainstream",
-    "camera.living_room_camera": "camera.reolink_living_room_profile000_mainstream",
+    # Populated from config/home_runtime.json at startup.
+    # Run install.sh or edit home_runtime.json to configure camera mappings.
 }
 
 
@@ -97,11 +83,29 @@ class HAProxy:
             "Content-Type": "application/json",
         }
         self._acl = acl
+        self._client: httpx.AsyncClient | None = None
         runtime = load_home_runtime_config()
         self._camera_aliases = dict(_LEGACY_CAMERA_ALIASES)
         self._camera_aliases.update(runtime.camera_aliases)
         # Weather entity — configurable via home_runtime.json, falls back to legacy
-        self._weather_entity = runtime.weather_entity or "weather.met_office_ince_in_makerfield"
+        self._weather_entity = runtime.weather_entity or ""
+        self._sensor_shortcuts = runtime.sensor_shortcuts
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Return a shared httpx client with connection pooling."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=_CALL_TIMEOUT,
+                headers={"Authorization": self._headers["Authorization"]},
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                verify=False,
+            )
+        return self._client
+
+    async def close(self) -> None:
+        """Close the shared httpx client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
 
     # ── Public interface ──────────────────────────────────────────────────
 
@@ -138,21 +142,20 @@ class HAProxy:
                 )
             # Intercept sensor/binary_sensor for common questions
             if domain in ("sensor", "binary_sensor"):
-                return ToolResult(
-                    success=True,
-                    message=(
-                        "Do NOT browse sensors. Use get_entity_state with the EXACT entity_id:\n"
-                        f"  Outdoor temp: {self._weather_entity} (attribute: temperature)\n"
-                        "  Living room temp: sensor.living_room_sensor_temperature\n"
-                        "  Main bedroom temp: sensor.main_bedroom_temp_temperature\n"
-                        "  Kids bedroom temp: sensor.bedroom_sensor_temperature\n"
-                        "  Total power: sensor.total_power_consumption\n"
-                        "  Daily power cost: sensor.daily_power_cost\n"
-                        "  Car status: sensor.ko66ewx_lock\n"
-                        "  Fuel level: sensor.ko66ewx_fuel_level\n"
-                        "Call get_entity_state with the specific entity_id that answers the user's question."
-                    ),
-                )
+                lines = [f"  Outdoor temp: {self._weather_entity} (attribute: temperature)"]
+                for label, eid in self._sensor_shortcuts.items():
+                    lines.append(f"  {label}: {eid}")
+                if lines:
+                    shortcuts = "\n".join(lines)
+                    return ToolResult(
+                        success=True,
+                        message=(
+                            "Do NOT browse sensors. Use get_entity_state with the EXACT entity_id:\n"
+                            f"{shortcuts}\n"
+                            "Call get_entity_state with the specific entity_id that answers the user's question."
+                        ),
+                    )
+                return await self.get_entities(domain)
             return await self.get_entities(domain)
 
         if tool_call.function_name == "get_entity_state":
@@ -167,6 +170,9 @@ class HAProxy:
                 now = datetime.now().strftime("%A, %d %B %Y %H:%M")
                 return ToolResult(success=True, message=f"Current time: {now}")
             return await self._get_single_entity_state(entity_id)
+
+        if tool_call.function_name == "play_music":
+            return await self._play_music(tool_call.arguments)
 
         if tool_call.function_name != "call_ha_service":
             logger.warning("ha_proxy.unknown_tool", name=tool_call.function_name)
@@ -200,7 +206,33 @@ class HAProxy:
             logger.warning("ha_proxy.bad_service_format", service=service)
             return ToolResult(
                 success=False,
-                message=f"Invalid service format: '{service}'.",
+                message=f"Invalid Home Assistant service name: '{service}'. Service names use underscores, not dots.",
+            )
+
+        # Reject get_state — LLM should use the get_entity_state tool instead
+        if service == "get_state":
+            logger.warning("ha_proxy.get_state_rejected", domain=domain, entity_id=entity_id)
+            return ToolResult(
+                success=False,
+                message=f"Use get_entity_state('{entity_id}') instead of calling {domain}.get_state as a service.",
+            )
+
+        # Read-only domains — cannot be switched, toggled, or turned on/off
+        _READ_ONLY_DOMAINS = frozenset({"sensor", "binary_sensor", "weather", "sun", "zone", "person", "device_tracker"})
+        _WRITE_SERVICES = frozenset({"turn_on", "turn_off", "toggle"})
+        if domain in _READ_ONLY_DOMAINS and service in _WRITE_SERVICES:
+            logger.warning("ha_proxy.read_only_domain", domain=domain, service=service, entity_id=entity_id)
+            return ToolResult(
+                success=False,
+                message=f"Domain '{domain}' is not switchable — it is read-only. Use get_entity_state to read its value.",
+            )
+
+        # update_entity must go through homeassistant domain
+        if service == "update_entity" and domain != "homeassistant":
+            logger.warning("ha_proxy.update_entity_wrong_domain", domain=domain, entity_id=entity_id)
+            return ToolResult(
+                success=False,
+                message=f"update_entity must be called via the homeassistant domain: call_ha_service(domain='homeassistant', service='update_entity', entity_id='{entity_id}').",
             )
 
         # H2 security fix: hardcoded denylist — blocked even with wildcard ACL
@@ -249,22 +281,26 @@ class HAProxy:
         if domain in self._LARGE_DOMAINS:
             logger.warning("ha_proxy.get_entities_large_domain", domain=domain)
 
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    f"{self._ha_url}/api/states",
-                    headers={"Authorization": self._headers["Authorization"]},
-                )
-        except Exception as exc:
-            return ToolResult(success=False, message=f"Could not reach Home Assistant: {exc}")
+        # Try WebSocket state mirror first (zero API calls)
+        all_states = None
+        ws_mgr = getattr(self, "_ws_manager", None)
+        if ws_mgr and ws_mgr.is_connected:
+            all_states = ws_mgr.get_all_states()
 
-        if resp.status_code != 200:
-            return ToolResult(success=False, message="Failed to fetch entity states from Home Assistant.")
+        if not all_states:
+            try:
+                client = await self._get_client()
+                resp = await client.get(f"{self._ha_url}/api/states")
+            except Exception as exc:
+                return ToolResult(success=False, message=f"Could not reach Home Assistant: {exc}")
+            if resp.status_code != 200:
+                return ToolResult(success=False, message="Failed to fetch entity states from Home Assistant.")
+            all_states = resp.json()
 
         entities = [
-            s for s in resp.json()
-            if s["entity_id"].startswith(f"{domain}.")
-            and s["state"] != "unavailable"
+            s for s in all_states
+            if s.get("entity_id", "").startswith(f"{domain}.")
+            and s.get("state") != "unavailable"
         ]
 
         if not entities:
@@ -303,12 +339,17 @@ class HAProxy:
     async def _get_single_entity_state(self, entity_id: str) -> ToolResult:
         """Return the current state and key attributes of a single entity."""
         logger.info("ha_proxy.get_entity_state", entity_id=entity_id)
+
+        # Try WebSocket state mirror first (zero API calls)
+        ws_mgr = getattr(self, "_ws_manager", None)
+        s = ws_mgr.get_state(entity_id) if ws_mgr and ws_mgr.is_connected else None
+        if s is not None:
+            return await self._format_entity_state(entity_id, s)
+
+        # Fallback to REST
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    f"{self._ha_url}/api/states/{entity_id}",
-                    headers={"Authorization": self._headers["Authorization"]},
-                )
+            client = await self._get_client()
+            resp = await client.get(f"{self._ha_url}/api/states/{entity_id}")
         except Exception as exc:
             return ToolResult(success=False, message=f"Could not reach Home Assistant: {exc}")
 
@@ -336,9 +377,13 @@ class HAProxy:
             return ToolResult(success=False, message=f"Failed to fetch state for '{entity_id}'.")
 
         s = resp.json()
-        unit = s["attributes"].get("unit_of_measurement", "")
+        return await self._format_entity_state(entity_id, s)
+
+    async def _format_entity_state(self, entity_id: str, s: dict) -> ToolResult:
+        """Format an entity state dict into a ToolResult for the LLM."""
+        unit = s.get("attributes", {}).get("unit_of_measurement", "")
         state_str = f"{s['state']} {unit}".strip()
-        friendly = s["attributes"].get("friendly_name", entity_id)
+        friendly = s.get("attributes", {}).get("friendly_name", entity_id)
 
         # Return ALL attributes so the LLM has full context (e.g. car lock
         # doorStatusOverall, sensor sub-readings). Skip internal HA display keys.
@@ -365,16 +410,65 @@ class HAProxy:
 
         return ToolResult(success=True, message=msg)
 
+    async def _play_music(self, args: dict) -> ToolResult:
+        """Search Music Assistant and play the first result on a speaker."""
+        query = (args.get("query") or "").strip()
+        entity_id = (args.get("entity_id") or "").strip()
+        if not query:
+            return ToolResult(success=False, message="play_music requires a 'query' argument.")
+        if not entity_id:
+            return ToolResult(success=False, message="play_music requires an 'entity_id' argument.")
+
+        music_svc = getattr(self, "_music_service", None)
+        if music_svc is None:
+            return ToolResult(success=False, message="Music service is not configured.")
+
+        logger.info("ha_proxy.play_music", query=query, entity_id=entity_id)
+        results = await music_svc.search(query, media_type="track", limit=5)
+        if not results:
+            results = await music_svc.search(query, media_type="artist", limit=5)
+        if not results:
+            return ToolResult(success=False, message=f"No results found for '{query}'. Try a different search term.")
+
+        track = results[0]
+        uri = track.get("uri") or track.get("url") or ""
+        name = track.get("name") or track.get("title") or query
+        artist = track.get("artist") or track.get("artists") or ""
+        if isinstance(artist, list):
+            artist = artist[0].get("name", "") if artist else ""
+
+        if not uri:
+            return ToolResult(success=False, message=f"Found '{name}' but no playable URI available.")
+
+        # Use music_assistant.play_media for MA URIs — it handles routing to the correct player
+        logger.info("ha_proxy.play_music_uri", entity_id=entity_id, uri=uri[:80], name=name)
+        r = await self.call_service(
+            "music_assistant", "play_media", entity_id,
+            service_data={"media_id": uri, "media_type": "track"},
+        )
+        if r.success:
+            desc = f"Now playing: {name}"
+            if artist:
+                desc += f" by {artist}"
+            desc += f" on {entity_id.split('.', 1)[-1].replace('_', ' ').title()}"
+            return ToolResult(success=True, message=desc)
+        return ToolResult(success=False, message=f"Failed to play '{name}': {r.message}")
+
+    _forecast_cache: dict[str, tuple[float, str]] = {}  # entity_id → (expires_at, text)
+    _FORECAST_TTL = 1800  # 30 minutes
+
     async def _fetch_weather_forecast(self, entity_id: str) -> str:
-        """Fetch daily forecast from HA weather.get_forecasts service."""
+        """Fetch daily forecast from HA weather.get_forecasts service. Cached 30 min."""
+        import time as _time
+        now = _time.monotonic()
+        cached = self._forecast_cache.get(entity_id)
+        if cached and now < cached[0]:
+            return cached[1]
         try:
             url = f"{self._ha_url}/api/services/weather/get_forecasts?return_response"
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    url,
-                    headers=self._headers,
-                    json={"entity_id": entity_id, "type": "daily"},
-                )
+            client = await self._get_client()
+            resp = await client.post(url, headers={"Content-Type": "application/json"},
+                                     json={"entity_id": entity_id, "type": "daily"})
             if resp.status_code != 200:
                 return ""
             data = resp.json()
@@ -397,7 +491,9 @@ class HAProxy:
                 if wind:
                     line += f", wind {wind} km/h"
                 lines.append(line)
-            return "\n".join(lines)
+            result = "\n".join(lines)
+            self._forecast_cache[entity_id] = (now + self._FORECAST_TTL, result)
+            return result
         except Exception:
             return ""
 
@@ -465,8 +561,8 @@ class HAProxy:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=_CALL_TIMEOUT) as client:
-                resp = await client.post(url, headers=self._headers, json=payload)
+            client = await self._get_client()
+            resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
         except httpx.ConnectError as exc:
             logger.error("ha_proxy.connect_error", error=str(exc))
             return ToolResult(
@@ -550,19 +646,21 @@ class HAProxy:
             reason = self._acl.deny_reason("camera", "get_image", entity_id)
             logger.warning("ha_proxy.camera_acl_denied", entity_id=entity_id, reason=reason)
             return None
-        url = f"{self._ha_url}/api/camera_proxy/{entity_id}"
+        from avatar_backend.config import get_settings
+        _base = get_settings().ha_local_url_resolved
+        url = f"{_base}/api/camera_proxy/{entity_id}"
         for attempt in range(2):
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get(url, headers=self._headers)
-                    if resp.status_code == 200 and resp.content:
-                        return resp.content
-                    if attempt == 0 and resp.status_code in (502, 503, 504):
-                        logger.debug("ha_proxy.camera_fetch_retry", entity_id=entity_id, status=resp.status_code)
-                        await asyncio.sleep(1.0)
-                        continue
-                    logger.warning("ha_proxy.camera_fetch_failed", entity_id=entity_id, status=resp.status_code)
-                    return None
+                client = await self._get_client()
+                resp = await client.get(url)
+                if resp.status_code == 200 and resp.content:
+                    return resp.content
+                if attempt == 0 and resp.status_code in (502, 503, 504):
+                    logger.debug("ha_proxy.camera_fetch_retry", entity_id=entity_id, status=resp.status_code)
+                    await asyncio.sleep(1.0)
+                    continue
+                logger.warning("ha_proxy.camera_fetch_failed", entity_id=entity_id, status=resp.status_code)
+                return None
             except (httpx.ConnectError, httpx.TimeoutException) as exc:
                 if attempt == 0:
                     logger.debug("ha_proxy.camera_fetch_retry", entity_id=entity_id, exc_type=type(exc).__name__)
@@ -573,6 +671,11 @@ class HAProxy:
             except Exception as exc:
                 logger.error("ha_proxy.camera_error", entity_id=entity_id, exc=repr(exc), exc_type=type(exc).__name__)
                 return None
+        # HA failed — try Blue Iris direct fallback
+        bi = getattr(self, "_blueiris_service", None)
+        if bi and bi.available:
+            logger.info("ha_proxy.camera_blueiris_fallback", entity_id=entity_id)
+            return await bi.fetch_snapshot(entity_id)
         return None
 
         # ── Diagnostics ───────────────────────────────────────────────────────
@@ -580,23 +683,55 @@ class HAProxy:
     async def is_connected(self) -> bool:
         """True if HA is reachable AND the token is valid."""
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(
-                    f"{self._ha_url}/api/",
-                    headers={"Authorization": self._headers["Authorization"]},
-                )
-                return resp.status_code == 200
+            client = await self._get_client()
+            resp = await client.get(f"{self._ha_url}/api/")
+            return resp.status_code == 200
         except Exception:
             return False
 
     async def get_entity_state(self, entity_id: str) -> dict | None:
         """Fetch current state of an entity — used in tests and diagnostics."""
+        ws_mgr = getattr(self, "_ws_manager", None)
+        if ws_mgr and ws_mgr.is_connected:
+            s = ws_mgr.get_state(entity_id)
+            if s is not None:
+                return s
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    f"{self._ha_url}/api/states/{entity_id}",
-                    headers={"Authorization": self._headers["Authorization"]},
-                )
-                return resp.json() if resp.status_code == 200 else None
+            client = await self._get_client()
+            resp = await client.get(f"{self._ha_url}/api/states/{entity_id}")
+            return resp.json() if resp.status_code == 200 else None
         except Exception:
             return None
+
+    async def get_states_by_domain(self, domain: str) -> list[dict]:
+        """Fetch all entity states for a given domain (e.g. 'media_player'). Uses cache."""
+        states = await self._get_all_states_cached()
+        return [s for s in states if s.get("entity_id", "").startswith(domain + ".")]
+
+    async def _get_all_states_cached(self) -> list[dict]:
+        """Return all entity states — prefers WebSocket mirror, falls back to REST with cache."""
+        # Try WebSocket state mirror first (zero API calls)
+        ws_mgr = getattr(self, "_ws_manager", None)
+        if ws_mgr and ws_mgr.is_connected:
+            states = ws_mgr.get_all_states()
+            if states:
+                return states
+        # Fallback to REST with 10-second cache
+        import time as _time
+        now = _time.monotonic()
+        if hasattr(self, "_states_cache") and now - self._states_cache_ts < 10:
+            return self._states_cache
+        try:
+            client = await self._get_client()
+            resp = await client.get(f"{self._ha_url}/api/states")
+            if resp.status_code == 200:
+                    self._states_cache = resp.json()
+                    self._states_cache_ts = now
+                    return self._states_cache
+        except Exception:
+            pass
+        return getattr(self, "_states_cache", [])
+
+    def set_ws_manager(self, ws_manager) -> None:
+        """Link the shared HA WebSocket manager for state mirror access."""
+        self._ws_manager = ws_manager
