@@ -105,6 +105,7 @@ class Settings(BaseSettings):
 
     # ── Face Recognition ──────────────────────────────────────────────────
     codeproject_ai_url: str = ""  # e.g. http://192.168.0.33:32168
+    scoreboard_enabled: bool = True
 
     # ── Cross-field validators ─────────────────────────────────────────────
 

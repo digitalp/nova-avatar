@@ -426,6 +426,14 @@ else
   success "acl.yaml already exists — skipping"
 fi
 
+
+# ── Optional: scoreboard ─────────────────────────────────────────────────────
+INPUT_SCOREBOARD=true
+if ! $NON_INTERACTIVE; then
+  ask "Enable family chore scoreboard? (points, tasks, penalties) [Y/n]:"
+  read -r _sb_ans
+  [[ "${_sb_ans,,}" == n* ]] && INPUT_SCOREBOARD=false
+fi
 # ── Write .env ─────────────────────────────────────────────────────────────────
 header "Writing .env"
 
@@ -491,6 +499,9 @@ BLUEIRIS_PASSWORD=
 
 # CodeProject.AI (optional — enables face recognition, webcam greeting, object/plate detection)
 CODEPROJECT_AI_URL=
+
+# Optional features
+SCOREBOARD_ENABLED=${INPUT_SCOREBOARD}
 ENV_EOF
 
 chown "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}/.env"

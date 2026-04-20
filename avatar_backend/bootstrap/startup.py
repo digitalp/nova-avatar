@@ -176,14 +176,17 @@ async def bootstrap(app: FastAPI, settings, system_prompt: str) -> AppContainer:
     else:
         logger.info("speaker_service.disabled")
 
-    from avatar_backend.services.scoreboard_service import ScoreboardService
-    c.scoreboard_service = ScoreboardService(
-        db_path=_CONFIG_DIR / "scoreboard.db",
-        config_path=_CONFIG_DIR / "scoreboard_config.json",
-    )
-    c.ha_proxy._scoreboard_service = c.scoreboard_service
     c.ha_proxy._llm_service = c.llm_service
-    c.scoreboard_service._face_service = c.face_service
+    if settings.scoreboard_enabled:
+        from avatar_backend.services.scoreboard_service import ScoreboardService
+        c.scoreboard_service = ScoreboardService(
+            db_path=_CONFIG_DIR / "scoreboard.db",
+            config_path=_CONFIG_DIR / "scoreboard_config.json",
+        )
+        c.ha_proxy._scoreboard_service = c.scoreboard_service
+        c.scoreboard_service._face_service = c.face_service
+    else:
+        logger.info("scoreboard.disabled")
 
     from avatar_backend.services.energy_service import EnergyService
     c.energy_service = EnergyService(ha_proxy=c.ha_proxy)

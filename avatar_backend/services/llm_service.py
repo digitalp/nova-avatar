@@ -254,6 +254,16 @@ HA_TOOLS: list[dict] = [
     },
 ]
 
+
+# Drop scoreboard-related tools when feature is disabled
+try:
+    from avatar_backend.config import get_settings as _cfg_gs
+    if not _cfg_gs().scoreboard_enabled:
+        _sb_tools = {"log_chore", "get_scoreboard", "deduct_points"}
+        HA_TOOLS = [t for t in HA_TOOLS if t["function"]["name"] not in _sb_tools]
+except Exception:
+    pass
+
 # Anthropic uses a slightly different tool schema format
 _ANTHROPIC_TOOLS: list[dict] = [
     {
