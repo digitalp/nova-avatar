@@ -21,10 +21,14 @@ def _svc(container: AppContainer):
 async def get_scoreboard(request: Request, container: AppContainer = Depends(get_container)):
     """Public-ish: leaderboard + recent activity for the avatar page widget."""
     svc = _svc(container)
+    cfg = svc.get_config()
+    members = await svc.get_members()
+    cfg = dict(cfg)
+    cfg["members"] = members  # always reflect live face list
     return {
         "weekly": svc.weekly_scores(),
         "recent": svc.recent_logs(10),
-        "config": svc.get_config(),
+        "config": cfg,
     }
 
 

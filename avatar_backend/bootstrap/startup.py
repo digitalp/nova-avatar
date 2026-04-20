@@ -183,6 +183,7 @@ async def bootstrap(app: FastAPI, settings, system_prompt: str) -> AppContainer:
     )
     c.ha_proxy._scoreboard_service = c.scoreboard_service
     c.ha_proxy._llm_service = c.llm_service
+    c.scoreboard_service._face_service = c.face_service
 
     from avatar_backend.services.energy_service import EnergyService
     c.energy_service = EnergyService(ha_proxy=c.ha_proxy)

@@ -120,12 +120,24 @@ class ScoreboardService:
     def __init__(self, db_path: Path, config_path: Path) -> None:
         self._db_path = db_path
         self._config_path = config_path
+        self._face_service = None  # set by startup after init
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         if not config_path.exists():
             config_path.parent.mkdir(parents=True, exist_ok=True)
             config_path.write_text(json.dumps(_DEFAULT_CONFIG, indent=2) + "\n")
             _LOGGER.info("scoreboard.config_created", path=str(config_path))
+
+    async def get_members(self) -> list[str]:
+        """Return known face names from CPAI, falling back to config members."""
+        if self._face_service is not None:
+            try:
+                faces = await self._face_service.list_known_faces()
+                if faces:
+                    return sorted(f.lower() for f in faces)
+            except Exception:
+                pass
+        return self.get_config().get("members", [])
 
     # ── DB ────────────────────────────────────────────────────────────────────
 

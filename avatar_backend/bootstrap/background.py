@@ -82,7 +82,7 @@ async def _chore_reminder_loop(announce_fn, scoreboard_service) -> None:
             day_str = now.strftime("%A").lower()
             date_str = now.strftime("%Y-%m-%d")
             cfg = scoreboard_service.get_config()
-            members = cfg.get("members", [])
+            members = await scoreboard_service.get_members()
             for task in cfg.get("tasks", []):
                 for reminder in task.get("reminders", []):
                     if reminder.get("time") != time_str:
